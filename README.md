@@ -99,8 +99,8 @@ A documentation for it will probably be available later.
 ## Bug reports / Contact
 
 This program is in early development which means there will probably be bugs or crashes.
-Please report any issue you encounter on this Discord server in general chat or send me a DM.
-> **[Discord Server](https://discord.gg/gVGSFAcYQB)**
+Please report any issue you encounter on this Discord server in general chat or send me (Alpha) a DM.
+> **[Discord Server](https://discord.gg/bUEkGCCX7t)**
 
 Visit my website [here](https://alphaglyph.dev) to learn more about me and my projects or to get my Discord username.
 
