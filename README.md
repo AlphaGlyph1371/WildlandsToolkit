@@ -11,6 +11,8 @@ modify your game.
 
 ## Features
 
+Note: because most of you probably will not read all of that, NO you can't import new meshes into the game yet. It is on my to-do list though.
+
 ### Archives
 
 - Opens every `.forge` of the game and lists its entries
