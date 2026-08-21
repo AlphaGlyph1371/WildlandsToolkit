@@ -154,7 +154,7 @@ rebuild   <file.forge> <out.forge>          write every entry again, then compar
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for the full license text.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE.txt) file for the full license text.
 
 ## Disclaimer
 
