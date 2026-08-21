@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Wildlands Toolkit" width="380">
+</p>
+
 # (Probably) the first Ghost Recon Wildlands Toolkit
 
 An open modding tool for **Tom Clancy's Ghost Recon Wildlands**. It opens the game's

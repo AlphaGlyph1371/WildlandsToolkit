@@ -62,10 +62,31 @@ public partial class MainWindow : Window
 
     void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (_settings.IsConfigured)
+        {
+            LoadArchiveList();
+            LoadSkeletonIndex();
+        }
+
+        ContentRendered += OnFirstRender;
+    }
+
+    // Anything that puts a dialog in front of the user waits until the window has drawn
+    // itself once, so the dialog does not sit on a blank white window.
+    void OnFirstRender(object? sender, EventArgs e)
+    {
+        ContentRendered -= OnFirstRender;
+
         ShowEarlyNotice();
 
-        if (!_settings.IsConfigured && !RunSetup())
+        if (_settings.IsConfigured)
+            return;
+
+        if (!RunSetup())
+        {
             SetStatus("No game folder set. Use \"Game folder\" or \"Open file\".");
+            return;
+        }
 
         LoadArchiveList();
         LoadSkeletonIndex();
@@ -77,21 +98,15 @@ public partial class MainWindow : Window
             return;
 
         var text = new StringBuilder();
-        text.AppendLine($"Welcome to {VersionText()}.");
-        text.AppendLine();
         text.AppendLine("This is early development. Expect bugs, and expect things that do not work yet.");
         text.AppendLine();
-        text.AppendLine("Your archives are safe as long as you let the toolkit do the writing: before the");
-        text.AppendLine("first change to an archive a copy is made as <archive>.original and never touched");
-        text.AppendLine("again, so you can always go back. Close the game before writing.");
+        text.AppendLine("Your archives are safe. Before the first change to an archive a copy is made as <archive>.original and never touched again, so you can always go back. Close the game before writing.");
         text.AppendLine();
-        text.AppendLine("Please report anything that breaks on the Discord server, the link is in the");
-        text.AppendLine("bottom right corner of the window. A screenshot and what you did before it broke");
-        text.AppendLine("is usually enough.");
+        text.AppendLine("Please report anything that breaks on the Discord server, the link is in the bottom right corner of the window. A screenshot and what you did before it broke is usually enough.");
         text.AppendLine();
-        text.AppendLine("This message is only shown once.");
+        text.Append("This message is only shown once.");
 
-        MessageBox.Show(this, text.ToString(), VersionText(), MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, text.ToString(), $"Welcome to {VersionText()}", MessageBoxButton.OK, MessageBoxImage.Information);
 
         _settings.SeenEarlyNotice = true;
         _settings.Save();
