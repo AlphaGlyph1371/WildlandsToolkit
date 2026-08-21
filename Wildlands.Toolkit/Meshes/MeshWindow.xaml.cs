@@ -1,0 +1,326 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Media3D;
+using Wildlands.Formats;
+using Wildlands.Formats.Data;
+using Wildlands.Formats.Forge;
+using Wildlands.Formats.Materials;
+using Wildlands.Formats.Models;
+
+namespace Wildlands.Toolkit;
+
+enum BackFaces { FromMaterial, Always, Never }
+
+public partial class MeshWindow : Window
+{
+    static readonly Color[] Palette =
+    [
+        Color.FromRgb(0xB8, 0xC0, 0xCC),
+        Color.FromRgb(0x8F, 0xC2, 0xE8),
+        Color.FromRgb(0xC7, 0xB2, 0xE0),
+        Color.FromRgb(0xA8, 0xD8, 0xB0),
+        Color.FromRgb(0xE8, 0xC5, 0x94),
+        Color.FromRgb(0xE0, 0xA5, 0xA5),
+        Color.FromRgb(0x9E, 0xD8, 0xD2),
+        Color.FromRgb(0xD4, 0xD2, 0x96),
+    ];
+
+    readonly Mesh _mesh;
+    readonly string _name;
+    readonly AppSettings _settings;
+    readonly List<MeshPart> _parts;
+    readonly List<Resource> _siblings;
+    readonly ArchiveSet? _archives;
+    readonly SkeletonIndex? _skeletonIndex;
+
+    List<SkeletonBone>? _skeleton;
+
+    List<MeshSurface> _surfaces = [];
+    bool _texturesLoaded;
+    bool _textured;
+    readonly DirectionalLight _light = new(Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
+
+    Point3D _target;
+    double _distance = 10;
+    double _yaw = -2.2;
+    double _pitch = 0.45;
+
+    bool _colourRanges = true;
+    BackFaces _backFaces = BackFaces.FromMaterial;
+
+    Point _dragStart;
+    bool _orbiting;
+    bool _panning;
+
+    public MeshWindow(Mesh mesh, string name, List<Resource> siblings, ArchiveSet? archives,
+        SkeletonIndex? skeletonIndex, AppSettings settings)
+    {
+        InitializeComponent();
+
+        _mesh = mesh;
+        _name = name;
+        _siblings = siblings;
+        _archives = archives;
+        _skeletonIndex = skeletonIndex;
+        _settings = settings;
+        Title = name;
+
+        _parts = MeshScene.Build(mesh);
+        _surfaces = MeshSurfaces.Load(mesh, siblings, archives, withTextures: false);
+        BuildScene();
+        ShowFacts();
+
+        if (_parts.Count < 2)
+        {
+            ColourButton.IsEnabled = false;
+            ColourButton.ToolTip = "This mesh is drawn in one piece, so there is nothing to tell apart";
+        }
+
+        Loaded += (_, _) => Fit();
+    }
+
+    void BuildScene()
+    {
+        var group = new Model3DGroup();
+        group.Children.Add(new AmbientLight(Color.FromRgb(0x4A, 0x4C, 0x52)));
+        group.Children.Add(_light);
+
+        for (int i = 0; i < _parts.Count; i++)
+        {
+            var colour = _colourRanges ? Palette[i % Palette.Length] : Palette[0];
+
+            var surface = i < _surfaces.Count ? _surfaces[i] : null;
+            var brush = _textured ? surface?.Texture : null;
+            var front = brush ?? Paint(colour);
+
+            var model = new GeometryModel3D(_parts[i].Geometry, new DiffuseMaterial(front));
+
+            bool twoSided = _backFaces switch
+            {
+                BackFaces.Always => true,
+                BackFaces.Never => false,
+                _ => surface?.TwoSided ?? true,
+            };
+
+            if (twoSided)
+                model.BackMaterial = new DiffuseMaterial(brush ?? Paint(Shade(colour, 0.45)));
+
+            group.Children.Add(model);
+        }
+
+        Scene.Content = group;
+    }
+
+    void Texture_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_texturesLoaded)
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            try
+            {
+                _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives, withTextures: true);
+                _texturesLoaded = true;
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+
+            if (_surfaces.TrueForAll(s => s.Texture is null))
+            {
+                StatusText.Text = "no textures found for this mesh";
+                TextureButton.IsChecked = false;
+                TextureButton.IsEnabled = false;
+                TextureButton.Content = "No textures";
+                return;
+            }
+        }
+
+        _textured = TextureButton.IsChecked == true;
+        BuildScene();
+    }
+
+    static Brush Paint(Color colour)
+    {
+        var brush = new SolidColorBrush(colour);
+        brush.Freeze();
+        return brush;
+    }
+
+    static Color Shade(Color colour, double factor) => Color.FromRgb((byte)(colour.R * factor), (byte)(colour.G * factor), (byte)(colour.B * factor));
+
+    void ShowFacts()
+    {
+        if (_parts.Count == 0)
+        {
+            StatusText.Text = _mesh.Note.Length > 0 ? $"nothing to draw: {_mesh.Note}" : "nothing to draw: this mesh carries no geometry";
+            return;
+        }
+
+        int triangles = 0;
+        foreach (var part in _parts)
+            triangles += part.TriangleCount;
+
+        StatusText.Text =
+            $"{_parts[0].Geometry.Positions.Count:N0} vertices   {triangles:N0} triangles   " +
+            $"{_parts.Count} draw range(s)   format {_mesh.VertexFormat}, stride {_mesh.VertexStride}" +
+            (_mesh.BoneCount > 0 ? $"   {_mesh.BoneCount} bones, shown in bind pose" : "");
+
+        var bounds = MeshScene.Bounds(_parts);
+        SizeText.Text = $"{bounds.SizeX:0.00} x {bounds.SizeY:0.00} x {bounds.SizeZ:0.00} m";
+    }
+
+    void Fit_Click(object sender, RoutedEventArgs e) => Fit();
+
+    void Fit()
+    {
+        var bounds = MeshScene.Bounds(_parts);
+        if (bounds.IsEmpty)
+            return;
+
+        _target = new Point3D(
+            bounds.X + bounds.SizeX / 2,
+            bounds.Y + bounds.SizeY / 2,
+            bounds.Z + bounds.SizeZ / 2);
+
+        double radius = new Vector3D(bounds.SizeX, bounds.SizeY, bounds.SizeZ).Length / 2;
+        double half = Camera.FieldOfView / 2 * Math.PI / 180;
+
+        _distance = Math.Max(radius / Math.Sin(half) * 1.1, 0.1);
+        UpdateCamera();
+    }
+
+    void UpdateCamera()
+    {
+        var direction = new Vector3D(
+            Math.Cos(_pitch) * Math.Cos(_yaw),
+            Math.Cos(_pitch) * Math.Sin(_yaw),
+            Math.Sin(_pitch));
+
+        Camera.Position = _target + direction * _distance;
+        Camera.LookDirection = -direction;
+
+        Camera.NearPlaneDistance = _distance / 100;
+
+        var (right, up) = Axes(direction);
+        _light.Direction = -direction - up * 0.4 + right * 0.3;
+    }
+
+    static (Vector3D Right, Vector3D Up) Axes(Vector3D direction)
+    {
+        var right = Vector3D.CrossProduct(direction, new Vector3D(0, 0, 1));
+        right.Normalize();
+
+        var up = Vector3D.CrossProduct(right, direction);
+        up.Normalize();
+
+        return (right, up);
+    }
+
+    void Colour_Click(object sender, RoutedEventArgs e)
+    {
+        _colourRanges = ColourButton.IsChecked == true;
+        BuildScene();
+    }
+
+    void Backface_Click(object sender, RoutedEventArgs e)
+    {
+        _backFaces = _backFaces switch
+        {
+            BackFaces.FromMaterial => BackFaces.Always,
+            BackFaces.Always => BackFaces.Never,
+            _ => BackFaces.FromMaterial,
+        };
+
+        BackfaceButton.Content = _backFaces switch
+        {
+            BackFaces.Always => "Back faces: all",
+            BackFaces.Never => "Back faces: none",
+            _ => "Back faces: as material",
+        };
+        BuildScene();
+    }
+
+    void Skeleton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_skeleton is not null)
+        {
+            _skeleton = null;
+            SkeletonButton.Content = "Skeleton";
+            return;
+        }
+
+        _skeleton = SkeletonPicker.Choose(this, out string name);
+        SkeletonButton.Content = _skeleton is null ? "Skeleton" : "Skeleton: " + name;
+    }
+
+    void Export_Click(object sender, RoutedEventArgs e)
+    {
+        string done = MeshExporter.SaveFbx(this, _mesh, _name, _siblings, _skeletonIndex, _settings, _skeleton);
+
+        if (done.Length > 0)
+            StatusText.Text = done;
+    }
+
+    void Stage_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStart = e.GetPosition(Stage);
+        _orbiting = e.ChangedButton == MouseButton.Left;
+        _panning = e.ChangedButton == MouseButton.Right;
+
+        Stage.CaptureMouse();
+        Stage.Cursor = _panning ? Cursors.SizeAll : Cursors.ScrollAll;
+    }
+
+    void Stage_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_orbiting && !_panning)
+            return;
+
+        var now = e.GetPosition(Stage);
+        var moved = now - _dragStart;
+        _dragStart = now;
+
+        if (_orbiting)
+        {
+            _yaw -= moved.X * 0.008;
+
+            _pitch = Math.Clamp(_pitch + moved.Y * 0.008, -1.5, 1.5);
+        }
+        else
+        {
+            var (right, up) = Axes(Camera.LookDirection);
+            double scale = _distance * 0.0015;
+            _target += right * (moved.X * scale) + up * (moved.Y * scale);
+        }
+
+        UpdateCamera();
+    }
+
+    void Stage_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        _orbiting = false;
+        _panning = false;
+        Stage.ReleaseMouseCapture();
+        Stage.Cursor = Cursors.Arrow;
+    }
+
+    void Stage_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        _distance = Math.Clamp(_distance * (e.Delta > 0 ? 0.85 : 1 / 0.85), 0.05, 100000);
+        UpdateCamera();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.F)
+            Fit();
+        else if (e.Key == Key.Escape)
+            Close();
+        else
+            base.OnKeyDown(e);
+    }
+}

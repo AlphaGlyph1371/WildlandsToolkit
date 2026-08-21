@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <Platforms>AnyCPU</Platforms>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+
+    <!-- The solution builds x64 while a single project builds AnyCPU. Without
+         this the platform lands in the output path, so the two write to
+         different folders and one of them quietly goes stale. -->
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
+  </PropertyGroup>
+</Project>

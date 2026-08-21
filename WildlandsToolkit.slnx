@@ -1,0 +1,14 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="Wildlands.Formats/Wildlands.Formats.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="Wildlands.Toolkit/Wildlands.Toolkit.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="Wildlands.Cli/Wildlands.Cli.csproj">
+    <Platform Project="x64" />
+  </Project>
+</Solution>

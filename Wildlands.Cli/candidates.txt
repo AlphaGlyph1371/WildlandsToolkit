@@ -1,0 +1,504 @@
+# Candidate class names for "wlcli guess". One name per line, in the exact
+# spelling that CRC32 has to match - engine type names are case sensitive.
+# Blank lines and lines starting with # are ignored.
+#
+# Add a name here whenever you have a reason to suspect it - a name found in
+# another Anvil-engine game's documentation, a plausible sibling of a name
+# already in ResourceTypes.KnownNames, a string spotted in a leak or a forum
+# post. Run it against the game's own archives:
+#
+#   wlcli guess candidates.txt <path>\DataPC.forge <path>\DataPC_GRN_WorldMap.forge ...
+#
+# Anything that comes back as a HIT and is not already in KnownNames is a
+# genuine new type, confirmed by a real hash match - not a guess any more.
+# Move it into ResourceTypes.cs and, if you like, leave it in this file too so
+# a fresh archive still gets checked against it.
+
+# --- Siblings of names ResourceTypes.KnownNames already confirms ---
+# The strongest kind of guess: the game clearly uses this exact suffix or
+# prefix for a whole family, so another member of the family is worth trying
+# even without any other evidence.
+
+# ...PropertyControllerData is confirmed for TimeOfDay, Weather, Wind.
+SoundPropertyControllerData
+FogPropertyControllerData
+CameraPropertyControllerData
+FloraPropertyControllerData
+WaterPropertyControllerData
+FreeRoamCameraPropertyControllerData
+LightPropertyControllerData
+CloudPropertyControllerData
+AtmospherePropertyControllerData
+OceanPropertyControllerData
+SnowPropertyControllerData
+RainPropertyControllerData
+WindZonePropertyControllerData
+PostFXPropertyControllerData
+DepthOfFieldPropertyControllerData
+ExposurePropertyControllerData
+ColorGradingPropertyControllerData
+
+# World... is confirmed for Ambiance, ParticlesDescriptor, TransitionPortal.
+WorldSettings
+WorldLayout
+WorldData
+WorldEntity
+WorldRegion
+WorldStreaming
+WorldStreamingSettings
+WorldPortal
+WorldBounds
+WorldGrid
+WorldChunk
+WorldCell
+WorldZone
+WorldMap
+WorldNavMesh
+WorldCollision
+WorldLighting
+WorldAudio
+WorldWeather
+WorldTime
+WorldEconomy
+WorldMission
+WorldSpawner
+WorldObject
+WorldObjectDescriptor
+WorldPopulation
+WorldTraffic
+WorldEvent
+WorldEventDescriptor
+
+# ...Descriptor is confirmed for WorldParticles, SmallLifeZoneSpawn.
+ParticlesDescriptor
+SpawnDescriptor
+VehicleSpawnDescriptor
+AIZoneDescriptor
+ZoneDescriptor
+MissionDescriptor
+EnemySpawnDescriptor
+PatrolDescriptor
+LifeZoneSpawnDescriptor
+LifeZoneDescriptor
+CrowdSpawnDescriptor
+TrafficSpawnDescriptor
+WildlifeSpawnDescriptor
+LootSpawnDescriptor
+EncounterDescriptor
+AmbientLifeDescriptor
+FactionDescriptor
+SkillDescriptor
+ClassDescriptor
+LoadoutDescriptor
+CameraShakeDescriptor
+ExplosionDescriptor
+ImpactDescriptor
+
+# ...Container / ...Network is confirmed for RoadPath.
+RoadNetwork
+PathNetwork
+NavMeshContainer
+NavMeshNetwork
+CoverPointNetwork
+PatrolPathNetwork
+AIPathNetwork
+TrafficNetwork
+RiverNetwork
+RailNetwork
+
+# ...Layout is confirmed for Region.
+ZoneLayout
+MapLayout
+LevelLayout
+AreaLayout
+TerrainLayout
+ProvinceLayout
+BaseLayout
+
+# ...Info / ...Infos is confirmed for PrefetchingFileInfos, PrefetchInfo.
+StreamingFileInfos
+LoadingFileInfos
+AssetInfo
+ResourceInfo
+FileInfo
+LevelInfo
+MissionInfo
+StreamingInfo
+StreamingManifest
+PrefetchingManifest
+
+# ...Set is confirmed for Texture, AtomReplace.
+MaterialSet
+SoundSet
+AnimationSet
+EntitySet
+ReplaceSet
+MeshSet
+PrefabSet
+ClothSet
+ShaderSet
+FontSet
+IconSet
+
+# ...Table is confirmed for Build.
+LootTable
+SpawnTable
+DropTable
+AITable
+DialogueTable
+LocalizationTable
+UpgradeTable
+CraftingTable
+
+# ...Builder is confirmed for Entity.
+MeshBuilder
+WorldBuilder
+TerrainBuilder
+PrefabBuilder
+VehicleBuilder
+CharacterBuilder
+RoadBuilder
+RiverBuilder
+
+# ...Sky is confirmed for Layered.
+SkySettings
+SkyDome
+SkyBox
+SkyController
+CloudLayer
+SkyLayer
+
+# Zone appears inside SmallLifeZoneSpawnDescriptor.
+LifeZone
+LifeZoneManager
+AIZone
+SpawnZone
+DangerZone
+SafeZone
+CombatZone
+NoFlyZone
+TriggerZone
+DetectionZone
+
+# FX is confirmed on its own and as SplashFX.
+WeatherFX
+ParticleFX
+SoundFX
+ImpactFX
+ExplosionFX
+MuzzleFX
+TrailFX
+DecalFX
+VFXSet
+VFXDescriptor
+WaterFX
+
+# ...LightingSetup is confirmed for UI.
+LightingSetup
+GlobalLightingSetup
+LevelLightingSetup
+InteriorLightingSetup
+ExteriorLightingSetup
+
+# Compiled... is confirmed for Mip, TextureMap.
+CompiledMesh
+CompiledMaterial
+CompiledAnimation
+CompiledShader
+CompiledSound
+CompiledFont
+CompiledCollisionMesh
+
+# --- General Anvil-engine terms, common across the Assassin's Creed series ---
+# Not specific to any pattern already seen in Wildlands, but the kind of
+# system every Anvil game has, so worth a try even without local evidence.
+Skeleton
+SkeletonPose
+Cloth
+SoftBody
+Physics
+PhysicsShape
+Collision
+CollisionMesh
+NavMesh
+AIPath
+Trigger
+TriggerVolume
+Camera
+CameraShake
+Sound
+SoundBank
+SoundEvent
+MusicSet
+Localization
+StringTable
+Font
+UI
+UISetup
+UIWidget
+UIScreen
+Icon
+Achievement
+Reward
+Quest
+QuestData
+Mission
+MissionData
+Dialogue
+DialogueTree
+Cinematic
+Cutscene
+VideoClip
+LoadingScreen
+SaveGame
+Checkpoint
+Waypoint
+Objective
+Inventory
+Item
+ItemDescriptor
+Weapon
+WeaponData
+Vehicle
+VehicleData
+Character
+CharacterData
+NPC
+NPCData
+AI
+AIBehavior
+AIController
+Faction
+Team
+Squad
+Formation
+PatrolRoute
+SpawnPoint
+RespawnPoint
+Volume
+BoundingVolume
+Occluder
+LOD
+LODGroup
+Prefab
+PrefabInstance
+Blueprint
+Template
+Preset
+Config
+GameSettings
+GraphicsSettings
+AudioSettings
+ControllerSettings
+InputSettings
+Trophy
+Leaderboard
+Stats
+Telemetry
+
+# --- Ghost Recon Wildlands specific gameplay terms ---
+# Informed by what the game is actually about (Bolivia, Santa Blanca cartel,
+# rebel support, co-op tactical shooter), not general engine knowledge.
+RebelSupport
+RebelSkill
+SkillTree
+SkillUnlock
+WeaponAttachment
+WeaponSkin
+Camo
+Loadout
+ClassLoadout
+Perk
+PerkTree
+Cartel
+CartelBoss
+UnidadTroop
+SantaBlanca
+Province
+ProvinceData
+Stronghold
+Base
+EnemyBase
+Roadblock
+Convoy
+Extraction
+HelicopterExtraction
+DroneController
+DroneData
+Binoculars
+TacticalCamera
+SyncShot
+MarkTarget
+Ghost
+GhostWar
+Rebel
+RebelNetwork
+InformationNetwork
+IntelData
+# --- Round 2: siblings of the two fresh hits (Skeleton, Cloth) ---
+SkeletonMapping
+SkeletonLOD
+SkeletonBinding
+SkeletonHierarchy
+SkinBinding
+SkinCluster
+Ragdoll
+RagdollData
+RagdollPhysics
+IKSetup
+IKChain
+FacialSkeleton
+FacialSetup
+FaceRig
+LookAtSetup
+BlendShape
+BlendShapeData
+MorphTarget
+ClothData
+ClothSettings
+ClothCollision
+ClothConstraint
+ClothSimulation
+ClothMesh
+HairSimulation
+HairData
+Hair
+
+# --- Round 2: taken from real resource NAMES seen inside the game's own
+# "Game Bootstrap Settings" container earlier this session - these are
+# instance names, but this engine often names an instance after its own
+# class, so each is worth trying as a literal class name. ---
+SoundInitSettings
+SoundSettings
+EngineOptions
+BuildTagsToColumnMasksMap
+Universe
+AccomplishmentManager
+SoundMicroBehaviorTransitionConfig
+SoundDynEchoGlobalSettings
+DynEchoReflectorSettings
+SoundActionOnStateConfig
+SoundWindContextSoundSet
+SoundPointsConfig
+WorldTransitionComponent
+MissionManager
+DLCUniverseComponent
+TagRules
+SoundRadioSettings
+GRNSoundSettings
+SoundRadioTrack
+SoundRadioVoiceoverTrack
+SoundRadioCommercialTrack
+SoundRadioTrackSequence
+SoundRadioStation
+
+# --- Round 2: physics / collision, not yet tried ---
+PhysicsMaterial
+PhysicsConstraint
+RigidBody
+Destructible
+DestructibleData
+Breakable
+VehiclePhysics
+DestructiblePhysics
+
+# --- Round 2: materials and shaders, not yet tried ---
+MaterialInstance
+MaterialLibrary
+MaterialGraph
+ShaderGraph
+Shader
+ShaderPermutation
+ShaderVariant
+
+# --- Round 2: navigation / animation state, not yet tried ---
+NavGraph
+NavLink
+CoverPoint
+CoverData
+SmartObject
+InteractionPoint
+AnimGraph
+AnimationGraph
+AnimationController
+AnimationBlendTree
+AnimationLayer
+AnimationState
+AnimationStateMachine
+StateMachine
+
+# --- Round 2: streaming, not yet tried ---
+StreamingZone
+StreamingSector
+StreamingCell
+LevelStreaming
+LevelChunk
+AssetBundle
+ResourceBundle
+PackageInfo
+ArchiveInfo
+
+# --- Round 2: vegetation and terrain, not yet tried ---
+Vegetation
+VegetationSet
+VegetationPatch
+Foliage
+FoliagePatch
+Grass
+GrassPatch
+Tree
+TreeSet
+Rock
+RockSet
+Terrain
+TerrainPatch
+TerrainTile
+TerrainMaterial
+TerrainTexture
+Heightmap
+HeightField
+
+# --- Round 2: audio, not yet tried ---
+AmbientSound
+AmbientSoundSet
+ReverbZone
+AudioZone
+MusicTrigger
+RadioTrack
+
+# --- Round 2: minimap, since MinimapTextures is confirmed ---
+MinimapData
+MinimapIcon
+MinimapMarker
+
+# --- Round 2: vehicles, not yet tried ---
+VehiclePart
+VehicleWheel
+VehicleEngine
+VehicleDamage
+VehicleSpawner
+VehiclePool
+VehicleCamera
+
+# --- Round 2: mission / narrative, not yet tried ---
+MissionGraph
+MissionNode
+MissionTrigger
+MissionReward
+MissionObjective
+StoryData
+NarrativeData
+
+# --- Round 2: economy, not yet tried ---
+Currency
+ShopItem
+Shop
+Merchant
+CraftingRecipe
+CraftingMaterial
+
+# --- Round 2: day/night and weather, not yet tried under a shorter name ---
+WeatherSystem
+WeatherState
+WeatherTransition
+DayNightCycle

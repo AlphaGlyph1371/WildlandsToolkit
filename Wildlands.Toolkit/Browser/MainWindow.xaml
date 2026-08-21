@@ -1,0 +1,265 @@
+<Window x:Class="Wildlands.Toolkit.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Wildlands Toolkit" Height="740" Width="1200"
+        Background="{StaticResource Background}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" Cursor="Hand">
+
+    <DockPanel>
+
+        <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="10,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <Button x:Name="BackButton" Click="Back_Click" ToolTip="Back"
+                            Style="{StaticResource IconButton}" IsEnabled="False">
+                        <Path Style="{StaticResource NavIcon}" Data="M 5,0 L 0,5.5 L 5,11"/>
+                    </Button>
+                    <Button x:Name="ForwardButton" Click="Forward_Click" ToolTip="Forward"
+                            Style="{StaticResource IconButton}" IsEnabled="False">
+                        <Path Style="{StaticResource NavIcon}" Data="M 0,0 L 5,5.5 L 0,11"/>
+                    </Button>
+                    <Button x:Name="UpButton" Click="Up_Click" ToolTip="Up one level"
+                            Style="{StaticResource IconButton}" IsEnabled="False" Margin="0,0,12,0">
+                        <Path Style="{StaticResource NavIcon}" Data="M 4.5,11 L 4.5,0 M 0,4.5 L 4.5,0 L 9,4.5"/>
+                    </Button>
+                    <Button Content="Open file" Click="OpenFile_Click"/>
+                    <Button x:Name="ExtractButton" Content="Extract" Click="Extract_Click" IsEnabled="False"/>
+                    <Button x:Name="ApplyButton" Content="Apply changes" Click="Apply_Click" IsEnabled="False"/>
+                    <Button x:Name="DiscardButton" Content="Discard" Click="Discard_Click" IsEnabled="False"/>
+                </StackPanel>
+
+                <Border Grid.Column="1" Background="{StaticResource Background}"
+                        BorderBrush="{StaticResource Border}" BorderThickness="1"
+                        CornerRadius="4" Padding="8,4" Margin="6,0">
+                    <TextBlock x:Name="PathText" VerticalAlignment="Center"
+                               Foreground="{StaticResource TextDim}"
+                               Text="No archive open" TextTrimming="CharacterEllipsis"/>
+                </Border>
+
+                <Grid Grid.Column="2" Width="220">
+                    <TextBox x:Name="FilterBox" TextChanged="Filter_Changed"/>
+                    <TextBlock x:Name="FilterHint" Text="Filter by name" Margin="9,0,0,0"
+                               VerticalAlignment="Center" IsHitTestVisible="False"
+                               Foreground="{StaticResource TextDim}"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="10,5">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Grid.Column="0" Foreground="{StaticResource TextDim}"
+                           Text="Ready" TextTrimming="CharacterEllipsis"/>
+
+                <TextBlock x:Name="ScanText" Grid.Column="1" Foreground="{StaticResource TextDim}"
+                           Visibility="Collapsed" Margin="16,0"/>
+                <TextBlock x:Name="CountText" Grid.Column="2" Foreground="{StaticResource TextDim}"/>
+
+                <TextBlock Grid.Column="3" Margin="20,0,0,0" Cursor="Hand">
+                    <Hyperlink NavigateUri="https://discord.gg/gVGSFAcYQB"
+                               RequestNavigate="Discord_Navigate"
+                               ToolTip="Open the Discord server in your browser">
+                        <Hyperlink.Style>
+                            <Style TargetType="Hyperlink">
+                                <Setter Property="Foreground" Value="{StaticResource Discord}"/>
+                                <Setter Property="TextDecorations" Value="Underline"/>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource DiscordHover}"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Hyperlink.Style>Join my little Discord</Hyperlink>
+                </TextBlock>
+            </Grid>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="SidebarColumn" Width="250" MinWidth="200"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="260"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition x:Name="PreviewColumn" Width="380" MinWidth="220"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="10,10,10,6">
+                        <TextBlock Text="Archives" Margin="0,0,0,6"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="SkeletonIndexButton" Grid.Column="0" Content="Find skeletons"
+                                Click="SkeletonIndex_Click" Padding="6,3" Margin="0,0,3,0" FontSize="11"
+                                ToolTip="Scan the game for skeletons, so exported meshes get a working one. Takes a few minutes."/>
+                            <Button Grid.Column="1" Content="Game folder" Click="ChangeGameFolder_Click"
+                                Padding="6,3" Margin="3,0,0,0" FontSize="11"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <ListView x:Name="ArchiveList" SelectionChanged="ArchiveList_SelectionChanged"
+                          Background="Transparent" BorderThickness="0" Margin="4,0,4,8"
+                          ItemContainerStyle="{StaticResource PlainRow}"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel ToolTip="{Binding Name}">
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}"
+                                           Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextDim}"/>
+                                    <TextBlock Text="{Binding ShortName}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1"/>
+            <GridSplitter Grid.Column="3"/>
+
+            <Border Grid.Column="4" x:Name="PreviewPanel"
+                Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="1,0,0,0">
+                <DockPanel Margin="12">
+                    <TextBlock DockPanel.Dock="Top" x:Name="PreviewTitle" Text="Nothing selected"
+                           TextTrimming="CharacterEllipsis" FontSize="13" Margin="0,0,0,10"/>
+
+                    <Border DockPanel.Dock="Top" x:Name="ImageFrame" Height="300" Visibility="Collapsed"
+                        Background="#FF141416" BorderBrush="{StaticResource Border}"
+                        BorderThickness="1" CornerRadius="4" Margin="0,0,0,8">
+                        <Image x:Name="PreviewImage" Stretch="Uniform" Margin="6"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+
+                    <ItemsControl DockPanel.Dock="Top" x:Name="SetStrip" Visibility="Collapsed"
+                              Margin="0,0,0,8">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="2"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,6,6" Cursor="Hand"
+                                        Background="Transparent"
+                                        MouseLeftButtonUp="SetTexture_Click"
+                                        ToolTip="{Binding Name}">
+                                    <Border Height="132" Background="#FF141416" CornerRadius="4"
+                                        BorderBrush="{StaticResource Border}" BorderThickness="1">
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" Margin="4"
+                                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding Slot}" Margin="0,3,0,0" FontSize="11"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{StaticResource Text}"/>
+                                    <TextBlock Text="{Binding Size}" FontSize="10" FontFamily="Consolas"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{StaticResource TextDim}"/>
+                                    <TextBlock Text="{Binding From}" FontSize="10" FontFamily="Consolas"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{StaticResource TextDisabled}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Grid DockPanel.Dock="Top" x:Name="LevelRow" Visibility="Collapsed" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Mip level" VerticalAlignment="Center"
+                               Foreground="{StaticResource TextDim}" Margin="0,0,6,0"/>
+                        <ComboBox Grid.Column="1" x:Name="PreviewLevelBox" Margin="0"
+                              SelectionChanged="PreviewLevel_Changed"/>
+                    </Grid>
+
+                    <Border DockPanel.Dock="Top" x:Name="SourceRow" Visibility="Collapsed"
+                        CornerRadius="4" Padding="8,6" Margin="0,0,0,8"
+                        Background="{StaticResource Background}"
+                        BorderBrush="{StaticResource Border}" BorderThickness="1">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <Border x:Name="SourceTag" CornerRadius="3" Padding="6,1"
+                                    Background="{StaticResource Accent}">
+                                    <TextBlock x:Name="SourceTagText" Text="CompiledMip" FontSize="11"
+                                           FontWeight="SemiBold" Foreground="#FF10161E"/>
+                                </Border>
+                            </StackPanel>
+                            <TextBlock x:Name="SourceText" FontFamily="Consolas" FontSize="11"
+                                   Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button DockPanel.Dock="Top" x:Name="OpenViewerButton" Content="Open texture viewer"
+                        Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
+
+                    <Button DockPanel.Dock="Top" x:Name="OpenMeshButton" Content="Open mesh viewer"
+                        Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
+
+                    <Button DockPanel.Dock="Top" x:Name="OpenCycleButton" Content="Open time cycle editor"
+                        Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TextBlock x:Name="PreviewInfo" FontFamily="Consolas" FontSize="12"
+                               Foreground="{StaticResource TextDim}" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <ListView Grid.Column="2" x:Name="ItemList" MouseDoubleClick="ItemList_DoubleClick"
+                  SelectionChanged="ItemList_SelectionChanged" BorderThickness="0"
+                  PreviewMouseRightButtonDown="ItemList_RightButtonDown">
+                <ListView.ContextMenu>
+                    <ContextMenu Opened="Menu_Opened">
+                        <MenuItem x:Name="MenuOpen" Header="Open" Click="MenuOpen_Click"/>
+                        <MenuItem x:Name="MenuExtract" Header="Extract..." Click="Extract_Click"/>
+                        <MenuItem x:Name="MenuExport" Header="Export as..." Click="MenuExport_Click"/>
+                        <MenuItem x:Name="MenuReplace" Header="Replace..." Click="MenuReplace_Click"/>
+                        <Separator/>
+                        <MenuItem x:Name="MenuCopyName" Header="Copy name" Click="MenuCopyName_Click"/>
+                        <MenuItem x:Name="MenuCopyId" Header="Copy id" Click="MenuCopyId_Click"/>
+                    </ContextMenu>
+                </ListView.ContextMenu>
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Index" Width="60" DisplayMemberBinding="{Binding Index}"/>
+                        <GridViewColumn Header="Name" Width="290">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path Style="{StaticResource RowIcon}" Data="{Binding Icon}"/>
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Type" Width="140" DisplayMemberBinding="{Binding Type}"/>
+                        <GridViewColumn Header="Size" Width="85" DisplayMemberBinding="{Binding SizeText}"/>
+                        <GridViewColumn Header="Id" Width="120" DisplayMemberBinding="{Binding IdText}"/>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+
+        </Grid>
+    </DockPanel>
+</Window>
