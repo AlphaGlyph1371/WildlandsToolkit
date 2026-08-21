@@ -1,5 +1,9 @@
 <Project>
   <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Product>Wildlands Toolkit</Product>
+    <Authors>AlphaGlyph1371</Authors>
+
     <Platforms>AnyCPU</Platforms>
     <PlatformTarget>AnyCPU</PlatformTarget>
 

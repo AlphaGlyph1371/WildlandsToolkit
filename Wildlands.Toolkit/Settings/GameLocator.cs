@@ -14,11 +14,38 @@ public static class GameLocator
         foreach (var library in SteamLibraries())
         {
             var candidate = Path.Combine(library, "steamapps", "common", "Wildlands");
-            if (File.Exists(Path.Combine(candidate, Executable)))
+            if (LooksLikeGameFolder(candidate))
+                return candidate;
+        }
+
+        foreach (var candidate in UbisoftInstalls())
+        {
+            if (LooksLikeGameFolder(candidate))
                 return candidate;
         }
 
         return null;
+    }
+
+    // Ubisoft Connect keeps one subkey per owned game, each with an InstallDir. Which of
+    // them is Wildlands differs per account, so every folder is checked for the executable
+    // instead of looking up an id.
+    static IEnumerable<string> UbisoftInstalls()
+    {
+        foreach (var view in new[] { RegistryView.Registry32, RegistryView.Registry64 })
+        {
+            using var root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            using var installs = root.OpenSubKey(@"SOFTWARE\Ubisoft\Launcher\Installs");
+            if (installs is null)
+                continue;
+
+            foreach (string name in installs.GetSubKeyNames())
+            {
+                using var game = installs.OpenSubKey(name);
+                if (game?.GetValue("InstallDir") is string folder && folder.Length > 0)
+                    yield return folder;
+            }
+        }
     }
 
     public static bool LooksLikeGameFolder(string path)

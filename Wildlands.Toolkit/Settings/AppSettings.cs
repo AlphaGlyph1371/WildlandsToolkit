@@ -9,6 +9,7 @@ public sealed class AppSettings
     public string GamePath { get; set; } = "";
     public string ExportFolder { get; set; } = "";
     public List<string> RecentArchives { get; set; } = [];
+    public bool SeenEarlyNotice { get; set; }
 
     static string FilePath => Path.Combine(Folder, "settings.json");
 

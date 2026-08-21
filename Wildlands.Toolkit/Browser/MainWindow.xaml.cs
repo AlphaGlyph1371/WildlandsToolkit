@@ -56,16 +56,45 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Title = VersionText();
         Loaded += OnLoaded;
     }
 
     void OnLoaded(object sender, RoutedEventArgs e)
     {
+        ShowEarlyNotice();
+
         if (!_settings.IsConfigured && !RunSetup())
             SetStatus("No game folder set. Use \"Game folder\" or \"Open file\".");
 
         LoadArchiveList();
         LoadSkeletonIndex();
+    }
+
+    void ShowEarlyNotice()
+    {
+        if (_settings.SeenEarlyNotice)
+            return;
+
+        var text = new StringBuilder();
+        text.AppendLine($"Welcome to {VersionText()}.");
+        text.AppendLine();
+        text.AppendLine("This is early development. Expect bugs, and expect things that do not work yet.");
+        text.AppendLine();
+        text.AppendLine("Your archives are safe as long as you let the toolkit do the writing: before the");
+        text.AppendLine("first change to an archive a copy is made as <archive>.original and never touched");
+        text.AppendLine("again, so you can always go back. Close the game before writing.");
+        text.AppendLine();
+        text.AppendLine("Please report anything that breaks on the Discord server, the link is in the");
+        text.AppendLine("bottom right corner of the window. A screenshot and what you did before it broke");
+        text.AppendLine("is usually enough.");
+        text.AppendLine();
+        text.AppendLine("This message is only shown once.");
+
+        MessageBox.Show(this, text.ToString(), VersionText(), MessageBoxButton.OK, MessageBoxImage.Information);
+
+        _settings.SeenEarlyNotice = true;
+        _settings.Save();
     }
 
     bool RunSetup()
@@ -448,6 +477,12 @@ public partial class MainWindow : Window
 
         MenuCopyName.IsEnabled = item is not null;
         MenuCopyId.IsEnabled = item is { Id: not 0 };
+    }
+
+    static string VersionText()
+    {
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        return version is null ? "Wildlands Toolkit" : $"Wildlands Toolkit {version.Major}.{version.Minor}.{version.Build}";
     }
 
     void Discord_Navigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)

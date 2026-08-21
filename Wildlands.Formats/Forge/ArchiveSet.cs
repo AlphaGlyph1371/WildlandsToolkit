@@ -82,7 +82,7 @@ public sealed class ArchiveSet : IDisposable
     {
         var opened = new List<ForgeArchive>();
 
-        string? folder = Path.GetDirectoryName(_archive.FilePath);
+        string? folder = Path.GetDirectoryName(Path.GetFullPath(_archive.FilePath));
         if (folder is null)
             return opened;
 
