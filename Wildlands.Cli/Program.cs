@@ -96,6 +96,8 @@ switch (args[0])
         return Recode(args[1], args.Length >= 3 ? int.Parse(args[2]) : 200);
     case "texcycle":
         return TexCycle(args[1], args.Length >= 3 ? int.Parse(args[2]) : 200);
+    case "texhdr" when args.Length >= 3:
+        return ShowTextureHeaders(args[1], args[2]);
     case "texout" when args.Length >= 4:
         return ExportTextures(args[1], args[2], args[3]);
     case "texin" when args.Length >= 3:
@@ -1335,6 +1337,39 @@ static int ListMips(string forgePath, string filter, int count)
 
 // Walks the textures of an archive and groups the ones that cannot be drawn by
 // the reason, so the gaps are countable instead of anecdotal.
+static int ShowTextureHeaders(string forgePath, string filter)
+{
+    using var archive = ForgeArchive.Open(forgePath);
+
+    Console.WriteLine($"{"width",6} {"height",6} {"mips",4} {"topMip",12} {"totalSize",12} {"align",6} {"pixels",12}  name");
+
+    foreach (var entry in archive.Entries)
+    {
+        if (entry.FileExtension != ".data") continue;
+        if (!entry.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch { continue; }
+
+        foreach (var resource in file.Resources.Where(r => r.ClassHash == TextureMap.ClassHash))
+        {
+            TextureMap texture;
+            try { texture = TextureMap.Read(resource.Data); }
+            catch { continue; }
+
+            Console.WriteLine($"{texture.Width,6} {texture.Height,6} {texture.MipCount,4} {texture.TopMipSize,12} "
+                + $"{texture.TotalTextureSize,12} {texture.Alignment,6} {texture.Pixels.Length,12}  {resource.Name}");
+        }
+    }
+
+    return 0;
+}
+
 static int ExportTextures(string forgePath, string filter, string outputFolder)
 {
     using var archive = ForgeArchive.Open(forgePath);

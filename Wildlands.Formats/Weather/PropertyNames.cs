@@ -27,6 +27,7 @@ public static class PropertyNames
         { 0x49318F0D, "MaxHeight" },
         { 0x4CC9A9C1, "Cover" },
         { 0x5523A145, "RayleighDensity" },
+        { 0x643B7402, "MediumDesc" },
         { 0x57F28B54, "Size" },
         { 0x67C069F2, "NoiseTurbidity" },
         { 0x6B433A31, "Intensity" },
@@ -42,24 +43,32 @@ public static class PropertyNames
         { 0xAEBD252C, "EmissiveCurve" },
         { 0xBAE5ABF3, "Fog" },
         { 0xC1CCD8C7, "RayleighHeight" },
+        { 0xCE49C69F, "Stretch" },
         { 0xD0DE1EA9, "LayerAltitude" },
         { 0xD4ABF1D9, "DenseFog" },
         { 0xD568579C, "NoiseFrequency" },
         { 0xD942A33D, "BlendFactor" },
+        { 0xE5AA00B2, "ColorVibranceIntensity" },
         { 0xDA707488, "HeightFade" },
+        { 0xE48A738F, "PhaseFunction" },
         { 0xE6F95818, "ThresholdStart" },
         { 0xF4A03832, "DayTime" },
         { 0xFE751847, "MoonlightColor" },
 
         // three words, kept where the value backs the name up
+        { 0x02DA1D54, "VolCloudsParams" },
         { 0x16E80C76, "SunFlareSize" },
+        { 0x1705F833, "AOMinValue" },
         { 0x1E35604C, "MieColorMultiplier" },
+        { 0x1F1FEA3D, "WorldSplashConfig" },
+        { 0x2864AEC7, "StaticWetnessIntensity" },
         { 0x3673A50A, "CirrusLayerThickness" },
         { 0x39899589, "SunElevationAngle" },
         { 0x3DD6A243, "MoonTextureAttenuation" },
         { 0x41415F05, "DenseFogDensity" },
         { 0x52C2E4E6, "AutoExposureBias" },
         { 0x60255396, "MoonElevationAngle" },
+        { 0x7BAC4FEB, "CharacterSplashConfig" },
         { 0x8D292753, "HorizonFadeEnd" },
         { 0x9208EDB0, "RayleighColorMultiplier" },
         { 0xA29225E7, "CloudShadowDensity" },
@@ -74,5 +83,20 @@ public static class PropertyNames
         { 0xFA294520, "SunAzimuthAngle" },
     };
 
-    public static string Name(uint hash) => ByHash.TryGetValue(hash, out string? name) ? name : ResourceTypes.NameOf(hash);
+    // not certain: four words over a small vocabulary, shown with a question mark
+    static readonly Dictionary<uint, string> Guessed = new()
+    {
+        { 0x612ACAE7, "DayNightBlendFactor" },
+        { 0x7F7810CA, "FogLightingGlobalMultiplier" },
+        { 0x9BFF34EB, "SpaceFlareAdaptationFactor" },
+    };
+
+    public static string Name(uint hash)
+    {
+        if (ByHash.TryGetValue(hash, out string? name))
+            return name;
+        if (Guessed.TryGetValue(hash, out string? guess))
+            return guess + "?";
+        return ResourceTypes.NameOf(hash);
+    }
 }

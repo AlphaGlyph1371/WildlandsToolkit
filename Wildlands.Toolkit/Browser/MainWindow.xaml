@@ -60,6 +60,7 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusText" Grid.Column="0" Foreground="{StaticResource TextDim}"
                            Text="Ready" TextTrimming="CharacterEllipsis"/>
@@ -69,6 +70,13 @@
                 <TextBlock x:Name="CountText" Grid.Column="2" Foreground="{StaticResource TextDim}"/>
 
                 <TextBlock Grid.Column="3" Margin="20,0,0,0" Cursor="Hand">
+                    <Hyperlink NavigateUri="https://github.com/AlphaGlyph1371/WildlandsToolkit"
+                               RequestNavigate="Discord_Navigate"
+                               Foreground="{StaticResource TextDim}"
+                               ToolTip="Open the project on GitHub">GitHub</Hyperlink>
+                </TextBlock>
+
+                <TextBlock Grid.Column="4" Margin="14,0,0,0" Cursor="Hand">
                     <Hyperlink NavigateUri="https://discord.gg/bUEkGCCX7t"
                                RequestNavigate="Discord_Navigate"
                                ToolTip="Open the Discord server in your browser">
