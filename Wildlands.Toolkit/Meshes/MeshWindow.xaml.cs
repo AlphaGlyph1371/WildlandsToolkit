@@ -40,6 +40,7 @@ public partial class MeshWindow : Window
 
     List<MeshSurface> _surfaces = [];
     bool _texturesLoaded;
+    string? _borrowed;
     bool _textured;
     readonly DirectionalLight _light = new(Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
 
@@ -69,7 +70,7 @@ public partial class MeshWindow : Window
         Title = name;
 
         _parts = MeshScene.Build(mesh);
-        _surfaces = MeshSurfaces.Load(mesh, siblings, archives, withTextures: false);
+        _surfaces = MeshSurfaces.Load(mesh, siblings, archives, withTextures: false, out _borrowed);
         BuildScene();
         ShowFacts();
 
@@ -121,7 +122,7 @@ public partial class MeshWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             try
             {
-                _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives, withTextures: true);
+                _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives, withTextures: true, out _borrowed);
                 _texturesLoaded = true;
             }
             finally
@@ -137,6 +138,8 @@ public partial class MeshWindow : Window
                 TextureButton.Content = "No textures";
                 return;
             }
+
+            ShowFacts();
         }
 
         _textured = TextureButton.IsChecked == true;
@@ -167,7 +170,8 @@ public partial class MeshWindow : Window
         StatusText.Text =
             $"{_parts[0].Geometry.Positions.Count:N0} vertices   {triangles:N0} triangles   " +
             $"{_parts.Count} draw range(s)   format {_mesh.VertexFormat}, stride {_mesh.VertexStride}" +
-            (_mesh.BoneCount > 0 ? $"   {_mesh.BoneCount} bones, shown in bind pose" : "");
+            (_mesh.BoneCount > 0 ? $"   {_mesh.BoneCount} bones, shown in bind pose" : "") +
+            (_borrowed is null ? "" : $"   completed from {_borrowed}");
 
         var bounds = MeshScene.Bounds(_parts);
         SizeText.Text = $"{bounds.SizeX:0.00} x {bounds.SizeY:0.00} x {bounds.SizeZ:0.00} m";

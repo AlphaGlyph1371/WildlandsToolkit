@@ -1443,51 +1443,65 @@ static int ImportTextures(string forgePath, string inputFolder)
     using (var archive = ForgeArchive.Open(forgePath))
     using (var archives = new ArchiveSet(archive))
     {
-        var byName = new Dictionary<string, ForgeEntry>(StringComparer.OrdinalIgnoreCase);
+        var byName = new Dictionary<string, List<ForgeEntry>>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in archive.Entries)
-            byName.TryAdd(entry.Name, entry);
+        {
+            if (!byName.TryGetValue(entry.Name, out var sameName))
+                byName[entry.Name] = sameName = [];
+            sameName.Add(entry);
+        }
 
         foreach (string image in images)
         {
             string name = Path.GetFileNameWithoutExtension(image);
 
-            if (!byName.TryGetValue(name, out var entry))
+            if (!byName.TryGetValue(name, out var candidates))
             {
                 Console.WriteLine($"  {name}: no entry of that name in the archive");
                 missing++;
                 continue;
             }
 
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            var file = DataFile.Read(stream);
+            int copies = 0;
+            string summary = "";
 
-            int index = file.Resources.FindIndex(r => r.ClassHash == TextureMap.ClassHash && r.Name == name);
-            if (index < 0)
+            foreach (var entry in candidates)
             {
-                Console.WriteLine($"  {name}: the entry holds no TextureMap of that name");
+                using var stream = new MemoryStream(archive.ReadEntry(entry));
+                var file = DataFile.Read(stream);
+
+                int index = file.Resources.FindIndex(r => r.ClassHash == TextureMap.ClassHash && r.Name == name);
+                if (index < 0)
+                    continue;
+
+                var resource = file.Resources[index];
+                var location = new Location(forgePath, entry.Index, entry.Name);
+
+                try
+                {
+                    var built = TextureImporter.Build(image, TextureMap.Read(resource.Data), resource.Data, location,
+                        index, resource.Name, archives, generateMips: true, out summary);
+
+                    foreach (var change in built)
+                        changes.Set(change);
+
+                    copies++;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  {name}: {ex.Message}");
+                }
+            }
+
+            if (copies == 0)
+            {
+                Console.WriteLine($"  {name}: no entry of that name holds a TextureMap");
                 missing++;
                 continue;
             }
 
-            var resource = file.Resources[index];
-            var location = new Location(forgePath, entry.Index, entry.Name);
-
-            try
-            {
-                var built = TextureImporter.Build(image, TextureMap.Read(resource.Data), resource.Data, location,
-                    index, resource.Name, archives, generateMips: true, out string summary);
-
-                foreach (var change in built)
-                    changes.Set(change);
-
-                Console.WriteLine($"  {name}: {summary}");
-                matched++;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"  {name}: {ex.Message}");
-                missing++;
-            }
+            Console.WriteLine($"  {name}: {summary}" + (copies > 1 ? $"   ({copies} copies of that name)" : ""));
+            matched++;
         }
     }
 

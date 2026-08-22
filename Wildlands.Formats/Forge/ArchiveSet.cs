@@ -41,7 +41,9 @@ public sealed class ArchiveSet : IDisposable
         }
     }
 
-    public FoundResource? FindResource(ulong id, uint classHash)
+    public FoundResource? FindResource(ulong id, uint classHash) => FindResource(id, classHash, 0);
+
+    public FoundResource? FindResource(ulong id, uint classHash, ulong containerId)
     {
         foreach (var found in Candidates(id))
         {
@@ -61,15 +63,41 @@ public sealed class ArchiveSet : IDisposable
                 return new FoundResource(found, file.Resources[index], index);
         }
 
+        return containerId == 0 ? null : FindInContainer(id, classHash, containerId);
+    }
+
+    FoundResource? FindInContainer(ulong id, uint classHash, ulong containerId)
+    {
+        foreach (var archive in All())
+        {
+            var entry = archive.FindById(containerId);
+            if (entry is null)
+                continue;
+
+            DataFile file;
+            try
+            {
+                using var stream = new MemoryStream(archive.ReadEntry(entry));
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            int index = file.Resources.FindIndex(r => r.Id == id && r.ClassHash == classHash);
+            if (index >= 0)
+                return new FoundResource(Describe(archive, entry), file.Resources[index], index);
+        }
+
         return null;
     }
 
     public IEnumerable<ForgeArchive> All()
     {
-        yield return _archive;
-
-        foreach (var sibling in _siblings.Result)
-            yield return sibling;
+        return _siblings.Result
+            .Append(_archive)
+            .OrderByDescending(x => Path.GetFileName(x.FilePath), StringComparer.OrdinalIgnoreCase);
     }
 
     static SourceFile Describe(ForgeArchive archive, ForgeEntry entry)
