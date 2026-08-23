@@ -42,6 +42,7 @@ public static class PropertyNames
         { 0xA5A3ECDB, "MoonLightIntensity" },
         { 0xAEBD252C, "EmissiveCurve" },
         { 0xBAE5ABF3, "Fog" },
+        { 0xC0A9C490, "Vector4" },
         { 0xC1CCD8C7, "RayleighHeight" },
         { 0xCE49C69F, "Stretch" },
         { 0xD0DE1EA9, "LayerAltitude" },
@@ -93,10 +94,30 @@ public static class PropertyNames
 
     public static string Name(uint hash)
     {
-        if (ByHash.TryGetValue(hash, out string? name))
-            return name;
-        if (Guessed.TryGetValue(hash, out string? guess))
-            return guess + "?";
+        if (TryName(hash, out string? name))
+            return name!;
         return ResourceTypes.NameOf(hash);
     }
+
+    // The command-line census needs to distinguish a proven property name from a
+    // convenient, but explicitly uncertain, display guess. Keep that distinction
+    // here so discovery tools never promote a guess into a confirmed result.
+    public static bool TryName(uint hash, out string? name)
+    {
+        if (ByHash.TryGetValue(hash, out name))
+            return true;
+
+        if (Guessed.TryGetValue(hash, out string? guess))
+        {
+            name = guess + "?";
+            return true;
+        }
+
+        if (ResourceTypes.TryName(hash, out name))
+            return true;
+
+        return false;
+    }
+
+    public static bool IsConfirmed(uint hash) => ByHash.ContainsKey(hash) || ResourceTypes.IsKnown(hash);
 }

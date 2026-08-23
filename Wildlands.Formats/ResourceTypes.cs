@@ -88,8 +88,12 @@ public static class ResourceTypes
 
     public static string NameOf(uint hash)
     {
-        return ByHash.TryGetValue(hash, out var name) ? name : $"0x{hash:X8}";
+        return TryName(hash, out var name) ? name! : $"0x{hash:X8}";
     }
+
+    public static bool TryName(uint hash, out string? name) => ByHash.TryGetValue(hash, out name);
+
+    public static bool IsKnown(uint hash) => ByHash.ContainsKey(hash);
 
     public static uint Crc32(string text)
     {
