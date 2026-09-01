@@ -178,6 +178,20 @@ public sealed class ForgeArchive : IDisposable
 
         long locationTable = _stream.Position;
 
+        // The two tables live in different parts of the archive. Seeking from one table
+        // to the other for every entry turns a header read into thousands of random reads,
+        // which is especially slow on a hard disk. Read each contiguous table once instead.
+        var locations = new byte[checked(entryCount * 20)];
+        _stream.Position = locationTable;
+        _stream.ReadExactly(locations);
+
+        var infos = new byte[checked(entryCount * ForgeEntry.InfoSize)];
+        _stream.Position = infoTable;
+        _stream.ReadExactly(infos);
+
+        using var locationReader = new BinaryReader(new MemoryStream(locations, writable: false));
+        using var infoReader = new BinaryReader(new MemoryStream(infos, writable: false));
+
         for (int i = 0; i < entryCount; i++)
         {
             var entry = new ForgeEntry
@@ -186,11 +200,8 @@ public sealed class ForgeArchive : IDisposable
                 InfoOffset = infoTable + (long)i * ForgeEntry.InfoSize,
             };
 
-            _stream.Position = entry.LocationOffset;
-            entry.ReadLocation(_reader);
-
-            _stream.Position = entry.InfoOffset;
-            entry.ReadInfo(_reader);
+            entry.ReadLocation(locationReader);
+            entry.ReadInfo(infoReader);
 
             entry.Index = setIndex * EntriesPerFileSet + i;
             Entries.Add(entry);

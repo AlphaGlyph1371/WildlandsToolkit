@@ -159,7 +159,7 @@ public partial class MeshWindow : Window
     {
         if (_parts.Count == 0)
         {
-            StatusText.Text = _mesh.Note.Length > 0 ? $"nothing to draw: {_mesh.Note}" : "nothing to draw: this mesh carries no geometry";
+            StatusText.Text = "nothing to draw: this mesh carries no geometry";
             return;
         }
 
@@ -170,7 +170,7 @@ public partial class MeshWindow : Window
         StatusText.Text =
             $"{_parts[0].Geometry.Positions.Count:N0} vertices   {triangles:N0} triangles   " +
             $"{_parts.Count} draw range(s)   format {_mesh.VertexFormat}, stride {_mesh.VertexStride}" +
-            (_mesh.BoneCount > 0 ? $"   {_mesh.BoneCount} bones, shown in bind pose" : "") +
+            (_mesh.Bones.Count > 0 ? $"   {_mesh.Bones.Count} bones, shown in bind pose" : "") +
             (_borrowed is null ? "" : $"   completed from {_borrowed}");
 
         var bounds = MeshScene.Bounds(_parts);
@@ -263,7 +263,7 @@ public partial class MeshWindow : Window
 
     void Export_Click(object sender, RoutedEventArgs e)
     {
-        string done = MeshExporter.SaveFbx(this, _mesh, _name, _siblings, _skeletonIndex, _settings, _skeleton);
+        string done = MeshExporter.Save(this, _mesh, _name, _siblings, _skeletonIndex, _settings, _skeleton);
 
         if (done.Length > 0)
             StatusText.Text = done;

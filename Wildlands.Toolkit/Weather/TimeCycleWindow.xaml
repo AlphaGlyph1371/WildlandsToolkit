@@ -16,6 +16,8 @@
                             ToolTip="Throw the edits away and go back to what the game shipped"/>
                     <Button Content="Export as text" Click="Export_Click"
                             ToolTip="Write the whole cycle out in the same form wlcli timecycle uses"/>
+                    <Button Content="[DEV] Apply graphics profile" Click="ApplyProfile_Click"
+                            ToolTip="Preview an external JSON profile on this exact controller"/>
                 </StackPanel>
 
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">

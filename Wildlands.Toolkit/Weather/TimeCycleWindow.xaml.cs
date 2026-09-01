@@ -218,6 +218,61 @@ public partial class TimeCycleWindow : Window
         SetStatus($"written to {dialog.FileName}");
     }
 
+    void ApplyProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Apply graphics profile to this controller",
+            Filter = "Graphics profile (*.json)|*.json|All files (*.*)|*.*",
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        TimeCycle preview;
+        GraphicsProfile profile;
+        GraphicsProfileResult result;
+        try
+        {
+            profile = GraphicsProfile.Load(dialog.FileName);
+            preview = TimeCycle.Read(_cycle.Write());
+            result = profile.Apply(preview, _name);
+        }
+        catch (Exception ex)
+        {
+            ShowError("Could not preview the graphics profile", ex);
+            return;
+        }
+
+        string details = string.Join(Environment.NewLine, result.Changes.Take(12).Select(change =>
+            $"• {change.Label}: {change.BeforeMinimum:0.#####}..{change.BeforeMaximum:0.#####} → "
+            + $"{change.AfterMinimum:0.#####}..{change.AfterMaximum:0.#####}"));
+        if (result.Changes.Count > 12)
+            details += $"{Environment.NewLine}• …and {result.Changes.Count - 12} more";
+
+        string warning = profile.Experimental
+            ? "This profile is marked EXPERIMENTAL and has not been visually verified.\n\n"
+            : "";
+        var answer = MessageBox.Show(this,
+            $"{warning}{profile.Name}\n{result.Changes.Count} curve(s), {result.ChangedValues} value(s)\n\n"
+            + $"{details}\n\nApply this preview to the currently opened controller?",
+            "Preview graphics profile", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes)
+            return;
+
+        _cycle.Entries.Clear();
+        _cycle.Entries.AddRange(preview.Entries);
+        var shipped = TimeCycle.Read(_original);
+        _rows.Clear();
+        for (int i = 0; i < _cycle.Entries.Count; i++)
+            _rows.Add(new CycleRow(i, _cycle.Entries[i], shipped.Entries[i]));
+
+        ShowEntries();
+        KeyList.ItemsSource = null;
+        MarkDirty();
+        SetStatus($"{profile.Name}: {result.ChangedValues} value(s) changed. Save adds this exact resource to the change list.");
+    }
+
     void MarkDirty()
     {
         _dirty = true;
@@ -256,12 +311,12 @@ public sealed class CycleRow : INotifyPropertyChanged
 {
     readonly float[][] _shipped;
 
-    public CycleRow(int index, TimeCycleEntry entry)
+    public CycleRow(int index, TimeCycleEntry entry, TimeCycleEntry? baseline = null)
     {
         Index = index;
         Entry = entry;
         Path = entry.PathText();
-        _shipped = entry.Values.Select(v => (float[])v.Clone()).ToArray();
+        _shipped = (baseline ?? entry).Values.Select(v => (float[])v.Clone()).ToArray();
     }
 
     public int Index { get; }

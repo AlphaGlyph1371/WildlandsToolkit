@@ -18,9 +18,6 @@ public static class MeshScene
     {
         var parts = new List<MeshPart>();
 
-        if (mesh.Data is null)
-            return parts;
-
         var vertices = MeshGeometry.ReadVertices(mesh);
 
         var positions = new Point3DCollection(vertices.Length);
@@ -31,7 +28,7 @@ public static class MeshScene
         {
             positions.Add(new Point3D(vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
             normals.Add(new Vector3D(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z));
-            texture.Add(new System.Windows.Point(vertex.Uv.X, vertex.Uv.Y));
+            texture.Add(vertex.Uv.Length > 0 ? new System.Windows.Point(vertex.Uv[0].X, vertex.Uv[0].Y) : default);
         }
 
         positions.Freeze();

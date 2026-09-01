@@ -1,0 +1,16 @@
+{
+  "FormatVersion": 1,
+  "Name": "CALIBRATION Yungas Exposure ON",
+  "Description": "Deliberately extreme exposure test. This is not a visual preset. Apply to both listed controllers, capture one comparison, then use the matching RESTORE profile.",
+  "Experimental": true,
+  "ResourceNames": ["GRN_YUNGAS_CD", "GRN_YUNGAS_COVER_CD"],
+  "Rules": [
+    {
+      "Label": "Force an unmistakable positive exposure bias",
+      "Path": "0x5FB26017.0x33B77FEC.0x52C2E4E6",
+      "Operation": "Set",
+      "Value": 0.75,
+      "Required": true
+    }
+  ]
+}

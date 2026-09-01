@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 
+using Wildlands.Formats.Forge;
+
 namespace Wildlands.Toolkit;
 
 public partial class SetupWindow : Window
@@ -47,7 +49,7 @@ public partial class SetupWindow : Window
             return;
         }
 
-        int archives = Directory.GetFiles(path, "*.forge").Length;
+        int archives = ArchiveLocator.Find(path).Count;
 
         if (!GameLocator.LooksLikeGameFolder(path))
         {

@@ -1,0 +1,25 @@
+{
+  "FormatVersion": 1,
+  "Name": "CALIBRATION Yungas Exposure RESTORE",
+  "Description": "Restores the shipped Yungas and Yungas Cover exposure-bias curve after the calibration test.",
+  "Experimental": false,
+  "ResourceNames": ["GRN_YUNGAS_CD", "GRN_YUNGAS_COVER_CD"],
+  "Rules": [
+    {
+      "Label": "Restore midnight and early morning",
+      "Path": "0x5FB26017.0x33B77FEC.0x52C2E4E6",
+      "Operation": "Set",
+      "Value": 0.0,
+      "KeyTimes": ["00:00:00", "04:02:00", "20:59:30", "24:00:00"],
+      "Required": true
+    },
+    {
+      "Label": "Restore shipped daylight exposure",
+      "Path": "0x5FB26017.0x33B77FEC.0x52C2E4E6",
+      "Operation": "Set",
+      "Value": -0.5,
+      "KeyTimes": ["06:01:30", "19:11:00"],
+      "Required": true
+    }
+  ]
+}

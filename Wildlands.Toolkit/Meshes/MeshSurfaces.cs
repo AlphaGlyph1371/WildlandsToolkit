@@ -24,12 +24,9 @@ public static class MeshSurfaces
         var from = new SortedSet<string>();
         borrowed = null;
 
-        if (mesh.Data is null)
-            return ranges;
-
         var brushes = new Dictionary<(ulong, bool), Brush?>();
 
-        foreach (ulong materialId in mesh.MaterialIds)
+        foreach (ulong materialId in mesh.Materials.Select(m => m.MaterialId))
         {
             ulong setId = 0;
             bool twoSided = false, translucent = false;

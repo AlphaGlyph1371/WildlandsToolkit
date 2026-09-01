@@ -5,8 +5,9 @@ namespace Wildlands.Formats.Models;
 
 public sealed class MeshPrimitive
 {
-    public const uint ClassHash = 2775812079;
+    public const uint ClassHash = 0xA57387EF;
 
+    public ulong Id { get; set; }
     public int MinIndex { get; set; }
     public int UsesDepthOnlyBuffers { get; set; }
     public int VertexCount { get; set; }
@@ -17,17 +18,17 @@ public sealed class MeshPrimitive
 
 public sealed class MeshData
 {
-    public const uint ClassHash = 105229237;
+    public const uint ClassHash = 0x0645ABB5;
 
-    public bool Indices32Bit { get; private set; }
-    public int VertexFormat { get; private set; }
-    public byte VertexStride { get; private set; }
+    public bool Indices32Bit { get; set; }
+    public byte VertexFormat { get; set; }
+    public byte VertexStride { get; set; }
 
     public List<MeshPrimitive> Standard { get; } = [];
     public List<MeshPrimitive> Shadow { get; } = [];
 
-    public byte[] VertexBuffer { get; private set; } = [];
-    public byte[] IndexBuffer { get; private set; } = [];
+    public byte[] VertexBuffer { get; set; } = [];
+    public byte[] IndexBuffer { get; set; } = [];
 
     public int VertexCount => VertexStride > 0 ? VertexBuffer.Length / VertexStride : 0;
     public int IndexCount => IndexBuffer.Length / (Indices32Bit ? 4 : 2);
@@ -50,16 +51,32 @@ public sealed class MeshData
         return data;
     }
 
+    public void Write(BinaryWriter writer)
+    {
+        writer.Write(Indices32Bit);
+        writer.Write(VertexFormat);
+        writer.Write(VertexStride);
+
+        WritePrimitives(writer, Standard);
+        WritePrimitives(writer, Shadow);
+
+        writer.Write(VertexBuffer.Length);
+        writer.Write(VertexBuffer);
+        writer.Write(IndexBuffer.Length);
+        writer.Write(IndexBuffer);
+    }
+
     static void ReadPrimitives(BinaryReader reader, List<MeshPrimitive> target)
     {
         int count = reader.ReadInt32();
 
         for (int i = 0; i < count; i++)
         {
-            ScimitarHeader.Read(reader, MeshPrimitive.ClassHash);
+            var header = ScimitarHeader.Read(reader, MeshPrimitive.ClassHash);
 
             target.Add(new MeshPrimitive
             {
+                Id = header.Id,
                 MinIndex = reader.ReadInt32(),
                 UsesDepthOnlyBuffers = reader.ReadInt32(),
                 VertexCount = reader.ReadInt32(),
@@ -67,6 +84,23 @@ public sealed class MeshData
                 TriangleCount = reader.ReadInt32(),
                 Type = reader.ReadInt32(),
             });
+        }
+    }
+
+    static void WritePrimitives(BinaryWriter writer, List<MeshPrimitive> source)
+    {
+        writer.Write(source.Count);
+
+        foreach (var primitive in source)
+        {
+            writer.Write(primitive.Id);
+            writer.Write(MeshPrimitive.ClassHash);
+            writer.Write(primitive.MinIndex);
+            writer.Write(primitive.UsesDepthOnlyBuffers);
+            writer.Write(primitive.VertexCount);
+            writer.Write(primitive.StartIndex);
+            writer.Write(primitive.TriangleCount);
+            writer.Write(primitive.Type);
         }
     }
 }

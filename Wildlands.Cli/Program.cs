@@ -31,7 +31,14 @@ if (args.Length < 2)
     Console.WriteLine("  meshes <file.forge> [n]        count the geometry containers and vertex formats");
     Console.WriteLine("  geometry <file.forge> [n]      decode every mesh and check it against its own header");
     Console.WriteLine("  fbx   <file.data> <name> <out> [cache.bin]  write one mesh as a binary FBX file");
+    Console.WriteLine("  objout <file.data> <name> <out.obj>  write one mesh as a Wavefront OBJ file");
+    Console.WriteLine("  objin <file.data> <name> <in.obj> <out.data>  replace one mesh's geometry from an OBJ file");
+    Console.WriteLine("  objcycle <folder|file.data> [n]  export every mesh to OBJ, read it back and compare the geometry");
+    Console.WriteLine("  gltfout <file.data> <name> <out.glb> [cache.bin]  write one mesh as binary glTF, with skin and every uv set");
+    Console.WriteLine("  gltfin <file.data> <name> <in.glb> <out.data>  replace one mesh's geometry from a glTF file");
+    Console.WriteLine("  gltfcycle <folder|file.data> [n]  export every mesh to glTF, read it back and compare everything");
     Console.WriteLine("  hash  <name> [name...]        the class hash of a type name");
+    Console.WriteLine("  hashscan <binary> <hash> [hash...]  resolve CRC32 hashes from strings retained in a binary");
     Console.WriteLine("  audit <file.forge> [n]         count the textures that cannot be shown, and why");
     Console.WriteLine("  recode <file.forge> [n]        decode every texture, encode it again and measure what was lost");
     Console.WriteLine("  texcycle <file.forge> [n]      write every texture out as dds, read it back and rebuild the resource");
@@ -39,10 +46,14 @@ if (args.Length < 2)
     Console.WriteLine("  texin  <file.forge> <indir>    read a folder of png back in, subfolders included, and write the archive");
     Console.WriteLine("  guess <list.txt> <file.forge> [file2.forge...]  check candidate names against real hashes");
     Console.WriteLine("  skeletons <file.forge> [n] [cache.bin]  for every skinned mesh, check the matching Skeleton's hierarchy");
+    Console.WriteLine("  skelcycle <folder|file.data>   read and rewrite every Skeleton byte for byte");
+    Console.WriteLine("  skelcheck <folder|file.data>   check Skeletons against the published Anvil documentation");
+    Console.WriteLine("  buildcycle <folder|file.data>  parse and rewrite every BuildTable byte for byte");
+    Console.WriteLine("  meshcycle <folder|file.data> [n]  read and rewrite every Mesh byte for byte");
     Console.WriteLine("  skelindex <folder-with-forges> <cache.bin>  index every Skeleton resource across a folder of archives");
     Console.WriteLine("  pack  <file.data> <out.data>   read a data file and write it back, then compare both");
     Console.WriteLine("  setres <file.data> <name> <in.bin> <out.data>  replace one resource and write the data file");
-    Console.WriteLine("  putentry <file.forge> <index> <file>  put a file into an archive entry, in place");
+    Console.WriteLine("  putentry <file.forge> <index> <file> [out.forge]  put a file into an archive entry, in place or into a rebuilt copy");
     Console.WriteLine("  rebuild <file.forge> <out.forge>  write every entry again in order, then compare both");
     Console.WriteLine("  timecycle <file.data> <name> [out.txt]  write one time cycle out as editable text");
     Console.WriteLine("  settimecycle <file.data> <name> <in.txt> <out.data>  read that text back and rebuild the data file");
@@ -50,7 +61,11 @@ if (args.Length < 2)
     Console.WriteLine("  weatherprops <file.forge> [n]  census PropertyPath hashes in time-of-day and weather controllers");
     Console.WriteLine("  profileprops <file.forge> <hash> [hash...]  show the actual curves for selected property hashes");
     Console.WriteLine("  crackprops <file.forge> <source> [source...]  match unknown property hashes only against literal strings or extracted file names");
+    Console.WriteLine("  graphicsaudit <file.forge> <out.json>  write a structured inventory of every graphics controller and curve");
+    Console.WriteLine("  guessprops <audit.json> [words.txt] [parts]  combine graphics terms and match unknown leaf hashes");
+    Console.WriteLine("  graphicsprofile <file.data> <resource> <profile.json> [out.data]  preview or apply a graphics profile");
     Console.WriteLine("  refs  <file.data> <name|0xid>  which resources hold this resource's id");
+    Console.WriteLine("  where <game folder> <name> [--all]  which archives hold a resource, and which one the game loads last");
     return 1;
 }
 
@@ -91,8 +106,22 @@ switch (args[0])
     case "params":
         return CheckParameters(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue,
             args.Length >= 4 ? args[3] : null);
+    case "objout" when args.Length >= 4:
+        return ExportObj(args[1], args[2], args[3]);
+    case "objin" when args.Length >= 5:
+        return ImportObj(args[1], args[2], args[3], args[4]);
+    case "objcycle":
+        return CheckObjRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
+    case "gltfout" when args.Length >= 4:
+        return ExportGltf(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
+    case "gltfin" when args.Length >= 5:
+        return ImportGltf(args[1], args[2], args[3], args[4]);
+    case "gltfcycle":
+        return CheckGltfRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
     case "hash":
         return HashNames(args[1..]);
+    case "hashscan" when args.Length >= 3:
+        return ScanHashes(args[1], args[2..]);
     case "audit":
         return Audit(args[1], args.Length >= 3 ? int.Parse(args[2]) : 500);
     case "recode":
@@ -110,6 +139,14 @@ switch (args[0])
     case "skeletons":
         return CheckSkeletons(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20000,
             args.Length >= 4 ? args[3] : null);
+    case "skelcycle":
+        return CheckSkeletonRoundTrips(args[1]);
+    case "skelcheck":
+        return CheckSkeletonsAgainstDocs(args[1]);
+    case "buildcycle":
+        return CheckBuildTableRoundTrips(args[1]);
+    case "meshcycle":
+        return CheckMeshRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
     case "skelindex" when args.Length >= 3:
         return BuildSkeletonIndex(args[1], args[2]);
     case "pack" when args.Length >= 3:
@@ -119,7 +156,7 @@ switch (args[0])
     case "rebuild" when args.Length >= 3:
         return RebuildArchive(args[1], args[2]);
     case "putentry" when args.Length >= 4:
-        return PutEntry(args[1], int.Parse(args[2]), args[3]);
+        return PutEntry(args[1], int.Parse(args[2]), args[3], args.Length >= 5 ? args[4] : null);
     case "timecycle" when args.Length >= 3:
         return ShowTimeCycle(args[1], args[2], args.Length >= 4 ? args[3] : null);
     case "settimecycle" when args.Length >= 5:
@@ -132,8 +169,17 @@ switch (args[0])
         return ProfileWeatherProperties(args[1], args[2..]);
     case "crackprops" when args.Length >= 3:
         return CrackPropertyNames(args[1], args[2..]);
+    case "graphicsaudit" when args.Length >= 3:
+        return GraphicsAudit.Write(args[1], args[2]);
+    case "guessprops" when args.Length >= 2:
+        return PropertyGuesser.Run(args[1], args.Length >= 3 ? args[2] : null,
+            args.Length >= 4 ? int.Parse(args[3]) : 3);
+    case "graphicsprofile" when args.Length >= 4:
+        return ApplyGraphicsProfile(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
     case "refs" when args.Length >= 3:
         return FindReferences(args[1], args[2]);
+    case "where" when args.Length >= 3:
+        return WhereIsResource(args[1], args[2], args.Contains("--all"));
     default:
         Console.WriteLine($"unknown command: {args[0]}");
         return 1;
@@ -250,37 +296,77 @@ static int RebuildArchive(string forgePath, string outputPath)
     return 0;
 }
 
-static int PutEntry(string forgePath, int index, string input)
+// Writes one entry back. In place when it still fits, which leaves the rest of
+// the archive untouched. When it grew, only a full rebuild can take it, and
+// that needs somewhere to write the new archive.
+static int PutEntry(string forgePath, int index, string input, string? rebuiltPath)
 {
-    if (!ArchiveBackup.Exists(forgePath))
-    {
-        Console.WriteLine("backing up the untouched archive...");
-        ArchiveBackup.Ensure(forgePath);
-    }
-
-    using var archive = ForgeArchive.OpenForUpdate(forgePath);
-    var entry = archive.Entries.FirstOrDefault(e => e.Index == index);
-
-    if (entry is null)
-    {
-        Console.WriteLine("no entry with index " + index);
-        return 1;
-    }
-
     var data = File.ReadAllBytes(input);
-    int previous = entry.Length;
 
-    try
+    if (rebuiltPath is null)
     {
-        archive.ReplaceEntry(entry, data);
-    }
-    catch (InvalidOperationException ex)
-    {
-        Console.WriteLine(ex.Message);
-        return 1;
+        if (!ArchiveBackup.Exists(forgePath))
+        {
+            Console.WriteLine("backing up the untouched archive...");
+            ArchiveBackup.Ensure(forgePath);
+        }
+
+        using var archive = ForgeArchive.OpenForUpdate(forgePath);
+        var entry = archive.Entries.FirstOrDefault(e => e.Index == index);
+
+        if (entry is null)
+        {
+            Console.WriteLine("no entry with index " + index);
+            return 1;
+        }
+
+        int previous = entry.Length;
+
+        try
+        {
+            archive.ReplaceEntry(entry, data);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.WriteLine(ex.Message);
+            Console.WriteLine("pass an output path as the fourth argument to rebuild the archive instead.");
+            return 1;
+        }
+
+        Console.WriteLine($"{entry.Name}  {previous} -> {data.Length} bytes, in place at 0x{entry.Offset:X}");
+        return 0;
     }
 
-    Console.WriteLine($"{entry.Name}  {previous} -> {data.Length} bytes, in place at 0x{entry.Offset:X}");
+    var timer = Stopwatch.StartNew();
+
+    using (var archive = ForgeArchive.Open(forgePath))
+    {
+        var entry = archive.Entries.FirstOrDefault(e => e.Index == index);
+
+        if (entry is null)
+        {
+            Console.WriteLine("no entry with index " + index);
+            return 1;
+        }
+
+        Console.WriteLine($"{entry.Name}  {entry.Length} -> {data.Length} bytes, rebuilding {archive.Entries.Count} entries");
+        archive.Rebuild(rebuiltPath, new Dictionary<int, byte[]> { [index] = data });
+    }
+
+    Console.WriteLine($"written -> {rebuiltPath} in {timer.Elapsed.TotalSeconds:0.0} s");
+
+    using (var check = ForgeArchive.Open(rebuiltPath))
+    {
+        var entry = check.Entries.FirstOrDefault(e => e.Index == index);
+
+        if (entry is null || !check.ReadEntry(entry).AsSpan().SequenceEqual(data))
+        {
+            Console.WriteLine("the rebuilt archive does not hold what was just written");
+            return 1;
+        }
+    }
+
+    Console.WriteLine("reopened and verified");
     return 0;
 }
 
@@ -334,7 +420,6 @@ static int CensusMeshes(string forgePath, int limit)
                 var mesh = Mesh.Read(resource.Data);
                 Bump(kinds, mesh.Geometry.ToString());
 
-                if (mesh.Note.Length > 0) Bump(notes, mesh.Note);
                 if (mesh.Geometry == GeometryKind.None) continue;
 
                 Bump(formats, "format " + mesh.VertexFormat + ", stride " + mesh.VertexStride);
@@ -386,9 +471,19 @@ static int CheckGeometry(string forgePath, int limit)
             if (mesh.Geometry == GeometryKind.None) continue;
             seen++;
 
-            var vertices = MeshGeometry.ReadVertices(mesh);
-            var triangles = MeshGeometry.ReadTriangles(mesh);
             string what = "format " + mesh.VertexFormat + ", stride " + mesh.VertexStride;
+            MeshVertex[] vertices;
+            int[] triangles;
+            try
+            {
+                vertices = MeshGeometry.ReadVertices(mesh);
+                triangles = MeshGeometry.ReadTriangles(mesh);
+            }
+            catch (Exception ex)
+            {
+                Bump(results, what + ": invalid geometry (" + ex.Message + ")");
+                continue;
+            }
 
             if (vertices.Length == 0 || triangles.Length == 0)
             {
@@ -420,7 +515,7 @@ static int CheckGeometry(string forgePath, int limit)
                 continue;
             }
 
-            if (vertices.Any(v => Math.Abs(v.Uv.X) > 64 || Math.Abs(v.Uv.Y) > 64))
+            if (vertices.Any(v => v.Uv.Length > 0 && (Math.Abs(v.Uv[0].X) > 64 || Math.Abs(v.Uv[0].Y) > 64)))
             {
                 Bump(results, what + ": texture coordinate far outside the map");
                 continue;
@@ -495,18 +590,12 @@ static int ShowMesh(string path, string name)
     var mesh = Mesh.Read(resource.Data);
 
     Console.WriteLine(resource.Name + "  " + resource.Data.Length + " bytes");
-    Console.WriteLine("  submeshes " + mesh.SubMeshCount + "  bones " + mesh.BoneCount
+    Console.WriteLine("  submeshes " + mesh.SubMeshIds.Count + "  bones " + mesh.Bones.Count
         + "  descriptor 0x" + mesh.DescriptorMask.ToString("X2"));
     Console.WriteLine("  extent    " + Triple(mesh.ExtentMin) + "   to   " + Triple(mesh.ExtentMax));
 
-    if (mesh.Note.Length > 0)
-    {
-        Console.WriteLine("  note      " + mesh.Note);
-        return 0;
-    }
-
     Console.WriteLine("  geometry  " + mesh.Geometry + "  format " + mesh.VertexFormat
-        + "  stride " + mesh.VertexStride + "  indices " + (mesh.Data!.Indices32Bit ? 32 : 16) + " bit");
+        + "  stride " + mesh.VertexStride + "  indices " + (mesh.Data.Indices32Bit ? 32 : 16) + " bit");
     Console.WriteLine("  scale     " + mesh.QuantizationFactor + "  uv " + mesh.UvQuantizationFactor
         + "  platform " + mesh.PlatformVersion + "  sdk " + mesh.SdkVersion);
     Console.WriteLine("  vertices  " + (mesh.VertexStride > 0 ? mesh.VertexBuffer.Length / mesh.VertexStride : 0)
@@ -526,13 +615,13 @@ static int ShowMesh(string path, string name)
         Console.WriteLine("  decoded   x " + Range(vertices.Select(v => v.Position.X))
             + "  y " + Range(vertices.Select(v => v.Position.Y))
             + "  z " + Range(vertices.Select(v => v.Position.Z)));
-        Console.WriteLine("  uv        u " + Range(vertices.Select(v => v.Uv.X))
-            + "  v " + Range(vertices.Select(v => v.Uv.Y))
+        Console.WriteLine("  uv        u " + Range(vertices.Where(v => v.Uv.Length > 0).Select(v => v.Uv[0].X))
+            + "  v " + Range(vertices.Where(v => v.Uv.Length > 0).Select(v => v.Uv[0].Y))
             + "  normals " + Range(vertices.Select(v => v.Normal.Length())));
         Console.WriteLine("  triangles " + triangles.Length / 3 + "  indices " + Range(triangles.Select(i => (float)i)));
     }
 
-    Console.WriteLine("  materials " + string.Join(", ", mesh.MaterialIds.Select(id => "0x" + id.ToString("X"))));
+    Console.WriteLine("  materials " + string.Join(", ", mesh.Materials.Select(m => "0x" + m.MaterialId.ToString("X"))));
     Console.WriteLine("  draws     " + mesh.Data.Standard.Count + " standard, " + mesh.Data.Shadow.Count + " shadow");
 
     foreach (var p in mesh.Data.Standard)
@@ -856,7 +945,7 @@ static int CheckMaterials(string forgePath, int limit)
                 .Select(r => r.Id).ToHashSet();
 
             var usedSets = new HashSet<ulong>();
-            foreach (ulong materialId in mesh.MaterialIds)
+            foreach (ulong materialId in mesh.Materials.Select(m => m.MaterialId))
             {
                 var owner = file.Resources.FirstOrDefault(r => r.Id == materialId
                     && r.ClassHash == Material.ClassHash);
@@ -869,10 +958,10 @@ static int CheckMaterials(string forgePath, int limit)
                 Bump(counts, "small file: " + spare + " of " + setsHere.Count + " sets unused");
             int ranges = mesh.Data.Standard.Count;
             Bump(counts, "draw ranges: " + ranges);
-            Bump(counts, mesh.MaterialIds.Count == ranges ? "one per draw range"
-                : mesh.MaterialIds.Count + " materials for " + ranges + " ranges");
+            Bump(counts, mesh.Materials.Count == ranges ? "one per draw range"
+                : mesh.Materials.Count + " materials for " + ranges + " ranges");
 
-            foreach (ulong id in mesh.MaterialIds)
+            foreach (ulong id in mesh.Materials.Select(m => m.MaterialId))
             {
                 if (classes.TryGetValue(id, out uint hash))
                 {
@@ -888,7 +977,7 @@ static int CheckMaterials(string forgePath, int limit)
                 if (what == "not found at all" && shown < 8)
                 {
                     Console.WriteLine("  " + resource.Name + "  ->  0x" + id.ToString("X")
-                        + "   (" + mesh.MaterialIds.Count + " materials)");
+                        + "   (" + mesh.Materials.Count + " materials)");
                     shown++;
                 }
             }
@@ -950,7 +1039,7 @@ static int ExportFbx(string path, string name, string output, string? cachePath)
     var mesh = Mesh.Read(resource.Data);
     if (mesh.Geometry == GeometryKind.None)
     {
-        Console.WriteLine(resource.Name + " has no geometry to write: " + mesh.Note);
+        Console.WriteLine(resource.Name + " has no geometry to write");
         return 1;
     }
 
@@ -1153,7 +1242,7 @@ static int ShowRanges(string path, string name)
 }
 
 static int Index(Mesh mesh, int position) =>
-    mesh.Data!.Indices32Bit
+    mesh.Data.Indices32Bit
         ? BitConverter.ToInt32(mesh.IndexBuffer, position * 4)
         : BitConverter.ToUInt16(mesh.IndexBuffer, position * 2);
 
@@ -2007,6 +2096,715 @@ static int ApplyTimeCycle(string path, string name, string input, string output)
     return 0;
 }
 
+static int CheckSkeletonsAgainstDocs(string path)
+{
+    (string Name, uint Hash)[] documented =
+    [
+        ("Skeleton", 0x24AECB7C), ("Bone", 0x95741049), ("BoneHandle", 0xC11EA419),
+        ("Reference", 0x2C52CBB0), ("Hips", 0xDED10611), ("Head", 0x07C159A2),
+        ("Neck1", 0xB05FD12B), ("LeftShoulder", 0x2D4660A8), ("LeftArm", 0xEB830ADA),
+        ("LeftForeArm", 0x89B93A80), ("LeftHand", 0xB675F36C), ("RightHand", 0x75F94D30),
+        ("wb-gunroot", 0), ("wb-HandRight", 0x1BD2DF4E), ("wb-HandLeft", 0x68D6F1C1),
+    ];
+
+    Console.WriteLine("CRC32 of names the documentation pins down:");
+    int hashFailures = 0;
+
+    foreach (var (name, expected) in documented)
+    {
+        if (expected == 0) continue;
+        uint actual = ResourceTypes.Crc32(name);
+        bool same = actual == expected;
+        if (!same) hashFailures++;
+        Console.WriteLine($"  {(same ? "ok  " : "FAIL")}  {name,-14} 0x{actual:X8}" + (same ? "" : $"  documented 0x{expected:X8}"));
+    }
+
+    var paths = Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.data") : [path];
+    var tags = new Dictionary<string, int>();
+    int seen = 0, subtreeOk = 0, subtreeDescendants = 0, subtreeBad = 0, singleRoot = 0, multiRoot = 0;
+    bool sawAverage = false;
+
+    foreach (string each in paths)
+    {
+        DataFile file;
+        try { file = DataFile.Read(each); }
+        catch { continue; }
+
+        foreach (var resource in file.Resources.Where(r => r.ClassHash == Skeleton.ClassHash))
+        {
+            SkeletonAsset asset;
+            try { asset = Skeleton.ReadAsset(resource.Data); }
+            catch { continue; }
+
+            seen++;
+            foreach (var bone in asset.Bones)
+            {
+                Bump(tags, "parent pointer tag " + bone.ParentPointerTag);
+                Bump(tags, "mirror pointer tag " + bone.MirrorPointerTag);
+            }
+
+            if (SubtreeSizesMatch(asset, includingSelf: true)) subtreeOk++;
+            else if (SubtreeSizesMatch(asset, includingSelf: false)) subtreeDescendants++;
+            else subtreeBad++;
+            int roots = asset.Bones.Count(b => b.ParentIndex < 0);
+            if (roots == 1) singleRoot++; else multiRoot++;
+
+            if (resource.Name.Contains("GR_PCF_Skeleton_Average", StringComparison.OrdinalIgnoreCase) && !sawAverage)
+            {
+                sawAverage = true;
+                ReportAverageRig(resource.Name, resource.Data.Length, asset, documented);
+            }
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"{seen} Skeleton(s) read");
+    Console.WriteLine($"  ChildrenCount = subtree including self : {subtreeOk}");
+    Console.WriteLine($"  ChildrenCount = descendants only       : {subtreeDescendants}");
+    Console.WriteLine($"  neither                               : {subtreeBad}");
+    Console.WriteLine($"  exactly one root                     : {singleRoot} yes, {multiRoot} no");
+    Report("object-pointer tags actually seen:", tags);
+
+    if (!sawAverage)
+        Console.WriteLine("GR_PCF_Skeleton_Average was not in this path, so its numbers were not checked.");
+
+    return hashFailures == 0 && subtreeBad == 0 ? 0 : 1;
+}
+
+static int[] SubtreeSizes(SkeletonAsset asset)
+{
+    var size = new int[asset.Bones.Count];
+
+    for (int i = asset.Bones.Count - 1; i >= 0; i--)
+    {
+        size[i]++;
+        int parent = asset.Bones[i].ParentIndex;
+        if (parent >= 0)
+            size[parent] += size[i];
+    }
+
+    return size;
+}
+
+static bool SubtreeSizesMatch(SkeletonAsset asset, bool includingSelf)
+{
+    var size = SubtreeSizes(asset);
+
+    for (int i = 0; i < asset.Bones.Count; i++)
+        if (asset.Bones[i].ChildrenCount != size[i] - (includingSelf ? 0 : 1))
+            return false;
+
+    return true;
+}
+
+static void ReportAverageRig(string name, int bytes, SkeletonAsset asset, (string Name, uint Hash)[] documented)
+{
+    Console.WriteLine();
+    Console.WriteLine($"{name}, the rig the documentation describes:");
+    Console.WriteLine($"  size          {bytes} bytes          (documented 14006)");
+    Console.WriteLine($"  bones         {asset.Bones.Count}                    (documented 100)");
+    Console.WriteLine($"  roots         {asset.Bones.Count(b => b.ParentIndex < 0)}                      (documented 1)");
+
+    int deepest = 0;
+    foreach (var bone in asset.Bones)
+    {
+        int depth = 0;
+        for (int at = bone.ParentIndex; at >= 0; at = asset.Bones[at].ParentIndex) depth++;
+        deepest = Math.Max(deepest, depth);
+    }
+    Console.WriteLine($"  depth         {deepest}                     (documented 12)");
+
+    float low = float.MaxValue, high = float.MinValue;
+    foreach (var bone in asset.Bones)
+    {
+        low = Math.Min(low, bone.GlobalPosition.Z);
+        high = Math.Max(high, bone.GlobalPosition.Z);
+    }
+    Console.WriteLine($"  height in Z   {high - low:0.###} m               (documented 1.77 m, Z up)");
+
+    foreach (var (label, hash) in documented)
+    {
+        if (hash == 0 || label is "Skeleton" or "Bone" or "BoneHandle" || label.StartsWith("wb-")) continue;
+        int index = asset.Bones.FindIndex(b => b.Name == hash);
+        string where = index < 0 ? "not in this rig" : $"index {index}, global z {asset.Bones[index].GlobalPosition.Z:0.###}";
+        Console.WriteLine($"  {label,-14} {where}");
+    }
+
+    int hand = asset.Bones.FindIndex(b => b.Name == 0xB675F36C);
+    if (hand >= 0)
+    {
+        var chain = new List<string>();
+        for (int at = hand; at >= 0; at = asset.Bones[at].ParentIndex)
+            chain.Add(ResourceTypes.NameOf(asset.Bones[at].Name) is { Length: > 0 } named && !named.StartsWith("0x")
+                ? named : "#" + at);
+        Console.WriteLine("  LeftHand chain up to the root: " + string.Join(" <- ", chain));
+    }
+}
+
+static int CheckSkeletonRoundTrips(string path)
+{
+    var paths = Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.data") : [path];
+    int seen = 0;
+    int failed = 0;
+    int bones = 0;
+    var problems = new Dictionary<string, int>();
+
+    foreach (string each in paths)
+    {
+        DataFile file;
+        try { file = DataFile.Read(each); }
+        catch { continue; }
+
+        foreach (var resource in file.Resources.Where(r => r.ClassHash == Skeleton.ClassHash))
+        {
+            seen++;
+            try
+            {
+                var asset = Skeleton.ReadAsset(resource.Data);
+                byte[] rebuilt = Skeleton.Write(asset);
+                if (!rebuilt.AsSpan().SequenceEqual(resource.Data))
+                {
+                    failed++;
+                    Bump(problems, "roundtrip differs at 0x" + FirstDifference(resource.Data, rebuilt).ToString("X"));
+                    continue;
+                }
+                bones += asset.Bones.Count;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Bump(problems, ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+    }
+
+    Console.WriteLine($"{seen} Skeleton(s), {failed} failure(s), {bones} bone(s) read");
+    if (problems.Count > 0)
+        Report("problems:", problems);
+    return failed == 0 ? 0 : 1;
+}
+
+static Resource? FindMesh(DataFile file, string name)
+{
+    var resource = file.Resources.FirstOrDefault(r => r.ClassHash == Mesh.ClassHash
+        && r.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
+
+    if (resource is null)
+        Console.WriteLine("no mesh matching " + name);
+
+    return resource;
+}
+
+static int ExportObj(string path, string name, string output)
+{
+    var file = DataFile.Read(path);
+    if (FindMesh(file, name) is not { } resource)
+        return 1;
+
+    var mesh = Mesh.Read(resource.Data);
+    if (mesh.Geometry == GeometryKind.None)
+    {
+        Console.WriteLine(resource.Name + " has no geometry to write");
+        return 1;
+    }
+
+    ObjFile.Write(mesh, resource.Name, output);
+    Console.WriteLine(resource.Name + " -> " + output + "  ("
+        + MeshGeometry.ReadVertices(mesh).Length + " vertices, "
+        + MeshGeometry.ReadTriangles(mesh).Length / 3 + " triangles, "
+        + mesh.Data.Standard.Count + " draw range(s))");
+    return 0;
+}
+
+static int ImportObj(string path, string name, string input, string output)
+{
+    var file = DataFile.Read(path);
+    if (FindMesh(file, name) is not { } resource)
+        return 1;
+
+    var mesh = Mesh.Read(resource.Data);
+    var obj = ObjFile.Read(input);
+    var result = MeshImport.Replace(mesh, obj);
+
+    resource.Data = mesh.Write();
+    Mesh.Read(resource.Data);
+
+    file.Write(output);
+    var written = DataFile.Read(output);
+    var check = written.Resources.FirstOrDefault(r => r.Id == resource.Id && r.ClassHash == Mesh.ClassHash);
+
+    if (check is null || !check.Data.AsSpan().SequenceEqual(resource.Data))
+        throw new InvalidDataException("The written data file does not hold the mesh that was just built.");
+
+    Console.WriteLine($"{resource.Name} <- {input}");
+    Console.WriteLine($"  {result.Vertices} vertices, {result.Triangles} triangles, {result.Ranges} draw range(s)");
+    Console.WriteLine($"  scale {result.QuantizationFactor:0.####}, uv {result.UvQuantizationFactor:0.####}"
+        + (result.TransferredSkinning ? ", joint weights taken from the nearest original vertex" : ""));
+    Console.WriteLine("written -> " + output + "  (reopened and verified)");
+    return 0;
+}
+
+static int ExportGltf(string path, string name, string output, string? cachePath)
+{
+    var file = DataFile.Read(path);
+    if (FindMesh(file, name) is not { } resource)
+        return 1;
+
+    var mesh = Mesh.Read(resource.Data);
+    if (mesh.Geometry == GeometryKind.None)
+    {
+        Console.WriteLine(resource.Name + " has no geometry to write");
+        return 1;
+    }
+
+    var skeleton = FindSkeleton(file.Resources, mesh.Bones);
+    if (skeleton is null && cachePath is not null)
+        skeleton = SkeletonIndex.Load(cachePath)?.FindBest(mesh.Bones.Select(b => b.Name));
+
+    GltfFile.Write(mesh, resource.Name, output, skeleton);
+    var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
+
+    Console.WriteLine(resource.Name + " -> " + output);
+    Console.WriteLine($"  {MeshGeometry.ReadVertices(mesh).Length} vertices, {mesh.Data.Standard.Count} primitive(s), "
+        + $"{layout.UvCount} uv set(s)" + (layout.HasColor ? ", vertex colours" : "")
+        + (layout.IsSkinned ? $", skin over {mesh.Bones.Count} bones"
+            + (skeleton is null ? " without a hierarchy" : $" with their hierarchy from {skeleton.Count} skeleton bones") : ""));
+    return 0;
+}
+
+static int ImportGltf(string path, string name, string input, string output)
+{
+    var file = DataFile.Read(path);
+    if (FindMesh(file, name) is not { } resource)
+        return 1;
+
+    var mesh = Mesh.Read(resource.Data);
+    var result = MeshImport.Replace(mesh, GltfFile.Read(input));
+
+    resource.Data = mesh.Write();
+    Mesh.Read(resource.Data);
+    file.Write(output);
+
+    var written = DataFile.Read(output);
+    var check = written.Resources.FirstOrDefault(r => r.Id == resource.Id && r.ClassHash == Mesh.ClassHash);
+
+    if (check is null || !check.Data.AsSpan().SequenceEqual(resource.Data))
+        throw new InvalidDataException("The written data file does not hold the mesh that was just built.");
+
+    Console.WriteLine($"{resource.Name} <- {input}");
+    Console.WriteLine($"  {result.Vertices} vertices, {result.Triangles} triangles, {result.Ranges} draw range(s)");
+    Console.WriteLine($"  scale {result.QuantizationFactor:0.####}, uv {result.UvQuantizationFactor:0.####}"
+        + (result.CarriedSkinning ? ", joint weights taken from the file" : "")
+        + (result.TransferredSkinning ? ", joint weights taken from the nearest original vertex" : "")
+        + (result.PatchedVertices > 0
+            ? $", {result.PatchedVertices} vertex(es) had no bone this mesh knows and took the nearest original weights" : ""));
+    Console.WriteLine("written -> " + output + "  (reopened and verified)");
+    return 0;
+}
+
+static int CheckGltfRoundTrips(string path, int limit)
+{
+    var paths = Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.data") : [path];
+    string scratch = Path.Combine(Path.GetTempPath(), "wl-gltfcycle.glb");
+    int seen = 0, failed = 0;
+    var problems = new Dictionary<string, int>();
+
+    foreach (string each in paths)
+    {
+        if (seen >= limit) break;
+
+        DataFile file;
+        try { file = DataFile.Read(each); }
+        catch { continue; }
+
+        foreach (var resource in file.Resources)
+        {
+            if (resource.ClassHash != Mesh.ClassHash || seen >= limit) continue;
+
+            Mesh mesh;
+            try
+            {
+                mesh = Mesh.Read(resource.Data);
+                if (mesh.Geometry == GeometryKind.None || !VertexLayout.IsKnown(mesh.VertexFormat)) continue;
+            }
+            catch { continue; }
+
+            seen++;
+            try
+            {
+                var before = MeshGeometry.ReadVertices(mesh);
+                var cornersBefore = MeshGeometry.ReadTriangles(mesh);
+                var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
+
+                GltfFile.Write(mesh, resource.Name, scratch);
+                var rebuilt = Mesh.Read(resource.Data);
+                var result = MeshImport.Replace(rebuilt, GltfFile.Read(scratch));
+                rebuilt = Mesh.Read(rebuilt.Write());
+
+                var after = MeshGeometry.ReadVertices(rebuilt);
+                var cornersAfter = MeshGeometry.ReadTriangles(rebuilt);
+
+                if (cornersAfter.Length != cornersBefore.Length)
+                {
+                    failed++;
+                    Bump(problems, "triangle count changed");
+                    continue;
+                }
+
+                float span = Math.Max(1e-6f, Math.Max(mesh.ExtentMax[0] - mesh.ExtentMin[0],
+                    Math.Max(mesh.ExtentMax[1] - mesh.ExtentMin[1], mesh.ExtentMax[2] - mesh.ExtentMin[2])));
+                float worst = 0, worstUv = 0;
+                int colourKept = 0, colourTotal = 0, jointKept = 0, jointTotal = 0;
+
+                for (int i = 0; i < cornersBefore.Length; i++)
+                {
+                    var a = before[cornersBefore[i]];
+                    var b = after[cornersAfter[i]];
+                    worst = Math.Max(worst, System.Numerics.Vector3.Distance(a.Position, b.Position));
+
+                    for (int set = 0; set < Math.Min(a.Uv.Length, b.Uv.Length); set++)
+                        worstUv = Math.Max(worstUv, System.Numerics.Vector2.Distance(a.Uv[set], b.Uv[set]));
+
+                    if (layout.HasColor)
+                    {
+                        colourTotal++;
+                        if (a.Color == b.Color) colourKept++;
+                    }
+
+                    if (layout.IsSkinned)
+                    {
+                        jointTotal++;
+                        if (a.JointIndices.AsSpan().SequenceEqual(b.JointIndices)
+                            && a.JointWeights.AsSpan().SequenceEqual(b.JointWeights)) jointKept++;
+                    }
+                }
+
+                Bump(problems, worst / span < 0.005f ? "corners kept within half a percent" : "corners moved further");
+                if (layout.UvCount > 0)
+                    Bump(problems, worstUv < 0.01f ? "every uv set kept" : "uv drifted more than 0.01");
+                if (colourTotal > 0)
+                    Bump(problems, colourKept == colourTotal ? "vertex colours kept exactly" : "vertex colours changed");
+                if (jointTotal > 0)
+                    Bump(problems, jointKept == jointTotal ? "joints and weights kept exactly" : "joints or weights changed");
+                if (layout.IsSkinned && !result.CarriedSkinning)
+                    Bump(problems, "skinning did not survive the file");
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Bump(problems, ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+    }
+
+    Console.WriteLine(seen + " mesh(es) through glTF and back, " + failed + " failure(s)");
+    Report("result:", problems);
+    return failed == 0 ? 0 : 1;
+}
+
+static int CheckObjRoundTrips(string path, int limit)
+{
+    var paths = Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.data") : [path];
+    string scratch = Path.Combine(Path.GetTempPath(), "wl-objcycle.obj");
+    int seen = 0, failed = 0;
+    var problems = new Dictionary<string, int>();
+
+    foreach (string each in paths)
+    {
+        if (seen >= limit) break;
+
+        DataFile file;
+        try { file = DataFile.Read(each); }
+        catch { continue; }
+
+        foreach (var resource in file.Resources)
+        {
+            if (resource.ClassHash != Mesh.ClassHash) continue;
+            if (seen >= limit) break;
+
+            Mesh mesh;
+            try
+            {
+                mesh = Mesh.Read(resource.Data);
+                if (mesh.Geometry == GeometryKind.None || !VertexLayout.IsKnown(mesh.VertexFormat)) continue;
+            }
+            catch { continue; }
+
+            seen++;
+            try
+            {
+                var before = MeshGeometry.ReadVertices(mesh);
+                var cornersBefore = MeshGeometry.ReadTriangles(mesh);
+
+                ObjFile.Write(mesh, resource.Name, scratch);
+                var rebuilt = Mesh.Read(resource.Data);
+                MeshImport.Replace(rebuilt, ObjFile.Read(scratch));
+                rebuilt = Mesh.Read(rebuilt.Write());
+
+                var after = MeshGeometry.ReadVertices(rebuilt);
+                var cornersAfter = MeshGeometry.ReadTriangles(rebuilt);
+
+                if (cornersAfter.Length != cornersBefore.Length)
+                {
+                    failed++;
+                    Bump(problems, "triangle count changed");
+                    continue;
+                }
+
+                float worst = 0;
+                float span = Math.Max(1e-6f, Math.Max(mesh.ExtentMax[0] - mesh.ExtentMin[0],
+                    Math.Max(mesh.ExtentMax[1] - mesh.ExtentMin[1], mesh.ExtentMax[2] - mesh.ExtentMin[2])));
+
+                for (int i = 0; i < cornersBefore.Length; i++)
+                    worst = Math.Max(worst, System.Numerics.Vector3.Distance(
+                        before[cornersBefore[i]].Position, after[cornersAfter[i]].Position));
+
+                Bump(problems, worst / span < 0.005f ? "corners kept within half a percent"
+                    : worst / span < 0.02f ? "corners kept within two percent"
+                    : "corners moved by more than two percent");
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Bump(problems, ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+    }
+
+    Console.WriteLine(seen + " mesh(es) through OBJ and back, " + failed + " failure(s)");
+    Report("result:", problems);
+    return failed == 0 ? 0 : 1;
+}
+
+static int CheckMeshRoundTrips(string path, int limit)
+{
+    var files = Directory.Exists(path)
+        ? Directory.EnumerateFiles(path, "*.data")
+        : [path];
+
+    int seen = 0, failed = 0, decoded = 0;
+    var formats = new Dictionary<string, int>();
+    var problems = new Dictionary<string, int>();
+
+    foreach (string file in files)
+    {
+        if (seen >= limit) break;
+
+        DataFile data;
+        try { data = DataFile.Read(file); }
+        catch { continue; }
+
+        foreach (var resource in data.Resources)
+        {
+            if (resource.ClassHash != Mesh.ClassHash) continue;
+            if (seen >= limit) break;
+            seen++;
+
+            Mesh mesh;
+            try
+            {
+                mesh = Mesh.Read(resource.Data);
+                byte[] rebuilt = mesh.Write();
+
+                if (!rebuilt.AsSpan().SequenceEqual(resource.Data))
+                {
+                    failed++;
+                    Bump(problems, "roundtrip differs at 0x" + FirstDifference(resource.Data, rebuilt).ToString("X"));
+                    continue;
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Bump(problems, ex.GetType().Name + ": " + ex.Message);
+                continue;
+            }
+
+            Bump(formats, "format " + mesh.VertexFormat + ", stride " + mesh.VertexStride);
+
+            if (mesh.Geometry == GeometryKind.None) continue;
+
+            try
+            {
+                var vertices = MeshGeometry.ReadVertices(mesh);
+                MeshGeometry.ReadTriangles(mesh);
+                CheckAgainstExtents(mesh, vertices, problems);
+                decoded++;
+            }
+            catch (Exception ex)
+            {
+                Bump(problems, "decode: " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+    }
+
+    Console.WriteLine(seen + " mesh(es), " + failed + " that do not rewrite identically, " + decoded + " decoded");
+    Report("vertex formats:", formats);
+    if (problems.Count > 0)
+        Report("problems:", problems);
+    return failed == 0 ? 0 : 1;
+}
+
+static void CheckAgainstExtents(Mesh mesh, MeshVertex[] vertices, Dictionary<string, int> problems)
+{
+    if (vertices.Length == 0) return;
+
+    float slack = 0.01f * Math.Max(1e-6f, Math.Max(mesh.ExtentMax[0] - mesh.ExtentMin[0],
+        Math.Max(mesh.ExtentMax[1] - mesh.ExtentMin[1], mesh.ExtentMax[2] - mesh.ExtentMin[2])));
+
+    foreach (var vertex in vertices)
+    {
+        float[] p = [vertex.Position.X, vertex.Position.Y, vertex.Position.Z];
+        for (int a = 0; a < 3; a++)
+        {
+            if (p[a] < mesh.ExtentMin[a] - slack || p[a] > mesh.ExtentMax[a] + slack)
+            {
+                Bump(problems, "vertex outside the extents the mesh states");
+                return;
+            }
+        }
+
+        if (Math.Abs(vertex.Normal.Length() - 1) > 0.1f)
+        {
+            Bump(problems, "normal is not unit length");
+            return;
+        }
+    }
+}
+
+static int CheckBuildTableRoundTrips(string path)
+{
+    var paths = Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.data") : [path];
+    int seen = 0;
+    int failed = 0;
+    var problems = new Dictionary<string, int>();
+
+    foreach (string each in paths)
+    {
+        DataFile file;
+        try { file = DataFile.Read(each); }
+        catch { continue; }
+
+        foreach (var resource in file.Resources.Where(r => r.ClassHash == BuildTable.ClassHash))
+        {
+            seen++;
+            try
+            {
+                var asset = BuildTable.Read(resource.Data);
+                byte[] rebuilt = asset.Write();
+                if (!rebuilt.AsSpan().SequenceEqual(resource.Data))
+                {
+                    failed++;
+                    Bump(problems, "roundtrip differs at 0x" + FirstDifference(resource.Data, rebuilt).ToString("X"));
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Bump(problems, ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+    }
+
+    Console.WriteLine($"{seen} BuildTable(s), {failed} failure(s)");
+    if (problems.Count > 0)
+        Report("problems:", problems);
+    return failed == 0 ? 0 : 1;
+}
+
+static int FirstDifference(byte[] left, byte[] right)
+{
+    int count = Math.Min(left.Length, right.Length);
+    for (int i = 0; i < count; i++)
+        if (left[i] != right[i])
+            return i;
+    return count;
+}
+
+static int ScanHashes(string binaryPath, string[] hashTexts)
+{
+    var targets = hashTexts.Select(ParseHash).ToHashSet();
+    var matches = new Dictionary<uint, SortedSet<string>>();
+
+    VisitAsciiTokens(binaryPath, Record);
+    VisitUtf16LeTokens(binaryPath, Record);
+
+    foreach (uint hash in targets.Order())
+    {
+        if (matches.TryGetValue(hash, out var names))
+            Console.WriteLine($"0x{hash:X8}  {string.Join(" | ", names)}");
+        else
+            Console.WriteLine($"0x{hash:X8}  <no literal match>");
+    }
+
+    return 0;
+
+    void Record(string candidate, long _)
+    {
+        uint hash = ResourceTypes.Crc32(candidate);
+        if (!targets.Contains(hash))
+            return;
+
+        if (!matches.TryGetValue(hash, out var names))
+            matches[hash] = names = [];
+        names.Add(candidate);
+    }
+}
+
+static uint ParseHash(string text)
+{
+    if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        return Convert.ToUInt32(text[2..], 16);
+    return Convert.ToUInt32(text, 16);
+}
+
+static int ApplyGraphicsProfile(string path, string name, string profilePath, string? output)
+{
+    var file = DataFile.Read(path);
+    var resource = file.Resources.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    if (resource is null)
+    {
+        Console.WriteLine("no resource named " + name);
+        return 1;
+    }
+
+    var cycle = TimeCycle.Read(resource.Data);
+    var profile = GraphicsProfile.Load(profilePath);
+    var result = profile.Apply(cycle, resource.Name);
+
+    Console.WriteLine($"{result.Name}{(result.Experimental ? " [EXPERIMENTAL]" : "")}: "
+        + $"{result.Changes.Count} curve(s), {result.ChangedValues} value(s)");
+    foreach (var change in result.Changes)
+        Console.WriteLine($"  {change.Label}: {change.BeforeMinimum:0.#####}..{change.BeforeMaximum:0.#####} "
+            + $"-> {change.AfterMinimum:0.#####}..{change.AfterMaximum:0.#####} ({change.ChangedValues} values)");
+
+    if (output is null)
+    {
+        Console.WriteLine("preview only; pass out.data to write the modified data file");
+        return 0;
+    }
+
+    resource.Data = cycle.Write();
+    file.Write(output);
+    var written = DataFile.Read(output);
+    if (written.Resources.Count != file.Resources.Count)
+        throw new InvalidDataException("The written data file has a different resource count.");
+
+    for (int i = 0; i < file.Resources.Count; i++)
+    {
+        var expected = file.Resources[i];
+        var actual = written.Resources[i];
+        if (expected.Id != actual.Id || expected.ClassHash != actual.ClassHash
+            || expected.Name != actual.Name || !expected.Data.AsSpan().SequenceEqual(actual.Data))
+            throw new InvalidDataException($"The written data file failed verification at resource {i} ({expected.Name}).");
+    }
+
+    Console.WriteLine("written -> " + output);
+    Console.WriteLine($"verified {written.Resources.Count} resource(s) after reopening the output");
+    return 0;
+}
+
 // Reads every time cycle in an archive and writes it straight back. The resource
 // carries eight bytes per entry that nothing derives, and object ids that are
 // handed out again on writing, so "identical" is the only answer that proves both
@@ -2490,6 +3288,85 @@ static bool IsAsciiLetter(char value) => value is >= 'A' and <= 'Z' or >= 'a' an
 // another simply carries its id, so a scan for that pattern finds the holders
 // without knowing any of the formats involved. Good enough to answer whether a
 // thing is used at all, which is otherwise hard to tell.
+// Before changing a mesh for a real test it matters which archive the game
+// actually loads. The same resource often sits in the base archive, in the
+// world map and in a patch, and only the last one wins.
+static int WhereIsResource(string gameFolder, string name, bool includeWorldMap)
+{
+    var archives = ArchiveLocator.Find(gameFolder);
+    if (archives.Count == 0)
+    {
+        Console.WriteLine("no forge archives in " + gameFolder);
+        return 1;
+    }
+
+    var skipped = new List<string>();
+    var found = new List<(string Archive, string Container, string Resource, string Kind, int Bytes)>();
+
+    foreach (string path in archives)
+    {
+        if (!includeWorldMap && Path.GetFileName(path).Contains("WorldMap", StringComparison.OrdinalIgnoreCase))
+        {
+            skipped.Add(Path.GetFileName(path));
+            continue;
+        }
+
+        ForgeArchive archive;
+        try { archive = ForgeArchive.Open(path); }
+        catch { continue; }
+
+        using (archive)
+        {
+            foreach (var entry in archive.Entries)
+            {
+                if (entry.FileExtension != ".data") continue;
+
+                DataFile file;
+                try
+                {
+                    using var stream = new MemoryStream(archive.ReadEntry(entry));
+                    file = DataFile.Read(stream);
+                }
+                catch { continue; }
+
+                foreach (var resource in file.Resources)
+                {
+                    if (!resource.Name.Contains(name, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    found.Add((Path.GetFileName(path), entry.Name, resource.Name,
+                        ResourceTypes.NameOf(resource.ClassHash), resource.Data.Length));
+                }
+            }
+        }
+    }
+
+    if (found.Count == 0)
+    {
+        Console.WriteLine("nothing matching " + name);
+        if (skipped.Count > 0)
+            Console.WriteLine("(the world map archives were skipped; add --all to search them too)");
+        return 1;
+    }
+
+    foreach (var perResource in found.GroupBy(f => f.Resource).OrderBy(g => g.Key))
+    {
+        Console.WriteLine(perResource.Key + "  (" + perResource.First().Kind + ")");
+
+        foreach (var hit in perResource)
+            Console.WriteLine($"    {hit.Archive,-42} container \"{hit.Container}\"  {hit.Bytes} bytes");
+
+        if (perResource.Count() > 1)
+            Console.WriteLine($"    -> {perResource.Count()} copies. Change every one of them, or the game keeps showing an older copy.");
+
+        Console.WriteLine();
+    }
+
+    if (skipped.Count > 0)
+        Console.WriteLine($"{skipped.Count} world map archive(s) were skipped because they are huge; add --all to search them too.");
+
+    return 0;
+}
+
 static int FindReferences(string path, string what)
 {
     var file = DataFile.Read(path);

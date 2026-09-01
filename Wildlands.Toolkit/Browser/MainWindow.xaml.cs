@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     readonly ChangeSet _changes = new();
     SkeletonIndex? _skeletonIndex;
     bool _buildingSkeletonIndex;
+    bool _loading;
     List<BrowserItem> _shown = [];
     TextureView? _preview;
     readonly List<TextureWindow> _textureWindows = [];
@@ -184,7 +185,7 @@ public partial class MainWindow : Window
             string folder = _settings.GamePath;
             var index = await Task.Run(() =>
             {
-                var archives = Directory.GetFiles(folder, "*.forge").Select(ForgeArchive.Open).ToList();
+                var archives = ArchiveLocator.Find(folder).Select(ForgeArchive.Open).ToList();
                 int done = 0;
 
                 try
@@ -230,22 +231,28 @@ public partial class MainWindow : Window
             return;
         }
 
-        var archives = Directory.GetFiles(_settings.GamePath, "*.forge")
+        var found = ArchiveLocator.Find(_settings.GamePath);
+        var archives = found
             .Select(path => new ArchiveItem(path))
             .OrderBy(a => a.Name)
             .ToList();
 
         ArchiveList.ItemsSource = archives;
-        SetStatus($"{archives.Count} archives in {_settings.GamePath}");
+
+        int inDlc = found.Count(path => Path.GetFileName(Path.GetDirectoryName(path) ?? "")
+            .StartsWith("dlc_", StringComparison.OrdinalIgnoreCase));
+
+        SetStatus($"{archives.Count} archives in {_settings.GamePath}"
+            + (inDlc > 0 ? $", {inDlc} of them in dlc folders" : ""));
     }
 
-    void ArchiveList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    async void ArchiveList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (ArchiveList.SelectedItem is ArchiveItem archive)
-            Navigate(new Location(archive.Path));
+            await Navigate(new Location(archive.Path));
     }
 
-    void OpenFile_Click(object sender, RoutedEventArgs e)
+    async void OpenFile_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
@@ -254,12 +261,12 @@ public partial class MainWindow : Window
         };
 
         if (dialog.ShowDialog() == true)
-            Navigate(new Location(dialog.FileName));
+            await Navigate(new Location(dialog.FileName));
     }
 
-    void Navigate(Location location)
+    async Task Navigate(Location location)
     {
-        if (!Go(location))
+        if (!await Go(location))
             return;
 
         if (_historyIndex < _history.Count - 1)
@@ -270,38 +277,54 @@ public partial class MainWindow : Window
         UpdateNavigationButtons();
     }
 
-    bool Go(Location location)
+    async Task<bool> Go(Location location)
     {
+        if (_loading)
+            return false;
+
         RememberPlace();
+        var watch = Stopwatch.StartNew();
+        SetLoading(true, location.IsArchiveRoot
+            ? $"Opening {Path.GetFileName(location.ArchivePath)}…"
+            : $"Loading {location.EntryName}…");
 
         try
         {
             if (_archive is null || _archive.FilePath != location.ArchivePath)
             {
-                _archives?.Dispose();
-                _archive?.Dispose();
-                _archive = ForgeArchive.Open(location.ArchivePath);
+                var oldArchives = _archives;
+                var oldArchive = _archive;
+                _archives = null;
+                _archive = null;
+
+                _archive = await Task.Run(() =>
+                {
+                    oldArchives?.Dispose();
+                    oldArchive?.Dispose();
+                    return ForgeArchive.Open(location.ArchivePath);
+                });
                 _archives = new ArchiveSet(_archive);
                 _settings.AddRecent(location.ArchivePath);
                 _settings.Save();
             }
 
-            var watch = Stopwatch.StartNew();
-
             if (location.IsArchiveRoot)
             {
                 _shown = _archive.Entries.Select(BrowserItem.FromEntry).ToList();
                 watch.Stop();
-                SetStatus($"{_shown.Count} entries in {watch.ElapsedMilliseconds} ms");
+                SetStatus($"{_shown.Count} entries loaded in {Elapsed(watch)}");
             }
             else
             {
                 var entry = _archive.Entries.First(x => x.Index == location.EntryIndex);
-                using var stream = new MemoryStream(_archive.ReadEntry(entry));
-                var file = DataFile.Read(stream);
-                _shown = file.Resources.Select(BrowserItem.FromResource).ToList();
+                _shown = await Task.Run(() =>
+                {
+                    using var stream = new MemoryStream(_archive.ReadEntry(entry));
+                    var file = DataFile.Read(stream);
+                    return file.Resources.Select(BrowserItem.FromResource).ToList();
+                });
                 watch.Stop();
-                SetStatus($"{_shown.Count} resources in {watch.ElapsedMilliseconds} ms");
+                SetStatus($"{_shown.Count} resources loaded in {Elapsed(watch)}");
             }
 
             PathText.Text = location.Display;
@@ -312,9 +335,54 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_archive is null)
+            {
+                _shown = [];
+                _showing = null;
+                PathText.Text = "No archive open";
+                ApplyFilter();
+            }
+
             ShowError($"Could not open {location.Display}", ex);
             return false;
         }
+        finally
+        {
+            SetLoading(false);
+        }
+    }
+
+    static string Elapsed(Stopwatch watch) => watch.Elapsed.TotalSeconds >= 1
+        ? $"{watch.Elapsed.TotalSeconds:0.0} s"
+        : $"{watch.ElapsedMilliseconds} ms";
+
+    void SetLoading(bool loading, string status = "")
+    {
+        _loading = loading;
+        ArchiveLoadProgress.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveLoadingOverlay.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveLoadingText.Text = status;
+        FilterBox.IsEnabled = !loading;
+        Mouse.OverrideCursor = loading ? Cursors.Wait : null;
+
+        if (loading)
+        {
+            ArchiveLoadingOverlay.Focus();
+            ExtractButton.IsEnabled = false;
+            ExportButton.IsEnabled = false;
+            ReplaceButton.IsEnabled = false;
+            ApplyButton.IsEnabled = false;
+            DiscardButton.IsEnabled = false;
+            SetStatus(status);
+        }
+        else
+        {
+            ExtractButton.IsEnabled = ItemList.SelectedItems.Count > 0;
+            UpdateResourceButtons();
+            UpdateChangeButtons();
+        }
+
+        UpdateNavigationButtons();
     }
 
     void RememberPlace()
@@ -362,7 +430,7 @@ public partial class MainWindow : Window
         return null;
     }
 
-    void ItemList_DoubleClick(object sender, MouseButtonEventArgs e)
+    async void ItemList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (ItemList.SelectedItem is not BrowserItem item)
             return;
@@ -374,42 +442,44 @@ public partial class MainWindow : Window
         }
 
         if (item.Entry is not null && item.CanOpen)
-            Navigate(new Location(_archive!.FilePath, item.Entry.Index, item.Name));
+            await Navigate(new Location(_archive!.FilePath, item.Entry.Index, item.Name));
     }
 
-    void Back_Click(object sender, RoutedEventArgs e)
+    async void Back_Click(object sender, RoutedEventArgs e)
     {
         if (_historyIndex <= 0)
             return;
 
-        _historyIndex--;
-        Go(_history[_historyIndex]);
+        int next = _historyIndex - 1;
+        if (await Go(_history[next]))
+            _historyIndex = next;
         UpdateNavigationButtons();
     }
 
-    void Forward_Click(object sender, RoutedEventArgs e)
+    async void Forward_Click(object sender, RoutedEventArgs e)
     {
         if (_historyIndex >= _history.Count - 1)
             return;
 
-        _historyIndex++;
-        Go(_history[_historyIndex]);
+        int next = _historyIndex + 1;
+        if (await Go(_history[next]))
+            _historyIndex = next;
         UpdateNavigationButtons();
     }
 
-    void Up_Click(object sender, RoutedEventArgs e)
+    async void Up_Click(object sender, RoutedEventArgs e)
     {
         if (_historyIndex < 0 || _history[_historyIndex].IsArchiveRoot)
             return;
 
-        Navigate(_history[_historyIndex].Parent);
+        await Navigate(_history[_historyIndex].Parent);
     }
 
     void UpdateNavigationButtons()
     {
-        BackButton.IsEnabled = _historyIndex > 0;
-        ForwardButton.IsEnabled = _historyIndex < _history.Count - 1;
-        UpButton.IsEnabled = _historyIndex >= 0 && !_history[_historyIndex].IsArchiveRoot;
+        BackButton.IsEnabled = !_loading && _historyIndex > 0;
+        ForwardButton.IsEnabled = !_loading && _historyIndex < _history.Count - 1;
+        UpButton.IsEnabled = !_loading && _historyIndex >= 0 && !_history[_historyIndex].IsArchiveRoot;
     }
 
     void Extract_Click(object sender, RoutedEventArgs e)
@@ -489,6 +559,9 @@ public partial class MainWindow : Window
         MenuExport.IsEnabled = _preview is not null || _previewMesh is not null || _previewSet is not null;
 
         MenuReplace.IsEnabled = item?.Resource is not null || _preview is not null;
+        MenuReplace.Header = item?.Resource?.ClassHash == Mesh.ClassHash ? "Replace geometry..." : "Replace...";
+        MenuReplaceRaw.IsEnabled = item?.Resource is not null;
+        UpdateResourceButtons();
 
         MenuCopyName.IsEnabled = item is not null;
         MenuCopyId.IsEnabled = item is { Id: not 0 };
@@ -525,24 +598,48 @@ public partial class MainWindow : Window
         if (ItemList.SelectedItem is not BrowserItem item || item.Resource is null || _showing is null)
             return;
 
-        var dialog = new OpenFileDialog { Title = $"Replace {item.Name}" };
-        if (dialog.ShowDialog() != true)
+        if (item.Resource.ClassHash == Mesh.ClassHash)
+        {
+            ReplaceMesh(item);
+            return;
+        }
+
+        ReplaceRawResource(item);
+    }
+
+    void MenuReplaceRaw_Click(object sender, RoutedEventArgs e)
+    {
+        if (ItemList.SelectedItem is BrowserItem item && item.Resource is not null)
+            ReplaceRawResource(item);
+    }
+
+    void ReplaceRawResource(BrowserItem item)
+    {
+        if (item.Resource is null || _showing is null)
             return;
 
-        byte[] data;
-        try
-        {
-            data = File.ReadAllBytes(dialog.FileName);
-        }
-        catch (Exception ex)
-        {
-            ShowError($"Could not read {Path.GetFileName(dialog.FileName)}", ex);
+        var data = RawReplace.Choose(this, item.Resource, _settings, out string summary);
+        if (data is null)
             return;
-        }
 
         _changes.Set(new PendingChange(_showing.ArchivePath, _showing.EntryIndex, _showing.EntryName, item.Index, item.Name, data));
 
-        SetStatus($"{item.Name}: {item.Size} -> {data.Length} bytes, waiting for Apply");
+        SetStatus($"{item.Name}: {summary}, waiting for Apply");
+        UpdateChangeButtons();
+    }
+
+    void ReplaceMesh(BrowserItem item)
+    {
+        if (item.Resource is null || _showing is null)
+            return;
+
+        var rebuilt = MeshImporter.Replace(this, item.Resource.Data, item.Name, _settings, out string summary);
+        if (rebuilt is null)
+            return;
+
+        _changes.Set(new PendingChange(_showing.ArchivePath, _showing.EntryIndex, _showing.EntryName, item.Index, item.Name, rebuilt));
+
+        SetStatus($"{item.Name}: {summary}, waiting for Apply");
         UpdateChangeButtons();
     }
 
@@ -623,13 +720,13 @@ public partial class MainWindow : Window
         {
             await Task.Run(() => _changes.Write(plans, progress));
             watch.Stop();
-            Navigate(place);
+            await Navigate(place);
             SetStatus($"Applied in {watch.Elapsed.TotalSeconds:0.0} s");
         }
         catch (System.Exception ex)
         {
             ShowError("Could not write the changes", ex);
-            Navigate(place);
+            await Navigate(place);
         }
 
         UpdateChangeButtons();
@@ -677,13 +774,13 @@ public partial class MainWindow : Window
         ApplyButton.Content = _changes.Count > 0 ? $"Apply {_changes.Count} changes" : "Apply changes";
     }
 
-    void MenuOpen_Click(object sender, RoutedEventArgs e)
+    async void MenuOpen_Click(object sender, RoutedEventArgs e)
     {
         if (ItemList.SelectedItem is not BrowserItem item)
             return;
 
         if (item.Entry is not null && item.CanOpen)
-            Navigate(new Location(_archive!.FilePath, item.Entry.Index, item.Name));
+            await Navigate(new Location(_archive!.FilePath, item.Entry.Index, item.Name));
         else
             OpenViewer();
     }
@@ -713,7 +810,7 @@ public partial class MainWindow : Window
         }
         else if (_previewMesh is not null)
         {
-            string done = MeshExporter.SaveFbx(this, _previewMesh, _previewMeshName, _previewSiblings,
+            string done = MeshExporter.Save(this, _previewMesh, _previewMeshName, _previewSiblings,
                 _skeletonIndex, _settings);
 
             if (done.Length > 0)
@@ -829,6 +926,15 @@ public partial class MainWindow : Window
     {
         ExtractButton.IsEnabled = ItemList.SelectedItems.Count > 0;
         ShowPreview(ItemList.SelectedItem as BrowserItem);
+        UpdateResourceButtons();
+    }
+
+    void UpdateResourceButtons()
+    {
+        var item = ItemList.SelectedItem as BrowserItem;
+
+        ReplaceButton.IsEnabled = item?.Resource is not null || _preview is not null;
+        ExportButton.IsEnabled = _preview is not null || _previewMesh is not null || _previewSet is not null;
     }
 
     void ShowPreview(BrowserItem? item)
@@ -1251,21 +1357,14 @@ public partial class MainWindow : Window
 
         lines.Add("");
         lines.Add($"geometry  {mesh.Geometry}");
-        lines.Add($"submeshes {mesh.SubMeshCount}");
+        lines.Add($"submeshes {mesh.SubMeshIds.Count}");
 
-        if (mesh.BoneCount > 0)
-            lines.Add($"bones     {mesh.BoneCount}");
+        if (mesh.Bones.Count > 0)
+            lines.Add($"bones     {mesh.Bones.Count}");
 
         lines.Add($"size      {mesh.ExtentMax[0] - mesh.ExtentMin[0]:0.00} x " +
                   $"{mesh.ExtentMax[1] - mesh.ExtentMin[1]:0.00} x " +
                   $"{mesh.ExtentMax[2] - mesh.ExtentMin[2]:0.00} m");
-
-        if (mesh.Data is null)
-        {
-            lines.Add("");
-            lines.Add($"       not drawn: {mesh.Note}");
-            return;
-        }
 
         int triangles = mesh.Data.Standard.Sum(range => range.TriangleCount);
         int vertices = mesh.VertexStride > 0 ? mesh.VertexBuffer.Length / mesh.VertexStride : 0;

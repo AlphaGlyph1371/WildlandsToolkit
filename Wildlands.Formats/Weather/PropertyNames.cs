@@ -2,6 +2,16 @@ using System.Collections.Generic;
 
 namespace Wildlands.Formats.Weather;
 
+public enum PropertyNameSource
+{
+    Unknown,
+    KnownProperty,
+    GuessedProperty,
+    ResourceType,
+}
+
+public readonly record struct PropertyNameMatch(string Name, PropertyNameSource Source);
+
 public static class PropertyNames
 {
     static readonly Dictionary<uint, string> ByHash = new()
@@ -84,12 +94,19 @@ public static class PropertyNames
         { 0xFA294520, "SunAzimuthAngle" },
     };
 
-    // not certain: four words over a small vocabulary, shown with a question mark
+    // Exact CRC32 matches whose paths and values fit the generated name, but which
+    // have not yet been confirmed by an in-game A/B test. The UI keeps the question
+    // mark so a plausible candidate can never be mistaken for runtime evidence.
     static readonly Dictionary<uint, string> Guessed = new()
     {
+        { 0x23C68615, "CirrusMultiScattering" },
+        { 0x4B24EF9A, "MultiScattering" },
         { 0x612ACAE7, "DayNightBlendFactor" },
         { 0x7F7810CA, "FogLightingGlobalMultiplier" },
+        { 0x81205B66, "FilmGrainStrength" },
         { 0x9BFF34EB, "SpaceFlareAdaptationFactor" },
+        { 0xDD5B0CAD, "FilmLUTBlend" },
+        { 0xF39CA435, "MoonSpriteIntensity" },
     };
 
     public static string Name(uint hash)
@@ -117,6 +134,20 @@ public static class PropertyNames
             return true;
 
         return false;
+    }
+
+    public static PropertyNameMatch Identify(uint hash)
+    {
+        if (ByHash.TryGetValue(hash, out string? known))
+            return new PropertyNameMatch(known, PropertyNameSource.KnownProperty);
+
+        if (Guessed.TryGetValue(hash, out string? guess))
+            return new PropertyNameMatch(guess, PropertyNameSource.GuessedProperty);
+
+        if (ResourceTypes.TryName(hash, out string? type))
+            return new PropertyNameMatch(type!, PropertyNameSource.ResourceType);
+
+        return new PropertyNameMatch($"0x{hash:X8}", PropertyNameSource.Unknown);
     }
 
     public static bool IsConfirmed(uint hash) => ByHash.ContainsKey(hash) || ResourceTypes.IsKnown(hash);

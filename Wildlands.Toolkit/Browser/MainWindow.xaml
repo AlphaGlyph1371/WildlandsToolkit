@@ -31,6 +31,10 @@
                     </Button>
                     <Button Content="Open file" Click="OpenFile_Click"/>
                     <Button x:Name="ExtractButton" Content="Extract" Click="Extract_Click" IsEnabled="False"/>
+                    <Button x:Name="ExportButton" Content="Export" Click="MenuExport_Click" IsEnabled="False"
+                            ToolTip="Write the selected resource out in a format you can edit"/>
+                    <Button x:Name="ReplaceButton" Content="Replace" Click="MenuReplace_Click" IsEnabled="False"
+                            ToolTip="Put an edited file back into the selected resource"/>
                     <Button x:Name="ApplyButton" Content="Apply changes" Click="Apply_Click" IsEnabled="False"/>
                     <Button x:Name="DiscardButton" Content="Discard" Click="Discard_Click" IsEnabled="False"/>
                 </StackPanel>
@@ -61,22 +65,26 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusText" Grid.Column="0" Foreground="{StaticResource TextDim}"
                            Text="Ready" TextTrimming="CharacterEllipsis"/>
 
-                <TextBlock x:Name="ScanText" Grid.Column="1" Foreground="{StaticResource TextDim}"
+                <ProgressBar x:Name="ArchiveLoadProgress" Grid.Column="1" Width="80" Height="4"
+                             IsIndeterminate="True" Visibility="Collapsed" Margin="16,0,0,0"
+                             VerticalAlignment="Center"/>
+                <TextBlock x:Name="ScanText" Grid.Column="2" Foreground="{StaticResource TextDim}"
                            Visibility="Collapsed" Margin="16,0"/>
-                <TextBlock x:Name="CountText" Grid.Column="2" Foreground="{StaticResource TextDim}"/>
+                <TextBlock x:Name="CountText" Grid.Column="3" Foreground="{StaticResource TextDim}"/>
 
-                <TextBlock Grid.Column="3" Margin="20,0,0,0" Cursor="Hand">
+                <TextBlock Grid.Column="4" Margin="20,0,0,0" Cursor="Hand">
                     <Hyperlink NavigateUri="https://github.com/AlphaGlyph1371/WildlandsToolkit"
                                RequestNavigate="Discord_Navigate"
                                Foreground="{StaticResource TextDim}"
                                ToolTip="Open the project on GitHub">GitHub</Hyperlink>
                 </TextBlock>
 
-                <TextBlock Grid.Column="4" Margin="14,0,0,0" Cursor="Hand">
+                <TextBlock Grid.Column="5" Margin="14,0,0,0" Cursor="Hand">
                     <Hyperlink NavigateUri="https://discord.gg/bUEkGCCX7t"
                                RequestNavigate="Discord_Navigate"
                                ToolTip="Open the Discord server in your browser">
@@ -243,6 +251,7 @@
                         <MenuItem x:Name="MenuExtract" Header="Extract..." Click="Extract_Click"/>
                         <MenuItem x:Name="MenuExport" Header="Export as..." Click="MenuExport_Click"/>
                         <MenuItem x:Name="MenuReplace" Header="Replace..." Click="MenuReplace_Click"/>
+                        <MenuItem x:Name="MenuReplaceRaw" Header="Replace with raw resource file..." Click="MenuReplaceRaw_Click"/>
                         <Separator/>
                         <MenuItem x:Name="MenuCopyName" Header="Copy name" Click="MenuCopyName_Click"/>
                         <MenuItem x:Name="MenuCopyId" Header="Copy id" Click="MenuCopyId_Click"/>
@@ -267,6 +276,25 @@
                     </GridView>
                 </ListView.View>
             </ListView>
+
+            <Border x:Name="ArchiveLoadingOverlay" Grid.ColumnSpan="5" Panel.ZIndex="100"
+                    Visibility="Collapsed" Background="#B8141416" Cursor="Wait" Focusable="True">
+                <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+                        MinWidth="360" Padding="28,22" CornerRadius="6"
+                        Background="{StaticResource Surface}"
+                        BorderBrush="{StaticResource Border}" BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="Loading archive" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource Text}" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="ArchiveLoadingText" Margin="0,7,0,14" MaxWidth="480"
+                                   Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"
+                                   HorizontalAlignment="Center"/>
+                        <ProgressBar Height="8" IsIndeterminate="True"
+                                     Foreground="{StaticResource Accent}"
+                                     Background="{StaticResource Background}"/>
+                    </StackPanel>
+                </Border>
+            </Border>
 
         </Grid>
     </DockPanel>

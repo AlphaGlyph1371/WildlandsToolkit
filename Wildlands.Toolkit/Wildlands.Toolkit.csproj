@@ -4,6 +4,11 @@
     <ProjectReference Include="..\Wildlands.Formats\Wildlands.Formats.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\GraphicsProfiles\*.json" Link="GraphicsProfiles\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows</TargetFramework>

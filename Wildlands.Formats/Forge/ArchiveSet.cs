@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Wildlands.Formats.Data;
 
@@ -15,6 +16,8 @@ public sealed class ArchiveSet : IDisposable
 {
     readonly ForgeArchive _archive;
     readonly Task<List<ForgeArchive>> _siblings;
+    readonly CancellationTokenSource _stopOpening = new();
+    int _disposed;
 
     public ArchiveSet(ForgeArchive archive)
     {
@@ -109,19 +112,32 @@ public sealed class ArchiveSet : IDisposable
     List<ForgeArchive> OpenSiblings()
     {
         var opened = new List<ForgeArchive>();
+        List<string> paths;
 
-        string? folder = Path.GetDirectoryName(Path.GetFullPath(_archive.FilePath));
-        if (folder is null)
-            return opened;
-
-        foreach (string path in Directory.GetFiles(folder, "*.forge"))
+        try
         {
-            if (string.Equals(path, _archive.FilePath, StringComparison.OrdinalIgnoreCase))
-                continue;
+            paths = ArchiveLocator.Siblings(_archive.FilePath);
+        }
+        catch
+        {
+            return opened;
+        }
+
+        foreach (string path in paths)
+        {
+            if (_stopOpening.IsCancellationRequested)
+                break;
 
             try
             {
-                opened.Add(ForgeArchive.Open(path));
+                var archive = ForgeArchive.Open(path);
+                if (_stopOpening.IsCancellationRequested)
+                {
+                    archive.Dispose();
+                    break;
+                }
+
+                opened.Add(archive);
             }
             catch
             {
@@ -134,7 +150,12 @@ public sealed class ArchiveSet : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        _stopOpening.Cancel();
         foreach (var sibling in _siblings.Result)
             sibling.Dispose();
+        _stopOpening.Dispose();
     }
 }

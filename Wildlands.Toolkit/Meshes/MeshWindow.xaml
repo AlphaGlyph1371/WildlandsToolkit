@@ -21,7 +21,7 @@
                             ToolTip="Draw the far side of every surface as well, a shade darker, so a hole in the geometry still reads as a hole. The material decides unless it is forced here."/>
                     <Button x:Name="SkeletonButton" Content="Skeleton" Click="Skeleton_Click"
                             ToolTip="Override the skeleton the export picks by itself"/>
-                    <Button Content="Export FBX" Click="Export_Click"/>
+                    <Button Content="Export..." Click="Export_Click" ToolTip="Write this mesh as FBX or OBJ"/>
                 </StackPanel>
 
                 <TextBlock DockPanel.Dock="Right" x:Name="HintText" VerticalAlignment="Center"

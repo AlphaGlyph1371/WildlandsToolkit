@@ -1,0 +1,51 @@
+{
+  "FormatVersion": 1,
+  "Name": "Refined Yungas v0.2",
+  "Description": "Tabacal/Yungas exposure, highlight, and late-night fill pass. Apply only to GRN_YUNGAS_CD after the global profile.",
+  "Experimental": true,
+  "ResourceNames": ["GRN_YUNGAS_CD"],
+  "Rules": [
+    {
+      "Label": "Recover detail in the bright sky shoulder",
+      "Path": "0x24D32CF8.0xAFB2BC2A",
+      "Operation": "Multiply",
+      "Value": 0.90,
+      "ClampMinimum": 0.0,
+      "ClampMaximum": 18.0,
+      "Required": true
+    },
+    {
+      "Label": "Recover sun and horizon highlight detail",
+      "Path": "0x24D32CF8.0xCBEF7544",
+      "Operation": "Multiply",
+      "Value": 0.90,
+      "ClampMinimum": 0.0,
+      "ClampMaximum": 200.0,
+      "Required": true
+    },
+    {
+      "Label": "Open the dawn exposure without lifting noon",
+      "Path": "0x5FB26017.0x33B77FEC.0x52C2E4E6",
+      "Operation": "Set",
+      "Value": -0.35,
+      "KeyTimes": ["06:01:30"],
+      "Required": true
+    },
+    {
+      "Label": "Open the sunset exposure without lifting noon",
+      "Path": "0x5FB26017.0x33B77FEC.0x52C2E4E6",
+      "Operation": "Set",
+      "Value": -0.35,
+      "KeyTimes": ["19:11:00"],
+      "Required": true
+    },
+    {
+      "Label": "Prevent the moon fill collapsing before 23:00",
+      "Path": "0x24D32CF8.0xA5A3ECDB",
+      "Operation": "Set",
+      "Value": 2.5,
+      "KeyTimes": ["00:00:00", "22:48:30", "24:00:00"],
+      "Required": true
+    }
+  ]
+}
