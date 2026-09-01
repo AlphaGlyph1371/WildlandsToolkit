@@ -13,6 +13,15 @@ modify your game.
 
 ---
 
+## !!! IMPORTANT !!!: One thing that can waste your evening
+
+**The same resource often sits in several archives.** `W_ASR_AK47_body_LOD0` exists four times,
+byte for byte identical, in `DataPC.forge`, `DataPC_patch_01.forge`, `DataPC_20_dlc.forge` and
+`DataPC_29_dlc.forge`. Change one and the game may still load another, and it looks exactly like
+your mod did nothing.
+
+---
+
 ## Features
 
 Note: because most of you probably will not read all of that, here is the short version on meshes.
@@ -63,8 +72,8 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
   ship their skeleton next to them**, so that index is what makes a usable rig possible at all
 - Reads and writes `Mesh`, `Skeleton` and `BuildTable` **byte for byte**: 20450, 1662 and 3649
   resources of `DataPC.forge` come back out identical
-- The skeleton reader is checked against the published AnvilNext documentation, hash for hash and
-  invariant for invariant (`wlcli skelcheck`)
+- The skeleton reader is checked against the published AnvilNext documentation from Firejumper93, which you can find [here](https://github.com/Firejumper93/GhostReconWildlands-AnvilNext2.0-Documentation), hash for hash and
+  invariant for invariant
 
 **Use glTF if you want the mesh to come back.** FBX export is still there and it carries the
 skeleton and the skin, but glTF is the one that survives the round trip without losing anything.
@@ -81,16 +90,6 @@ shape. It tells you when it does that.
 **About BuildTables, because they had me confused for a while:** they are the game's variant
 system, and they are where a lot of the "what does this thing look like" actually lives.
 
-A column says *which property* gets set, a row is *one variant*, and a selector with tags and a
-random seed picks the row. So what a shirt looks like is not decided in the mesh - it is decided
-here. `TOPS_VAR_COLORALL` has nine rows, and each one points at another table:
-`TOPS_solidColor_01-Black`, `_09-CoyoteBrown`, `_24-OliveDrab`, and so on.
-
-They are nested nearly all the way down. Of the 87520 references I could resolve, **72325 point at
-another BuildTable**. The rest land on texture specs, materials, shaders, LOD selectors, cloth and
-skeletons. It goes well past clothing as well: inventory settings, vehicle lists, named characters
-and even sound sets are wired up the same way.
-
 Practically: if you want a piece of gear to look different, changing the mesh is often the heavy
 way round, and bending one reference in the table chain is the light one. There is **no editor for
 that yet** - for now BuildTables can only be swapped whole, through the raw replace path.
@@ -101,16 +100,6 @@ that yet** - for now BuildTables can only be swapped whole, through the raw repl
 - Day curves with their control points: editable, filterable, resettable
 - The same curves as editable text, out and back in without losing a byte
 - External JSON graphics profiles can be previewed on the exact open controller before they join the change list
-
-Graphics profiles deliberately follow the raw browser: they only touch the controller that is
-currently open, even when it came from an archive the game would not normally mount. The bundled
-`GraphicsProfiles/Refined-Global-v0.2.json` and `Refined-Yungas-v0.2.json` are experimental,
-controller-bound starting points rather than visually verified presets. The preview lists their exact ranges first; **Save** and then the main
-window's **Apply changes** are still required before an archive is written.
-
-Files beginning with `Calibration-` are deliberately obvious diagnostic switches, not visual
-presets. Apply an `ON` profile only long enough to capture its comparison, then apply its matching
-`RESTORE` profile to the same controller(s).
 
 ### Command line
 
@@ -133,18 +122,6 @@ Over all of `DataPC.forge`:
 | Meshes | 20450 | **0** |
 | Skeletons | 1662 | **0** |
 | BuildTables | 3649 | **0** |
-
-For the import path there is `gltfcycle`, which exports every mesh, reads it back in and compares.
-Over 2500 meshes: no failures, corners stay within half a percent of the mesh size, and every uv
-set, all skin weights and all vertex colours come back unchanged.
-
-Byte for byte is not the same as "the game accepts it", so that was tested separately: an AK-12
-body, scaled 5x through the glTF round trip and written back into `DataPC.forge` and
-`DataPC_patch_01.forge`, renders correctly in the running game. Geometry, normals, textures,
-shadows and the skin all survive.
-
-What is still untested is a heavily skinned character mesh - the AK-12 body has three bones, a
-vest has eighty-five. The mechanism is the same, but nobody has looked at it in game yet.
 
 ---
 
@@ -193,24 +170,6 @@ mesh keeps the bone table it already has, and your joints are matched back onto 
 leave the armature that came out of the export alone, and do not rename its bones. The toolkit
 shows you how many matched before it writes anything, and if none of them do it stops instead of
 guessing.
-
----
-
-## One thing that will waste your evening
-
-**The same resource often sits in several archives.** `W_ASR_AK47_body_LOD0` exists four times,
-byte for byte identical, in `DataPC.forge`, `DataPC_patch_01.forge`, `DataPC_20_dlc.forge` and
-`DataPC_29_dlc.forge`. Change one and the game may still load another, and it looks exactly like
-your mod did nothing.
-
-Before you change anything for real, ask:
-
-```
-wlcli where "G:\...\Wildlands" W_ASR_AK47_body_LOD0
-```
-
-It lists every archive that holds it, so you know how many you have to change. World map archives
-are skipped by default because they are enormous; add `--all` when you need them too.
 
 ---
 
