@@ -39,3 +39,9 @@ Desktop.ini
 *.data
 *.dds
 *.chn
+
+# Local reverse-engineering and runtime diagnostics
+/Diagnostics/
+/ghostroom-diagnostics/
+/runtime-*.bin
+/runtime-*.json
