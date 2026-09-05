@@ -1,46 +1,109 @@
 <Window x:Class="Wildlands.Toolkit.MeshWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Mesh" Height="760" Width="1040"
+        Title="Mesh" Height="800" Width="1180" MinHeight="560" MinWidth="820"
         Background="{StaticResource Background}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
 
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="10,8">
-            <DockPanel LastChildFill="False">
-                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                    <Button Content="Fit" Click="Fit_Click" ToolTip="Frame the whole mesh"/>
-                    <ToggleButton x:Name="ColourButton" Content="Ranges" Click="Colour_Click" IsChecked="True"
-                                  Style="{StaticResource StateToggle}"
-                                  ToolTip="A draw range is one material of the model. Colouring them apart shows where the model changes material - with textures on, only ranges without a texture are tinted."/>
-                    <ToggleButton x:Name="TextureButton" Content="Textures" Click="Texture_Click"
-                                  Style="{StaticResource StateToggle}"
-                                  ToolTip="Follow each draw range to its material and texture set, and paint the diffuse texture the game uses"/>
-                    <Button x:Name="BackfaceButton" Content="Back faces: as material" Click="Backface_Click"
-                            ToolTip="Draw the far side of every surface as well, a shade darker, so a hole in the geometry still reads as a hole. The material decides unless it is forced here."/>
-                    <Button x:Name="SkeletonButton" Content="Skeleton" Click="Skeleton_Click"
-                            ToolTip="Override the skeleton the export picks by itself"/>
-                    <Button Content="Export..." Click="Export_Click" ToolTip="Write this mesh as FBX or OBJ"/>
-                </StackPanel>
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1"
+                Padding="14,10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-                <TextBlock DockPanel.Dock="Right" x:Name="HintText" VerticalAlignment="Center"
-                           Foreground="{StaticResource TextDim}" FontSize="11"
-                           Text="Drag to turn  ·  right-drag to move  ·  wheel to zoom"/>
-            </DockPanel>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock x:Name="MeshNameText" FontSize="16" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="MeshTypeText" Margin="0,2,0,0" FontSize="11"
+                                   Foreground="{StaticResource TextDim}"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="ImportButton" Content="Replace mesh…"
+                                Click="Replace_Click"
+                                ToolTip="Replace this mesh from GLB, glTF or OBJ and queue it for Apply changes (Ctrl+R)"/>
+                        <Button Content="Export…" Click="Export_Click" Margin="0"
+                                ToolTip="Export the current viewer mesh as GLB, FBX or OBJ"/>
+                    </StackPanel>
+                </Grid>
+
+                <Border Height="1" Background="{StaticResource Border}" Margin="0,10,0,9"/>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="VIEW" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Frame all" Click="Fit_Click"
+                                    ToolTip="Frame the whole mesh (F)"/>
+                            <ToggleButton x:Name="TextureButton" Content="Textures"
+                                          Click="Texture_Click" Style="{StaticResource StateToggle}"
+                                          ToolTip="Display the diffuse texture resolved through each material and texture set"/>
+                            <ToggleButton x:Name="ColourButton" Content="Draw ranges"
+                                          Click="Colour_Click" IsChecked="True"
+                                          Style="{StaticResource StateToggle}"
+                                          ToolTip="Tint separate material draw ranges when no texture is being shown"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Width="1" Background="{StaticResource Border}"
+                            Margin="8,0,14,0"/>
+
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="GEOMETRY" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox x:Name="BackfaceBox" Width="166" SelectedIndex="0"
+                                      SelectionChanged="Backface_Changed"
+                                      ToolTip="Choose whether the reverse side of a surface is rendered">
+                                <ComboBoxItem Content="Back faces: material"/>
+                                <ComboBoxItem Content="Back faces: always"/>
+                                <ComboBoxItem Content="Back faces: never"/>
+                            </ComboBox>
+                            <Button x:Name="SkeletonButton" Content="Choose skeleton…"
+                                    Click="Skeleton_Click" Margin="6,0,0,0"
+                                    ToolTip="Override the skeleton used when exporting GLB or FBX"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="4" x:Name="HintText" VerticalAlignment="Bottom"
+                               Foreground="{StaticResource TextDim}" FontSize="11" Margin="20,0,0,6"
+                               Text="Left-drag orbit  ·  right-drag pan  ·  wheel zoom  ·  F frame"/>
+                </Grid>
+            </StackPanel>
         </Border>
 
         <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="10,5">
+                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="10,6">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" Grid.Column="0" Foreground="{StaticResource TextDim}"
-                           FontFamily="Consolas" FontSize="12"/>
-                <TextBlock x:Name="SizeText" Grid.Column="1" Foreground="{StaticResource TextDim}"
-                           FontFamily="Consolas" FontSize="12"/>
+                <Border x:Name="PendingBadge" Grid.Column="0" Visibility="Collapsed"
+                        Background="{StaticResource Accent}" CornerRadius="3" Padding="6,2"
+                        Margin="0,0,9,0">
+                    <TextBlock Text="PENDING APPLY" Foreground="#FF10161E"
+                               FontSize="10" FontWeight="SemiBold"/>
+                </Border>
+                <TextBlock x:Name="StatusText" Grid.Column="1" Foreground="{StaticResource TextDim}"
+                           FontFamily="Consolas" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="SizeText" Grid.Column="2" Foreground="{StaticResource TextDim}"
+                           FontFamily="Consolas" FontSize="12" Margin="16,0,0,0"/>
             </Grid>
         </Border>
 

@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Wildlands.Formats.Models;
 
@@ -15,16 +17,52 @@ public enum BuildTableReferenceKind
 
 public sealed class BuildTableReference
 {
-    internal BuildTableReference(int offset, ulong value, BuildTableReferenceKind kind)
+    internal BuildTableReference(int offset, ulong value, BuildTableReferenceKind kind, string path)
     {
         Offset = offset;
         Value = value;
         Kind = kind;
+        Path = path;
     }
 
     public int Offset { get; }
     public ulong Value { get; set; }
     public BuildTableReferenceKind Kind { get; }
+    public string Path { get; }
+    public int? ComponentIndex { get; internal set; }
+}
+
+public sealed record BuildTableObject(int Offset, ulong Id, uint ClassHash, string Path);
+
+public sealed class BuildTableRow
+{
+    internal BuildTableRow(int index, int offset, int length, ulong id,
+        IReadOnlyList<BuildTableReference> references,
+        IReadOnlyList<BuildTableObject> objects,
+        int tagOffset,
+        uint tag,
+        IReadOnlyList<uint> possibleTags)
+    {
+        Index = index;
+        Offset = offset;
+        Length = length;
+        Id = id;
+        References = references;
+        Objects = objects;
+        TagOffset = tagOffset;
+        Tag = tag;
+        PossibleTags = possibleTags;
+    }
+
+    public int Index { get; }
+    public int Offset { get; }
+    public int Length { get; }
+    public ulong Id { get; }
+    public IReadOnlyList<BuildTableReference> References { get; }
+    public IReadOnlyList<BuildTableObject> Objects { get; }
+    public int TagOffset { get; }
+    public uint Tag { get; internal set; }
+    public IReadOnlyList<uint> PossibleTags { get; }
 }
 
 public sealed class BuildTableAsset
@@ -37,11 +75,20 @@ public sealed class BuildTableAsset
     public byte Prefix { get; internal set; }
     public int ColumnCount { get; internal set; }
     public int RowCount { get; internal set; }
+    public int RowCountOffset { get; internal set; }
     public List<BuildTableReference> References { get; } = [];
+    public List<BuildTableObject> Objects { get; } = [];
+    public List<BuildTableRow> Rows { get; } = [];
 
     public byte[] Write()
     {
         byte[] result = (byte[])_originalData.Clone();
+        foreach (var row in Rows)
+        {
+            if ((uint)row.TagOffset > result.Length - sizeof(uint))
+                throw new InvalidDataException($"BuildTable tag offset 0x{row.TagOffset:X} is outside the resource.");
+            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(row.TagOffset, sizeof(uint)), row.Tag);
+        }
         foreach (var reference in References)
         {
             if ((uint)reference.Offset > result.Length - sizeof(ulong))
@@ -63,6 +110,138 @@ public sealed class BuildTableAsset
         }
         return changed;
     }
+
+    public byte[] DuplicateRow(int rowIndex)
+    {
+        if ((uint)rowIndex >= (uint)Rows.Count)
+            throw new ArgumentOutOfRangeException(nameof(rowIndex));
+
+        byte[] source = Write();
+        var row = Rows[rowIndex];
+        if (!CanDuplicateRow(rowIndex, out string reason))
+            throw new InvalidOperationException(reason);
+        byte[] clone = source.AsSpan(row.Offset, row.Length).ToArray();
+        int insertAt = row.Offset + row.Length;
+        var localObjects = Objects.Where(obj => IsLocalId(obj.Id)).OrderBy(obj => obj.Offset).ToList();
+        if (localObjects.Zip(localObjects.Skip(1)).Any(pair => pair.First.Id >= pair.Second.Id))
+            throw new InvalidOperationException(
+                "The BuildTable local object ids are not ordered, so a row cannot be inserted safely.");
+
+        var rowIds = row.Objects.Where(obj => IsLocalId(obj.Id))
+            .OrderBy(obj => obj.Offset).Select(obj => obj.Id).Distinct().ToList();
+        if (rowIds.Count == 0)
+            throw new InvalidOperationException("The selected row has no local object ids to clone.");
+        ulong firstCloneId = localObjects.Where(obj => obj.Offset < insertAt).Max(obj => obj.Id) + 1;
+        var remapped = rowIds.Select((id, index) => (id, NewId: firstCloneId + (ulong)index))
+            .ToDictionary(pair => pair.id, pair => pair.NewId);
+
+        ulong shift = (ulong)rowIds.Count;
+        var shifted = localObjects.Where(obj => obj.Offset >= insertAt)
+            .ToDictionary(obj => obj.Id, obj => checked(obj.Id + shift));
+        if (shifted.Values.Any(id => !IsLocalId(id)))
+            throw new InvalidOperationException("The BuildTable has no free local object ids.");
+        byte[] shiftedSource = (byte[])source.Clone();
+        foreach (BuildTableObject obj in Objects)
+            if (shifted.TryGetValue(obj.Id, out ulong newId))
+                BinaryPrimitives.WriteUInt64LittleEndian(shiftedSource.AsSpan(obj.Offset), newId);
+        foreach (BuildTableReference reference in References)
+            if (shifted.TryGetValue(reference.Value, out ulong newId))
+                BinaryPrimitives.WriteUInt64LittleEndian(shiftedSource.AsSpan(reference.Offset), newId);
+
+        foreach (var obj in row.Objects)
+            if (remapped.TryGetValue(obj.Id, out ulong newId))
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    clone.AsSpan(obj.Offset - row.Offset, sizeof(ulong)), newId);
+
+        foreach (var reference in row.References)
+            if (remapped.TryGetValue(reference.Value, out ulong newId))
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    clone.AsSpan(reference.Offset - row.Offset, sizeof(ulong)), newId);
+
+        byte[] result = new byte[checked(shiftedSource.Length + clone.Length)];
+        shiftedSource.AsSpan(0, insertAt).CopyTo(result);
+        clone.CopyTo(result.AsSpan(insertAt));
+        shiftedSource.AsSpan(insertAt).CopyTo(result.AsSpan(insertAt + clone.Length));
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(RowCountOffset, sizeof(int)), RowCount + 1);
+
+        var parsed = BuildTable.Read(result);
+        if (parsed.RowCount != RowCount + 1 || parsed.Rows.Count != Rows.Count + 1)
+            throw new InvalidDataException("The duplicated BuildTable row did not parse back correctly.");
+        if (parsed.Rows[rowIndex + 1].Id == row.Id)
+            throw new InvalidDataException("The duplicated BuildTable row did not receive a fresh local id.");
+        var duplicateId = parsed.Objects.Where(obj => IsLocalId(obj.Id))
+            .GroupBy(obj => obj.Id).FirstOrDefault(group => group.Count() > 1);
+        if (duplicateId is not null)
+            throw new InvalidDataException(
+                $"The duplicated BuildTable contains local object id 0x{duplicateId.Key:X} more than once.");
+        var parsedLocalObjects = parsed.Objects.Where(obj => IsLocalId(obj.Id))
+            .OrderBy(obj => obj.Offset).ToList();
+        if (parsedLocalObjects.Zip(parsedLocalObjects.Skip(1))
+            .Any(pair => pair.First.Id >= pair.Second.Id))
+            throw new InvalidDataException(
+                "The duplicated BuildTable does not retain ordered local object ids.");
+        var defined = parsedLocalObjects.Select(obj => obj.Id).ToHashSet();
+        if (parsed.References.Any(reference => IsLocalId(reference.Value)
+                && !defined.Contains(reference.Value)))
+            throw new InvalidDataException(
+                "The duplicated BuildTable contains a local reference without an object.");
+        return result;
+    }
+
+    public void SetRowTag(int rowIndex, uint tag)
+    {
+        if ((uint)rowIndex >= (uint)Rows.Count)
+            throw new ArgumentOutOfRangeException(nameof(rowIndex));
+        Rows[rowIndex].Tag = tag;
+    }
+
+    public bool CanDuplicateRow(int rowIndex, out string reason)
+    {
+        if ((uint)rowIndex >= (uint)Rows.Count)
+        {
+            reason = "The option does not exist.";
+            return false;
+        }
+
+        var fixedObject = Rows[rowIndex].Objects
+            .FirstOrDefault(obj => obj.Id != 0 && !IsLocalId(obj.Id));
+        if (fixedObject is not null)
+        {
+            reason = $"{fixedObject.Path} uses a fixed object id, so this option cannot be duplicated safely.";
+            return false;
+        }
+
+        reason = "";
+        return true;
+    }
+
+    public byte[] RemoveRow(int rowIndex)
+    {
+        if ((uint)rowIndex >= (uint)Rows.Count)
+            throw new ArgumentOutOfRangeException(nameof(rowIndex));
+
+        var row = Rows[rowIndex];
+        var localIds = row.Objects.Where(obj => IsLocalId(obj.Id)).Select(obj => obj.Id).ToHashSet();
+        var outsideLink = References.FirstOrDefault(reference =>
+            (reference.Offset < row.Offset || reference.Offset >= row.Offset + row.Length)
+            && localIds.Contains(reference.Value));
+        if (outsideLink is not null)
+            throw new InvalidOperationException(
+                $"This option is used by {outsideLink.Path} and cannot be removed safely.");
+
+        byte[] source = Write();
+        byte[] result = new byte[checked(source.Length - row.Length)];
+        source.AsSpan(0, row.Offset).CopyTo(result);
+        source.AsSpan(row.Offset + row.Length).CopyTo(result.AsSpan(row.Offset));
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(RowCountOffset, sizeof(int)), RowCount - 1);
+
+        var parsed = BuildTable.Read(result);
+        if (parsed.RowCount != RowCount - 1 || parsed.Rows.Count != Rows.Count - 1)
+            throw new InvalidDataException("The BuildTable did not parse correctly after removing the row.");
+        return result;
+    }
+
+    static bool IsLocalId(ulong id) => id is >= 0xF0000000UL and <= uint.MaxValue;
 }
 
 public static class BuildTable
@@ -144,7 +323,8 @@ public static class BuildTable
         {
             var header = ReadHeader(ClassHash, "BuildTable");
             _asset.Id = header.Id;
-            _asset.References.Add(new BuildTableReference(0, header.Id, BuildTableReferenceKind.TableIdentity));
+            _asset.References.Add(new BuildTableReference(
+                0, header.Id, BuildTableReferenceKind.TableIdentity, "BuildTable identity"));
             _asset.Prefix = ReadByte("BuildTable prefix");
 
             _asset.ColumnCount = ReadCount("BuildTable column");
@@ -154,11 +334,20 @@ public static class BuildTable
                 ReadColumn(i);
             }
 
+            _asset.RowCountOffset = checked((int)_reader.BaseStream.Position);
             _asset.RowCount = ReadCount("BuildTable row");
             for (int i = 0; i < _asset.RowCount; i++)
             {
-                ReadHeader(BuildRowHash, $"row {i}");
-                ReadRow(i);
+                int start = checked((int)_reader.BaseStream.Position);
+                int referenceStart = _asset.References.Count;
+                int objectStart = _asset.Objects.Count;
+                var row = ReadHeader(BuildRowHash, $"row {i}");
+                var rowData = ReadRow(i);
+                int end = checked((int)_reader.BaseStream.Position);
+                _asset.Rows.Add(new BuildTableRow(i, start, end - start, row.Id,
+                    _asset.References.Skip(referenceStart).ToList(),
+                    _asset.Objects.Skip(objectStart).ToList(), rowData.TagOffset,
+                    rowData.Tag, rowData.PossibleTags));
             }
 
             ReadByte("shuffle selection");
@@ -237,38 +426,45 @@ public static class BuildTable
             ReadHandle($"column {column} property-path node {node} target material template");
         }
 
-        void ReadRow(int index)
+        (int TagOffset, uint Tag, IReadOnlyList<uint> PossibleTags) ReadRow(int index)
         {
             ReadSingle($"row {index} weight");
             ReadObjectPointer($"row {index} table");
-            ReadBuildTag($"row {index} tag");
-            ReadBuildTags($"row {index} possible tags");
+            var tag = ReadBuildTag($"row {index} tag");
+            var possibleTags = ReadBuildTags($"row {index} possible tags");
 
             int components = ReadCount($"row {index} component");
             for (int i = 0; i < components; i++)
             {
-                ReadInt32($"row {index} component {i} index");
+                int componentIndex = ReadInt32($"row {index} component {i} index");
+                int referenceStart = _asset.References.Count;
                 ReadDynamicProperty($"row {index} component {i}");
+                foreach (var reference in _asset.References.Skip(referenceStart))
+                    reference.ComponentIndex = componentIndex;
             }
+            return (tag.Offset, tag.Value, possibleTags);
         }
 
-        void ReadBuildTag(string field)
+        (int Offset, uint Value) ReadBuildTag(string field)
         {
             ReadHeader(BuildTagHash, field);
-            ReadUInt32(field + " value");
+            int offset = checked((int)_reader.BaseStream.Position);
+            return (offset, ReadUInt32(field + " value"));
         }
 
-        void ReadBuildTags(string field)
+        IReadOnlyList<uint> ReadBuildTags(string field)
         {
             ReadHeader(BuildTagsHash, field);
             int tags = ReadCount(field + " tag");
+            var result = new List<uint>(tags);
             for (int i = 0; i < tags; i++)
-                ReadBuildTag($"{field} tag {i}");
+                result.Add(ReadBuildTag($"{field} tag {i}").Value);
+            return result;
         }
 
         void ReadRowSelector()
         {
-            ReadBuildTags("default selector tags");
+            _ = ReadBuildTags("default selector tags");
             ReadUInt32("default selector column mask");
             ReadUInt32("default selector random seed");
 
@@ -392,7 +588,7 @@ public static class BuildTable
             switch (header.ClassHash)
             {
                 case BuildRowHash:
-                    ReadRow(-1);
+                    _ = ReadRow(-1);
                     break;
                 case BuildTagsHash:
                     ReadBuildTagsPayload(field);
@@ -450,14 +646,17 @@ public static class BuildTable
         {
             int offset = checked((int)_reader.BaseStream.Position);
             ulong value = ReadUInt64(field + " id");
-            _asset.References.Add(new BuildTableReference(offset, value, kind));
+            _asset.References.Add(new BuildTableReference(offset, value, kind, field));
             return value;
         }
 
         ScimitarHeader ReadHeader(uint expected, string field)
         {
             Ensure(12, field);
-            return ScimitarHeader.Read(_reader, expected);
+            int offset = checked((int)_reader.BaseStream.Position);
+            var header = ScimitarHeader.Read(_reader, expected);
+            _asset.Objects.Add(new BuildTableObject(offset, header.Id, header.ClassHash, field));
+            return header;
         }
 
         int ReadCount(string field)

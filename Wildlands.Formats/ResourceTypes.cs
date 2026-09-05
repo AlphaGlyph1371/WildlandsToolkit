@@ -28,6 +28,8 @@ public static class ResourceTypes
         "LayeredSky",
         "LensFlareSettings",
         "LightingDescriptor",
+        "LocalizationPackage",
+        "LODSelector",
         "Mask",
         "Material",
         "Mesh",

@@ -1,0 +1,154 @@
+GRW+0x8B12CD0  4883EC28                       sub      rsp, 0x28
+GRW+0x8B12CD4  4989D1                         mov      r9, rdx
+GRW+0x8B12CD7  4885D2                         test     rdx, rdx
+GRW+0x8B12CDA  7507                           jne      0x8b12ce3
+GRW+0x8B12CDC  31C0                           xor      eax, eax
+GRW+0x8B12CDE  4883C428                       add      rsp, 0x28
+GRW+0x8B12CE2  C3                             ret      
+GRW+0x8B12CE3  31D2                           xor      edx, edx
+GRW+0x8B12CE5  4183F807                       cmp      r8d, 7
+GRW+0x8B12CE9  0F8778010000                   ja       0x8b12e67
+GRW+0x8B12CEF  4963C0                         movsxd   rax, r8d
+GRW+0x8B12CF2  4C8D0507D34EF7                 lea      r8, [rip - 0x8b12cf9]
+GRW+0x8B12CF9  418B8C8030E96F00               mov      ecx, dword ptr [r8 + rax*4 + 0x6fe930]
+GRW+0x8B12D01  4C01C1                         add      rcx, r8
+GRW+0x8B12D04  FFE1                           jmp      rcx
+GRW+0x8B12D06  4C89C9                         mov      rcx, r9
+GRW+0x8B12D09  E8320D08F9                     call     0x1b93a40
+GRW+0x8B12D0E  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12D11  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12D15  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12D18  48C1E020                       shl      rax, 0x20
+GRW+0x8B12D1C  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12D20  4821C1                         and      rcx, rax
+GRW+0x8B12D23  E8A8A178F7                     call     0x29ced0
+GRW+0x8B12D28  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12D2C  89D0                           mov      eax, edx
+GRW+0x8B12D2E  4883C428                       add      rsp, 0x28
+GRW+0x8B12D32  C3                             ret      
+GRW+0x8B12D33  4C89C9                         mov      rcx, r9
+GRW+0x8B12D36  E8050D08F9                     call     0x1b93a40
+GRW+0x8B12D3B  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12D3E  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12D42  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12D45  48C1E020                       shl      rax, 0x20
+GRW+0x8B12D49  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12D4D  4821C1                         and      rcx, rax
+GRW+0x8B12D50  E83BA178F7                     call     0x29ce90
+GRW+0x8B12D55  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12D59  89D0                           mov      eax, edx
+GRW+0x8B12D5B  4883C428                       add      rsp, 0x28
+GRW+0x8B12D5F  C3                             ret      
+GRW+0x8B12D60  4C89C9                         mov      rcx, r9
+GRW+0x8B12D63  E8D80C08F9                     call     0x1b93a40
+GRW+0x8B12D68  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12D6B  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12D6F  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12D72  48C1E020                       shl      rax, 0x20
+GRW+0x8B12D76  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12D7A  4821C1                         and      rcx, rax
+GRW+0x8B12D7D  E87EA178F7                     call     0x29cf00
+GRW+0x8B12D82  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12D86  89D0                           mov      eax, edx
+GRW+0x8B12D88  4883C428                       add      rsp, 0x28
+GRW+0x8B12D8C  C3                             ret      
+GRW+0x8B12D8D  4C89C9                         mov      rcx, r9
+GRW+0x8B12D90  E8AB0C08F9                     call     0x1b93a40
+GRW+0x8B12D95  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12D98  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12D9C  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12D9F  48C1E020                       shl      rax, 0x20
+GRW+0x8B12DA3  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12DA7  4821C1                         and      rcx, rax
+GRW+0x8B12DAA  E831A178F7                     call     0x29cee0
+GRW+0x8B12DAF  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12DB3  89D0                           mov      eax, edx
+GRW+0x8B12DB5  4883C428                       add      rsp, 0x28
+GRW+0x8B12DB9  C3                             ret      
+GRW+0x8B12DBA  4C89C9                         mov      rcx, r9
+GRW+0x8B12DBD  E87E0C08F9                     call     0x1b93a40
+GRW+0x8B12DC2  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12DC5  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12DC9  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12DCC  48C1E020                       shl      rax, 0x20
+GRW+0x8B12DD0  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12DD4  4821C1                         and      rcx, rax
+GRW+0x8B12DD7  E814A178F7                     call     0x29cef0
+GRW+0x8B12DDC  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12DE0  89D0                           mov      eax, edx
+GRW+0x8B12DE2  4883C428                       add      rsp, 0x28
+GRW+0x8B12DE6  C3                             ret      
+GRW+0x8B12DE7  4C89C9                         mov      rcx, r9
+GRW+0x8B12DEA  E8510C08F9                     call     0x1b93a40
+GRW+0x8B12DEF  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12DF2  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12DF6  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12DF9  48C1E020                       shl      rax, 0x20
+GRW+0x8B12DFD  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12E01  4821C1                         and      rcx, rax
+GRW+0x8B12E04  E8A7A078F7                     call     0x29ceb0
+GRW+0x8B12E09  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12E0D  89D0                           mov      eax, edx
+GRW+0x8B12E0F  4883C428                       add      rsp, 0x28
+GRW+0x8B12E13  C3                             ret      
+GRW+0x8B12E14  4C89C9                         mov      rcx, r9
+GRW+0x8B12E17  E8240C08F9                     call     0x1b93a40
+GRW+0x8B12E1C  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12E1F  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12E23  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12E26  48C1E020                       shl      rax, 0x20
+GRW+0x8B12E2A  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12E2E  4821C1                         and      rcx, rax
+GRW+0x8B12E31  E88AA078F7                     call     0x29cec0
+GRW+0x8B12E36  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12E3A  89D0                           mov      eax, edx
+GRW+0x8B12E3C  4883C428                       add      rsp, 0x28
+GRW+0x8B12E40  C3                             ret      
+GRW+0x8B12E41  4C89C9                         mov      rcx, r9
+GRW+0x8B12E44  E8F70B08F9                     call     0x1b93a40
+GRW+0x8B12E49  488B08                         mov      rcx, qword ptr [rax]
+GRW+0x8B12E4C  4863410C                       movsxd   rax, dword ptr [rcx + 0xc]
+GRW+0x8B12E50  488B09                         mov      rcx, qword ptr [rcx]
+GRW+0x8B12E53  48C1E020                       shl      rax, 0x20
+GRW+0x8B12E57  48C1F83F                       sar      rax, 0x3f
+GRW+0x8B12E5B  4821C1                         and      rcx, rax
+GRW+0x8B12E5E  E83DA078F7                     call     0x29cea0
+GRW+0x8B12E63  0FB7500A                       movzx    edx, word ptr [rax + 0xa]
+GRW+0x8B12E67  89D0                           mov      eax, edx
+GRW+0x8B12E69  4883C428                       add      rsp, 0x28
+GRW+0x8B12E6D  C3                             ret      
+GRW+0x8B12E6E  CC                             int3     
+GRW+0x8B12E6F  29C1                           sub      ecx, eax
+GRW+0x8B12E71  B9FF5FCC0F                     mov      ecx, 0xfcc5fff
+GRW+0x8B12E76  1DD2C56031                     sbb      eax, 0x3160c5d2
+GRW+0x8B12E7B  9C                             pushfq   
+GRW+0x8B12E7C  56                             push     rsi
+GRW+0x8B12E7D  F7D1                           not      ecx
+GRW+0x8B12E7F  BEFFFFFFFF                     mov      esi, 0xffffffff
+GRW+0x8B12E84  81C900020000                   or       ecx, 0x200
+GRW+0x8B12E8A  B8DC8AC2EB                     mov      eax, 0xebc28adc
+GRW+0x8B12E8F  31CE                           xor      esi, ecx
+GRW+0x8B12E91  89F1                           mov      ecx, esi
+GRW+0x8B12E93  5E                             pop      rsi
+GRW+0x8B12E94  0FA4C10F                       shld     ecx, eax, 0xf
+GRW+0x8B12E98  9C                             pushfq   
+GRW+0x8B12E99  4883EC08                       sub      rsp, 8
+GRW+0x8B12E9D  48890424                       mov      qword ptr [rsp], rax
+GRW+0x8B12EA1  4152                           push     r10
+GRW+0x8B12EA3  4189C2                         mov      r10d, eax
+GRW+0x8B12EA6  678D80504990AC                 lea      eax, [eax - 0x536fb6b0]
+GRW+0x8B12EAD  4129C2                         sub      r10d, eax
+GRW+0x8B12EB0  B89A2BBA64                     mov      eax, 0x64ba2b9a
+GRW+0x8B12EB5  4109C2                         or       r10d, eax
+GRW+0x8B12EB8  4419D0                         sbb      eax, r10d
+GRW+0x8B12EBB  4181D2DFB924AE                 adc      r10d, 0xae24b9df
+GRW+0x8B12EC2  4409D0                         or       eax, r10d
+GRW+0x8B12EC5  4131C2                         xor      r10d, eax
+GRW+0x8B12EC8  4152                           push     r10
+GRW+0x8B12ECA  50                             push     rax
+GRW+0x8B12ECB  4C8D1512000000                 lea      r10, [rip + 0x12]
+GRW+0x8B12ED2  488D0534C9A90E                 lea      rax, [rip + 0xea9c934]
+GRW+0x8B12ED9  4C0F44D0                       cmove    r10, rax
+GRW+0x8B12EDD  58                             pop      rax
+GRW+0x8B12EDE  4C871424                       xchg     qword ptr [rsp], r10
+GRW+0x8B12EE2  C3                             ret      

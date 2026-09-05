@@ -7,6 +7,7 @@ public sealed class ImportedGroup
     public string Name { get; set; } = "";
     public List<MeshVertex> Vertices { get; } = [];
     public List<int> Indices { get; } = [];
+    public bool HasTangents { get; set; }
 }
 
 public sealed class ImportedGeometry

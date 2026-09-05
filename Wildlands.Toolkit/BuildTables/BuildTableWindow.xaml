@@ -1,0 +1,378 @@
+<Window x:Class="Wildlands.Toolkit.BuildTableWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Armory editor" Height="790" Width="1280" MinHeight="620" MinWidth="980"
+        Background="{StaticResource Background}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <Style x:Key="ArmoryCard" TargetType="ListViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Background" Value="{StaticResource Surface}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border x:Name="Card" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3" Padding="14,11">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource TextDim}"/>
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsHiddenFromGunsmith}" Value="True">
+                                <Setter TargetName="Card" Property="BorderBrush" Value="#C8944D"/>
+                                <Setter TargetName="Card" Property="Background" Value="#2B251E"/>
+                            </DataTrigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Card" Property="Background" Value="#252A32"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="14,9">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                    <Button x:Name="SaveButton" Content="Save armory changes" Click="Save_Click"
+                            IsEnabled="False" ToolTip="Validate every edited table and add it to Apply changes"/>
+                    <Button x:Name="DiscardButton" Content="Discard unsaved edits" Click="Discard_Click"
+                            IsEnabled="False" ToolTip="Restore every table changed in this editor"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock Text="Game labels" VerticalAlignment="Center"
+                               Foreground="{StaticResource TextDim}" Margin="0,0,7,0"/>
+                    <ComboBox x:Name="LanguageBox" Width="160" IsEnabled="False"
+                              SelectionChanged="Language_Changed"
+                              ToolTip="Choose an installed game language for confirmed display names">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <CheckBox x:Name="TechnicalModeBox" Content="Technical view" VerticalAlignment="Center"
+                              Margin="16,0,0,0" Checked="TechnicalMode_Changed" Unchecked="TechnicalMode_Changed"
+                              ToolTip="Show the raw fields, selectors and internal table links"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="12,7">
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource TextDim}"
+                       TextTrimming="CharacterEllipsis"/>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" MinWidth="190"/>
+                <ColumnDefinition Width="*" MinWidth="430"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="365" MinWidth="320"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource Surface}"
+                    BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="16,17,14,14">
+                        <TextBlock x:Name="FamilyTitleText" FontSize="19" FontWeight="SemiBold"
+                                   Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="FamilySubtitleText" Margin="0,4,0,0" FontSize="11"
+                                   Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <ListBox x:Name="FamilyList" BorderThickness="0" Background="Transparent"
+                             SelectionChanged="Family_Changed" Padding="7,0,7,10"
+                             HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="9,7">
+                                    <TextBlock Text="{Binding Title}" FontSize="13"
+                                               Foreground="{StaticResource Text}"/>
+                                    <TextBlock Text="{Binding Subtitle}" Margin="0,2,0,0" FontSize="10"
+                                               Foreground="{StaticResource TextDim}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Column="1">
+                <Grid x:Name="ArmoryPane">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border x:Name="OptionHeaderPanel" BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1"
+                            Padding="20,16,18,13">
+                        <DockPanel>
+                            <Button x:Name="AddAttachmentButton" DockPanel.Dock="Right" Content="Add attachment"
+                                    Click="AddAttachment_Click" ToolTip="Set up a new attachment"/>
+                            <StackPanel>
+                            <TextBlock x:Name="SlotTitleText" FontSize="18" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Text}"/>
+                            <TextBlock x:Name="SlotSubtitleText" Margin="0,4,0,0"
+                                       Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <ListView Grid.Row="1" x:Name="OptionList" BorderThickness="0" Background="Transparent"
+                              Padding="18,16,18,16" ItemContainerStyle="{StaticResource ArmoryCard}"
+                              SelectionChanged="Option_Changed" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="94" Height="70" Margin="0,0,12,0"
+                                            Background="#17191D" BorderBrush="{StaticResource Border}"
+                                            BorderThickness="1" CornerRadius="3" ClipToBounds="True"
+                                            ToolTip="{Binding PreviewDetails}">
+                                        <Grid>
+                                            <Viewport3D IsHitTestVisible="False">
+                                                <Viewport3D.Camera>
+                                                    <PerspectiveCamera Position="2.4,-3,1.7"
+                                                                       LookDirection="-2.4,3,-1.7"
+                                                                       UpDirection="0,0,1" FieldOfView="38"/>
+                                                </Viewport3D.Camera>
+                                                <ModelVisual3D Content="{Binding PreviewModel}"/>
+                                            </Viewport3D>
+                                            <TextBlock Text="{Binding PreviewStatus}" Margin="7"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       TextAlignment="Center" TextWrapping="Wrap" FontSize="9"
+                                                       Foreground="{StaticResource TextDim}"/>
+                                            <Border VerticalAlignment="Bottom" Background="#C817191D"
+                                                    Visibility="{Binding PreviewBadgeVisibility}"
+                                                    Padding="3,2">
+                                                <TextBlock Text="{Binding PreviewBadge}" FontSize="7"
+                                                           HorizontalAlignment="Center"
+                                                           Foreground="{StaticResource TextDim}"/>
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <Grid Grid.Column="1" VerticalAlignment="Center">
+                                        <StackPanel Margin="0,0,150,0">
+                                            <TextBlock Text="{Binding Number}" FontSize="9" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextDim}"/>
+                                            <TextBlock Text="{Binding DisplayName}" Margin="0,3,0,0" FontSize="15"
+                                                       Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding InternalName}" Margin="0,3,0,0" FontSize="10"
+                                                       Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                Visibility="{Binding GunsmithBadgeVisibility}"
+                                                Background="#3B2D1D" BorderBrush="#C8944D"
+                                                BorderThickness="1" CornerRadius="3" Padding="7,3">
+                                            <TextBlock Text="{Binding GunsmithBadge}" FontSize="8"
+                                                       FontWeight="SemiBold" Foreground="#F0C27B"/>
+                                        </Border>
+                                    </Grid>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <Grid x:Name="OverviewPane" Grid.RowSpan="2" Visibility="Collapsed"
+                          Background="{StaticResource Background}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="510"
+                                    Margin="36" TextBlock.TextAlignment="Center">
+                            <TextBlock Text="Armory connection table" FontSize="22" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Text}"/>
+                            <TextBlock Margin="0,10,0,0" FontSize="14" Foreground="{StaticResource Text}"
+                                       TextWrapping="Wrap"
+                                       Text="This table is the map of this weapon's armory."/>
+                            <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextDim}"
+                                       TextWrapping="Wrap"
+                                       Text="It connects the weapon to its attachment categories. It does not contain individual barrels, sights or magazines itself."/>
+                            <Border Margin="0,22,0,18" Height="1" Background="{StaticResource Border}"/>
+                            <TextBlock Foreground="{StaticResource TextDim}" TextWrapping="Wrap"
+                                       Text="Choose a category on the left to view and edit the options that belong to it."/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+
+                <Grid x:Name="TechnicalPane" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="10,8">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <TextBlock Text="Show" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextDim}" Margin="12,0,6,0"/>
+                                <ComboBox x:Name="KindBox" Width="170" SelectionChanged="Filter_Changed"/>
+                                <TextBlock Text="Filter" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextDim}" Margin="12,0,6,0"/>
+                                <TextBox x:Name="FilterBox" Width="180" TextChanged="Filter_Changed"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <ListView Grid.Row="1" x:Name="ReferenceList" BorderThickness="0"
+                              SelectionChanged="Reference_Changed">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="" Width="24" DisplayMemberBinding="{Binding Mark}"/>
+                                <GridViewColumn Header="Technical field" Width="260" DisplayMemberBinding="{Binding Path}"/>
+                                <GridViewColumn Header="Current asset" Width="290" DisplayMemberBinding="{Binding Target}"/>
+                                <GridViewColumn Header="Purpose" Width="130" DisplayMemberBinding="{Binding Category}"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Grid>
+            </Grid>
+
+            <GridSplitter Grid.Column="2" Width="4" HorizontalAlignment="Stretch"/>
+
+            <ScrollViewer Grid.Column="3" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="18,16">
+                    <TextBlock x:Name="ReferenceTitle" Text="Select an option" FontSize="16"
+                               Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ReferenceMeta" Margin="0,5,0,16"
+                               Foreground="{StaticResource TextDim}"/>
+
+                    <StackPanel x:Name="PartPickerPanel" Visibility="Collapsed" Margin="0,0,0,15">
+                        <TextBlock Text="Part of this option" Foreground="{StaticResource TextDim}"/>
+                        <ComboBox x:Name="PartBox" Margin="0,5,0,0" DisplayMemberPath="PartLabel"
+                                  SelectionChanged="Part_Changed"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Selected asset" Foreground="{StaticResource TextDim}"/>
+                    <TextBlock x:Name="ResolvedNameText" Margin="0,5,0,2" FontSize="15"
+                               Foreground="{StaticResource Text}" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ResolvedText" Margin="0,0,0,17"
+                               Foreground="{StaticResource TextDim}" TextWrapping="Wrap" FontSize="10"/>
+
+                    <Border x:Name="GunsmithAvailabilityNote" Background="{StaticResource Surface}"
+                            BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="3"
+                            Padding="11,9" Margin="0,0,0,17" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Weapon owner listing" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                            <TextBlock x:Name="GunsmithAvailabilityText"
+                                       Text="Checking the installed Gunsmith list."
+                                       Margin="0,4,0,0" Foreground="{StaticResource TextDim}" FontSize="10" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="GunsmithLinkPanel" Background="{StaticResource Surface}"
+                            BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="3"
+                            Padding="11,9" Margin="0,0,0,17" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Confirmed game links" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                            <TextBlock x:Name="GunsmithLinkText" Margin="0,5,0,0" Foreground="{StaticResource TextDim}"
+                                       FontSize="10" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <Button x:Name="GunsmithAvailabilityButton" Content="Gunsmith availability"
+                            Click="ToggleGunsmithAvailability_Click" Visibility="Collapsed" IsEnabled="False"
+                            Margin="0,0,0,17" ToolTip="Change whether this option appears in Gunsmith."/>
+
+                    <WrapPanel Margin="0,0,0,18">
+                        <Button x:Name="DuplicateRowButton" Content="Duplicate exact row (technical)"
+                                Click="DuplicateRow_Click" IsEnabled="False"/>
+                        <Button x:Name="RemoveRowButton" Content="Remove technical row"
+                                Click="RemoveRow_Click" IsEnabled="False" Visibility="Collapsed" Margin="8,0,0,0"/>
+                        <Button x:Name="ClearFieldButton" Content="Clear optional asset"
+                                Click="ClearField_Click" Visibility="Collapsed" Margin="8,0,0,0"/>
+                    </WrapPanel>
+
+                    <StackPanel x:Name="RawReferencePanel" Visibility="Collapsed">
+                        <TextBlock Text="Raw reference replacement" FontWeight="SemiBold"
+                                   Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="The game database confirms complete options, not arbitrary one-field replacements."
+                                   Margin="0,3,0,0" Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
+                        <TextBox x:Name="TargetSearchBox" Margin="0,7,0,6"
+                                 TextChanged="TargetSearch_Changed"/>
+                        <CheckBox x:Name="ShowAllAssetsBox" Margin="0,0,0,6"
+                                  Content="Enable unverified archive search"
+                                  IsEnabled="False"
+                                  Checked="SearchMode_Changed" Unchecked="SearchMode_Changed"/>
+                        <TextBlock x:Name="SearchModeNote"
+                                   Text="Disabled: no individual asset replacement is confirmed for this exact row."
+                                   Margin="0,0,0,8" Foreground="{StaticResource TextDim}"
+                                   FontSize="10" TextWrapping="Wrap"/>
+                        <Grid Height="220" Margin="0,0,0,8">
+                            <ListView x:Name="TargetResults" ItemContainerStyle="{StaticResource PlainRow}"
+                                      BorderThickness="1" BorderBrush="{StaticResource Border}"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                      SelectionChanged="Target_Changed" MouseDoubleClick="Target_DoubleClick">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="4,5" ToolTip="{Binding Details}">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Compatibility}"
+                                                           Foreground="{StaticResource TextDim}" FontSize="9" Margin="8,0,0,0"/>
+                                                <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource Text}"
+                                                           FontSize="13" TextTrimming="CharacterEllipsis"/>
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextDim}"
+                                                       Margin="0,2,0,0" FontSize="9" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Reason}" Foreground="{StaticResource TextDim}"
+                                                       Margin="0,2,0,0" FontSize="9" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <TextBlock x:Name="TargetEmptyText" Text="Select an option first."
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Margin="20" TextAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{StaticResource TextDim}" IsHitTestVisible="False"/>
+                        </Grid>
+                        <Button x:Name="UseTargetButton" Content="Use unverified asset"
+                                Click="UseTarget_Click" IsEnabled="False" HorizontalAlignment="Left"/>
+                    </StackPanel>
+
+                    <Expander x:Name="TechnicalDetailsPanel" Header="Technical details" Margin="0,20,0,0"
+                              Visibility="Collapsed"
+                              Foreground="{StaticResource TextDim}">
+                        <StackPanel Margin="0,10,0,0">
+                            <TextBlock Text="Exact asset ID" Foreground="{StaticResource TextDim}"/>
+                            <TextBox x:Name="ValueBox" Margin="0,5,0,8" FontFamily="Consolas"
+                                     IsEnabled="False" KeyDown="Value_KeyDown"/>
+                            <CheckBox x:Name="ReplaceMatchingBox" Margin="0,4,0,2" IsEnabled="False"
+                                      Content="Update all fields using the current asset"/>
+                            <TextBlock x:Name="ReplaceMatchingHelp" Margin="22,0,0,10"
+                                       Foreground="{StaticResource TextDim}" FontSize="10" TextWrapping="Wrap"/>
+                            <Button x:Name="ApplyValueButton" Content="Apply exact ID"
+                                    Click="ApplyValue_Click" IsEnabled="False" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+
+    <Border x:Name="MetadataLoadingOverlay" Panel.ZIndex="100" Visibility="Collapsed"
+            Background="#B8141416" Cursor="Wait" Focusable="True">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" MinWidth="360"
+                Padding="28,22" CornerRadius="6" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="Loading game labels" FontSize="16" FontWeight="SemiBold"
+                           Foreground="{StaticResource Text}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="MetadataLoadingText" Margin="0,7,0,14" MaxWidth="480"
+                           Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"
+                           HorizontalAlignment="Center" TextAlignment="Center"/>
+                <ProgressBar Height="8" IsIndeterminate="True" Foreground="{StaticResource Accent}"
+                             Background="{StaticResource Background}"/>
+            </StackPanel>
+        </Border>
+    </Border>
+    </Grid>
+</Window>

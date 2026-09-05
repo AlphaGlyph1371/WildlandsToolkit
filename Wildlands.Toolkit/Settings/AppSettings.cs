@@ -6,6 +6,7 @@ namespace Wildlands.Toolkit;
 
 public sealed class AppSettings
 {
+    public DateTimeOffset? LastUpdateCheckUtc { get; set; }
     public string GamePath { get; set; } = "";
     public string ExportFolder { get; set; } = "";
     public List<string> RecentArchives { get; set; } = [];
@@ -15,6 +16,11 @@ public sealed class AppSettings
 
     // Building this takes some minutes, so it is kept next to the settings
     public static string SkeletonCachePath => Path.Combine(Folder, "skeletons.cache");
+
+    // Kept separately so older Toolkit versions, which only know about the skeleton
+    // cache, continue to start normally after an update.
+    public static string ArmoryCachePath => Path.Combine(Folder, "armory.cache");
+    public bool SeenIndexSetup { get; set; }
 
     static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WildlandsToolkit");
 

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using Wildlands.Formats;
@@ -5,13 +6,14 @@ using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
 using System.Linq;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using Wildlands.Formats.Models;
 using Wildlands.Formats.Materials;
 using Wildlands.Formats.Textures;
 using Wildlands.Formats.Weather;
 using Wildlands.Toolkit;
 
-if (args.Length < 2)
+if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
 {
     Console.WriteLine("usage: wlcli <command> <args>");
     Console.WriteLine("  blobs <file.data>              list the compressed blobs of a data file");
@@ -25,6 +27,7 @@ if (args.Length < 2)
     Console.WriteLine("  mesh  <file.data> <name>       what a mesh holds");
     Console.WriteLine("  sets  <file.forge> [n]         which textures the texture sets point at");
     Console.WriteLine("  mats  <file.forge> [n]         whether every draw range finds its material");
+    Console.WriteLine("  matinfo <file.forge> <container> <material>  show texture-selector and TextureSet links");
     Console.WriteLine("  params <file.forge> [n] [out.txt]  walk every material parameter list and count what is in it");
     Console.WriteLine("  camo  <file.forge> [file2.forge...]  match every camo option to the texture it wears");
     Console.WriteLine("  ranges <file.data> <name>      how its index buffer splits over the draw ranges");
@@ -49,6 +52,7 @@ if (args.Length < 2)
     Console.WriteLine("  skelcycle <folder|file.data>   read and rewrite every Skeleton byte for byte");
     Console.WriteLine("  skelcheck <folder|file.data>   check Skeletons against the published Anvil documentation");
     Console.WriteLine("  buildcycle <folder|file.data>  parse and rewrite every BuildTable byte for byte");
+    Console.WriteLine("  buildaudit <file.forge> [container filter]  roundtrip and duplicate every safe BuildTable row in an archive");
     Console.WriteLine("  meshcycle <folder|file.data> [n]  read and rewrite every Mesh byte for byte");
     Console.WriteLine("  skelindex <folder-with-forges> <cache.bin>  index every Skeleton resource across a folder of archives");
     Console.WriteLine("  pack  <file.data> <out.data>   read a data file and write it back, then compare both");
@@ -65,7 +69,33 @@ if (args.Length < 2)
     Console.WriteLine("  guessprops <audit.json> [words.txt] [parts]  combine graphics terms and match unknown leaf hashes");
     Console.WriteLine("  graphicsprofile <file.data> <resource> <profile.json> [out.data]  preview or apply a graphics profile");
     Console.WriteLine("  refs  <file.data> <name|0xid>  which resources hold this resource's id");
+    Console.WriteLine("  refsforge <archive.forge> <container filter> <id> [id...]  find exact ids inside one Forge container");
+    Console.WriteLine("  refs32forge <archive.forge> <container filter> <value> [value...]  find exact 32-bit values inside one Forge container");
+    Console.WriteLine("  namesforge <archive.forge> <container filter> <resource filter>  list matching resources in one Forge container");
+    Console.WriteLine("  hexdb <archive.forge> <container filter> <id> [bytes] [offset]  print database resource bytes");
+    Console.WriteLine("  tagmap <archive.forge> <container filter> <tag> [tag...]  inspect BuildTag-to-column-mask entries");
+    Console.WriteLine("  comparedb <archive.forge> <container filter> <baseline id> <candidate id> [...]  compare database resource bytes");
+    Console.WriteLine("  locfind <game folder> <string id>  find one localized string in every installed package");
+    Console.WriteLine("  locstats <game folder>  measure localized string id ranges in installed packages");
+    Console.WriteLine("  xrefall <game folder> <id> [id...]  find exact 64-bit references in every installed data container");
+    Console.WriteLine("  find64 <folder|file.data> <id> [id...]  find exact little-endian 64-bit values in resources");
+    Console.WriteLine("  copies <archive.forge> <id>  list every installed copy of one exact resource id");
+    Console.WriteLine("  ids <archive.forge> <id> [id...]  resolve exact resource ids from the archive index");
     Console.WriteLine("  where <game folder> <name> [--all]  which archives hold a resource, and which one the game loads last");
+    Console.WriteLine("  handles <game folder> <archive.forge> [name prefix]  check that every BuildTable model handle reaches a Forge entry");
+    Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
+    Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
+    Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  duprowcheck <archive.forge> <container> <table> <row>  verify an in-memory row duplication");
+    Console.WriteLine("  memwatch <process|pid> <u32:0xvalue|u64:0xvalue> [...]  compare exact values in two live process states");
+    Console.WriteLine("  memfind <process|pid> <u32:0xvalue|u64:0xvalue> [...]  find exact values in a live process");
+    Console.WriteLine("  memcontexts <process|pid> <locked value> <free value> [...]  compare nearby runtime records");
+    Console.WriteLine("  memsave <process|pid> <out.json> <u32:0xvalue|u64:0xvalue> [...]  save a live value snapshot");
+    Console.WriteLine("  memdiff <before.json> <after.json>  compare two saved live value snapshots");
+    Console.WriteLine("  memread <process|pid> <address> <length>  read a live process memory range");
+    Console.WriteLine("  memregion <process|pid> <address> <out.bin>  save the readable region containing an address");
+    Console.WriteLine("  memtrace <process|pid> <address> [address...]  trace one to four aligned 4-byte addresses");
+    Console.WriteLine("  memtraceprobe                       isolated hardware-watchpoint test target");
     return 1;
 }
 
@@ -101,6 +131,8 @@ switch (args[0])
         return CheckTextureSets(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
     case "mats":
         return CheckMaterials(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
+    case "matinfo" when args.Length >= 4:
+        return ShowMaterialLinks(args[1], args[2], args[3]);
     case "camo":
         return MatchCamo(args[1..]);
     case "params":
@@ -145,6 +177,8 @@ switch (args[0])
         return CheckSkeletonsAgainstDocs(args[1]);
     case "buildcycle":
         return CheckBuildTableRoundTrips(args[1]);
+    case "buildaudit":
+        return AuditForgeBuildTables(args[1], args.Length >= 3 ? args[2] : "");
     case "meshcycle":
         return CheckMeshRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
     case "skelindex" when args.Length >= 3:
@@ -178,11 +212,353 @@ switch (args[0])
         return ApplyGraphicsProfile(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
     case "refs" when args.Length >= 3:
         return FindReferences(args[1], args[2]);
+    case "refsforge" when args.Length >= 4:
+        return FindForgeReferences(args[1], args[2], args[3..]);
+    case "refs32forge" when args.Length >= 4:
+        return FindForge32BitValues(args[1], args[2], args[3..]);
+    case "namesforge" when args.Length >= 4:
+        return FindForgeResourceNames(args[1], args[2], args[3]);
+    case "hexdb" when args.Length >= 4:
+        return PrintDatabaseResource(args[1], args[2], args[3],
+            args.Length >= 5 ? ParseFlexibleInt32(args[4]) : int.MaxValue,
+            args.Length >= 6 ? ParseFlexibleInt32(args[5]) : 0);
+    case "tagmap" when args.Length >= 4:
+        return InspectBuildTagColumnMaps(args[1], args[2], args[3..]);
+    case "comparedb" when args.Length >= 5:
+        return CompareDatabaseResources(args[1], args[2], args[3], args[4..]);
+    case "locfind" when args.Length >= 3:
+        return FindLocalizedString(args[1], args[2]);
+    case "locstats" when args.Length >= 2:
+        return MeasureLocalizedStringIds(args[1]);
+    case "xrefall" when args.Length >= 3:
+        return ArchiveReferenceCensus.Run(args[1], args[2..]);
+    case "find64" when args.Length >= 3:
+        return Find64BitValues(args[1], args.Skip(2).ToArray());
+    case "copies" when args.Length >= 3:
+        return FindAssetCopies(args[1], args[2]);
+    case "ids" when args.Length >= 3:
+        return FindResourcesById(args[1], args[2..]);
     case "where" when args.Length >= 3:
         return WhereIsResource(args[1], args[2], args.Contains("--all"));
+    case "handles" when args.Length >= 3:
+        return CheckModelHandles(args[1], args[2], args.Length >= 4 ? args[3] : "");
+    case "lodsizes" when args.Length >= 3:
+        return CheckStreamedLodSizes(args[1], args[2], args.Length >= 4 ? args[3] : "");
+    case "agree" when args.Length >= 3:
+        return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
+    case "buildinfo" when args.Length >= 3:
+        return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+    case "duprowcheck" when args.Length >= 5:
+        return CheckDuplicatedBuildTable(args[1], args[2], args[3], int.Parse(args[4]));
+    case "memwatch" when args.Length >= 3:
+        return ProcessMemoryWatch.Run(args[1], args[2..]);
+    case "memfind" when args.Length >= 3:
+        return ProcessMemoryWatch.Find(args[1], args[2..]);
+    case "memcontexts" when args.Length >= 4:
+        return ProcessMemoryWatch.CompareContexts(args[1], args[2..]);
+    case "memsave" when args.Length >= 4:
+        return ProcessMemoryWatch.Save(args[1], args[2], args[3..]);
+    case "memdiff" when args.Length >= 3:
+        return ProcessMemoryWatch.Compare(args[1], args[2]);
+    case "memread" when args.Length >= 4:
+        return ProcessMemoryWatch.Read(args[1], args[2], args[3]);
+    case "memregion" when args.Length >= 4:
+        return ProcessMemoryWatch.SaveRegion(args[1], args[2], args[3]);
+    case "memtrace" when args.Length >= 3:
+        return ProcessMemoryTrace.Run(args[1], args[2..]);
+    case "memtraceprobe":
+        return ProcessMemoryTrace.Probe();
     default:
         Console.WriteLine($"unknown command: {args[0]}");
         return 1;
+}
+
+// A model a BuildTable row names is always the first resource of a Forge entry that carries
+// its id. Measured over the shipped game: 29,637 of 29,637 containers in DataPC.forge start
+// with the resource their entry is named after, and 2,487 of 2,487 model handles in the 843
+// weapon BuildTables of DataPC_patch_01.forge name such an entry. A handle that names a
+// resource buried inside somebody else's container is never resolved by the game, so this
+// command is the check to run over a modified archive before starting Wildlands.
+static int CheckModelHandles(string gameFolder, string archivePath, string prefix)
+{
+    var installed = ArchiveLocator.Find(gameFolder);
+    if (installed.Count == 0)
+    {
+        Console.WriteLine("no forge archives in " + gameFolder);
+        return 1;
+    }
+
+    var entryIds = new Dictionary<ulong, string>();
+    foreach (string path in installed)
+    {
+        try
+        {
+            using var archive = ForgeArchive.Open(path);
+            foreach (var entry in archive.Entries)
+                entryIds.TryAdd(entry.Id, Path.GetFileName(path));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  skipped {Path.GetFileName(path)}: {ex.Message}");
+        }
+    }
+    Console.WriteLine($"{installed.Count} installed archives, {entryIds.Count} Forge entry ids");
+
+    using var target = ForgeArchive.Open(archivePath);
+    int tables = 0, resolved = 0;
+    var unresolved = new List<string>();
+
+    foreach (var entry in target.Entries)
+    {
+        if (entry.FileExtension != ".data"
+            || !entry.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            continue;
+
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(target.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch { continue; }
+
+        var localIds = file.Resources.Select(resource => resource.Id).ToHashSet();
+        foreach (var resource in file.Resources)
+        {
+            if (resource.ClassHash != BuildTable.ClassHash)
+                continue;
+
+            BuildTableAsset table;
+            try { table = BuildTable.Read(resource.Data); }
+            catch { continue; }
+            tables++;
+
+            foreach (var row in table.Rows)
+            {
+                foreach (var reference in row.References)
+                {
+                    if (reference.Kind != BuildTableReferenceKind.Handle
+                        || reference.ComponentIndex is null
+                        || reference.Value == 0)
+                        continue;
+
+                    if (entryIds.ContainsKey(reference.Value))
+                    {
+                        resolved++;
+                        continue;
+                    }
+
+                    string where = localIds.Contains(reference.Value)
+                        ? "it is a plain resource inside this same container"
+                        : "no installed archive holds a Forge entry with that id";
+                    unresolved.Add($"{entry.Name}/{resource.Name} row {row.Index} "
+                        + $"tag 0x{row.Tag:X8} names 0x{reference.Value:X}: {where}");
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"{tables} BuildTables in {Path.GetFileName(archivePath)}: "
+        + $"{resolved} model handles reach a Forge entry, {unresolved.Count} do not");
+    foreach (string line in unresolved)
+        Console.WriteLine("  " + line);
+    return unresolved.Count == 0 ? 0 : 1;
+}
+
+// Four bytes behind the handle of a LOD that lives in a Forge entry of its own, a LODSelector
+// carries how much GPU data that LOD is. Measured over all 2846 LODSelectors of DataPC.forge
+// that stream a LOD: 1949 count the vertex buffer, the index buffer and the primitive
+// descriptions, 838 leave the descriptions out, 59 hold zero, and nothing else occurs. A
+// number left over from a replaced mesh promises the streamer more data than the file holds,
+// and everything that wants the streamed LOD - the Gunsmith above all - stops loading.
+static int CheckStreamedLodSizes(string gameFolder, string archivePath, string prefix)
+{
+    var installed = ArchiveLocator.Find(gameFolder);
+    if (installed.Count == 0)
+    {
+        Console.WriteLine("no forge archives in " + gameFolder);
+        return 1;
+    }
+
+    var homeOf = new Dictionary<ulong, string>();
+    foreach (string path in installed)
+    {
+        try
+        {
+            using var archive = ForgeArchive.Open(path);
+            foreach (var entry in archive.Entries)
+                homeOf.TryAdd(entry.Id, path);
+        }
+        catch { }
+    }
+
+    var open = new Dictionary<string, ForgeArchive>(StringComparer.OrdinalIgnoreCase);
+    var meshes = new Dictionary<ulong, (int Buffers, int WithDescriptions)>();
+    int selectors = 0, correct = 0, zero = 0;
+    var wrong = new List<string>();
+
+    try
+    {
+        using var target = ForgeArchive.Open(archivePath);
+        uint selectorHash = ResourceTypes.Crc32("LODSelector");
+
+        foreach (var entry in target.Entries)
+        {
+            if (entry.FileExtension != ".data" || entry.Extension != selectorHash
+                || !entry.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            DataFile file;
+            try
+            {
+                using var stream = new MemoryStream(target.ReadEntry(entry));
+                file = DataFile.Read(stream);
+            }
+            catch { continue; }
+
+            Resource selector = file.Resources[0];
+            var own = file.Resources.Select(resource => resource.Id).ToHashSet();
+            selectors++;
+
+            byte[] data = selector.Data;
+            for (int offset = 0; offset + sizeof(ulong) + 2 * sizeof(uint) <= data.Length; offset++)
+            {
+                ulong id = BinaryPrimitives.ReadUInt64LittleEndian(data.AsSpan(offset));
+                if (id == selector.Id || own.Contains(id) || !homeOf.TryGetValue(id, out string? home))
+                    continue;
+
+                if (!meshes.TryGetValue(id, out var size))
+                {
+                    if (!open.TryGetValue(home, out ForgeArchive? source))
+                        open[home] = source = ForgeArchive.Open(home);
+                    var lodEntry = source.Entries.First(candidate => candidate.Id == id);
+                    using var stream = new MemoryStream(source.ReadEntry(lodEntry));
+                    Resource lod = DataFile.Read(stream).Resources[0];
+                    if (lod.ClassHash != Mesh.ClassHash) continue;
+                    var mesh = Mesh.Read(lod.Data);
+                    if (mesh.Clustered is null) continue;
+                    int buffers = mesh.Clustered.VertexBuffer.Length + mesh.Clustered.IndexBuffer.Length;
+                    meshes[id] = size = (buffers, buffers + mesh.Clustered.PrimitiveDescriptions.Length);
+                }
+
+                uint value = BinaryPrimitives.ReadUInt32LittleEndian(
+                    data.AsSpan(offset + sizeof(ulong) + sizeof(uint)));
+                if (value == 0) zero++;
+                else if (value == size.Buffers || value == size.WithDescriptions) correct++;
+                else
+                    wrong.Add($"{entry.Name}: streamed LOD 0x{id:X} is {size.Buffers} bytes "
+                        + $"({size.WithDescriptions} with descriptions), the selector says {value}");
+            }
+        }
+    }
+    finally
+    {
+        foreach (var archive in open.Values)
+            archive.Dispose();
+    }
+
+    Console.WriteLine($"{selectors} LODSelectors in {Path.GetFileName(archivePath)}: "
+        + $"{correct} streamed sizes correct, {zero} left at zero, {wrong.Count} wrong");
+    foreach (string line in wrong)
+        Console.WriteLine("  " + line);
+    return wrong.Count == 0 ? 0 : 1;
+}
+
+// A container ships in the base archive and again in the patch, and both are mounted. A mod
+// that changes one copy and leaves the other is the oldest way to waste an evening here: part
+// of the game shows the change and part of it does not. This holds every BuildTable of a
+// container against the same table in every other installed copy and lists the options that
+// only one of them has.
+static int CheckCopiesAgree(string gameFolder, string archivePath, string prefix)
+{
+    var installed = ArchiveLocator.Find(gameFolder)
+        .Where(path => !string.Equals(path, archivePath, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    using var target = ForgeArchive.Open(archivePath);
+    var wanted = target.Entries
+        .Where(entry => entry.FileExtension == ".data"
+            && entry.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(entry => entry.Id, entry => entry);
+    if (wanted.Count == 0)
+    {
+        Console.WriteLine($"no container in {Path.GetFileName(archivePath)} matches \"{prefix}\"");
+        return 1;
+    }
+
+    var here = new Dictionary<ulong, Dictionary<ulong, (string Name, HashSet<uint> Tags)>>();
+    foreach (var entry in wanted.Values)
+        here[entry.Id] = ReadOptionTags(target, entry);
+
+    int compared = 0, agree = 0;
+    var differences = new List<string>();
+
+    foreach (string path in installed)
+    {
+        ForgeArchive other;
+        try { other = ForgeArchive.Open(path); }
+        catch { continue; }
+
+        using (other)
+        {
+            foreach (var entry in other.Entries.Where(entry => wanted.ContainsKey(entry.Id)))
+            {
+                var mine = here[entry.Id];
+                var theirs = ReadOptionTags(other, entry);
+                foreach ((ulong id, var table) in mine)
+                {
+                    if (!theirs.TryGetValue(id, out var second))
+                    {
+                        differences.Add($"{table.Name}: {Path.GetFileName(path)} has no such table "
+                            + $"in its copy of {entry.Name}");
+                        continue;
+                    }
+                    compared++;
+                    var onlyHere = table.Tags.Except(second.Tags).ToList();
+                    var onlyThere = second.Tags.Except(table.Tags).ToList();
+                    if (onlyHere.Count == 0 && onlyThere.Count == 0) { agree++; continue; }
+                    foreach (uint tag in onlyHere)
+                        differences.Add($"{table.Name}: option 0x{tag:X8} is only in "
+                            + $"{Path.GetFileName(archivePath)}, not in {Path.GetFileName(path)}");
+                    foreach (uint tag in onlyThere)
+                        differences.Add($"{table.Name}: option 0x{tag:X8} is only in "
+                            + $"{Path.GetFileName(path)}, not in {Path.GetFileName(archivePath)}");
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"{wanted.Count} container(s) matching \"{prefix}\": {compared} BuildTables "
+        + $"held against a second installed copy, {agree} agree, {differences.Count} difference(s)");
+    foreach (string line in differences)
+        Console.WriteLine("  " + line);
+    return differences.Count == 0 ? 0 : 1;
+}
+
+static Dictionary<ulong, (string Name, HashSet<uint> Tags)> ReadOptionTags(
+    ForgeArchive archive, ForgeEntry entry)
+{
+    var tables = new Dictionary<ulong, (string, HashSet<uint>)>();
+    DataFile file;
+    try
+    {
+        using var stream = new MemoryStream(archive.ReadEntry(entry));
+        file = DataFile.Read(stream);
+    }
+    catch { return tables; }
+
+    foreach (var resource in file.Resources)
+    {
+        if (resource.ClassHash != BuildTable.ClassHash)
+            continue;
+        try
+        {
+            var table = BuildTable.Read(resource.Data);
+            tables[resource.Id] = (resource.Name, table.Rows.Select(row => row.Tag).ToHashSet());
+        }
+        catch { }
+    }
+    return tables;
 }
 
 // Writes a data file back out and reads the result again, so that every resource
@@ -901,6 +1277,57 @@ static int CheckParameters(string forgePath, int limit, string? dumpPath)
         Console.WriteLine("wrote " + names.Count + " hashes to " + dumpPath);
     }
 
+    return 0;
+}
+
+static int ShowMaterialLinks(string forgePath, string containerName, string materialName)
+{
+    using var archive = ForgeArchive.Open(forgePath);
+    ForgeEntry? entry = archive.Entries.FirstOrDefault(candidate =>
+        candidate.FileExtension == ".data"
+        && candidate.Name.Equals(containerName, StringComparison.OrdinalIgnoreCase));
+    if (entry is null)
+    {
+        Console.WriteLine($"container {containerName} was not found");
+        return 1;
+    }
+
+    DataFile file;
+    using (var stream = new MemoryStream(archive.ReadEntry(entry), writable: false))
+        file = DataFile.Read(stream);
+
+    Resource? resource = file.Resources.FirstOrDefault(candidate =>
+        candidate.ClassHash == Material.ClassHash
+        && candidate.Name.Equals(materialName, StringComparison.OrdinalIgnoreCase));
+    if (resource is null)
+    {
+        Console.WriteLine($"material {materialName} was not found in {containerName}");
+        return 1;
+    }
+
+    var material = Material.Read(resource.Data);
+    var sets = file.Resources.Where(candidate => candidate.ClassHash == TextureSet.ClassHash)
+        .Select(candidate => (candidate.Name, Set: TextureSet.Read(candidate.Data)))
+        .ToDictionary(candidate => candidate.Set.Id);
+
+    Console.WriteLine($"material 0x{material.Id:X}  default set 0x{material.TextureSetId:X}");
+    foreach (var set in sets.Values)
+    {
+        Console.WriteLine($"set 0x{set.Set.Id:X}  {set.Name}");
+        foreach (var slot in set.Set.Textures)
+            Console.WriteLine($"  {slot.Name,-16} 0x{slot.Id:X}");
+    }
+
+    Console.WriteLine("parameters:");
+    foreach (var parameter in material.Parameters.Where(parameter => parameter.TextureId != 0))
+    {
+        string name = ParameterNames.NameOf(parameter.Name);
+        string match = sets.TryGetValue(parameter.TextureSetId, out var selected)
+            ? selected.Set.Textures.FirstOrDefault(slot => slot.Id == parameter.TextureId)?.Name ?? "<not in selected set>"
+            : "<set not in container>";
+        Console.WriteLine($"  0x{parameter.Name:X8} {name,-18} set 0x{parameter.TextureSetId:X}  "
+            + $"texture 0x{parameter.TextureId:X}  slot {match}");
+    }
     return 0;
 }
 
@@ -2404,6 +2831,7 @@ static int ImportGltf(string path, string name, string input, string output)
 
 static int CheckGltfRoundTrips(string path, int limit)
 {
+    GltfImportSelfTest.Run();
     var paths = Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.data") : [path];
     string scratch = Path.Combine(Path.GetTempPath(), "wl-gltfcycle.glb");
     int seen = 0, failed = 0;
@@ -2710,6 +3138,88 @@ static int CheckBuildTableRoundTrips(string path)
     if (problems.Count > 0)
         Report("problems:", problems);
     return failed == 0 ? 0 : 1;
+}
+
+static int AuditForgeBuildTables(string archivePath, string containerFilter)
+{
+    using var archive = ForgeArchive.Open(archivePath);
+    int containers = 0, tables = 0, rows = 0, duplicatable = 0, duplicated = 0, failed = 0;
+    var problems = new Dictionary<string, int>();
+    var rejected = new Dictionary<string, int>();
+
+    foreach (var entry in archive.Entries)
+    {
+        if (!entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase))
+            continue;
+
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry), writable: false);
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        var resources = file.Resources.Where(resource => resource.ClassHash == BuildTable.ClassHash).ToList();
+        if (resources.Count == 0)
+            continue;
+        containers++;
+
+        foreach (var resource in resources)
+        {
+            tables++;
+            try
+            {
+                var table = BuildTable.Read(resource.Data);
+                rows += table.Rows.Count;
+                byte[] rebuilt = table.Write();
+                if (!rebuilt.AsSpan().SequenceEqual(resource.Data))
+                    throw new InvalidDataException(
+                        $"roundtrip differs at 0x{FirstDifference(resource.Data, rebuilt):X}");
+
+                for (int row = 0; row < table.Rows.Count; row++)
+                {
+                    if (!table.CanDuplicateRow(row, out string reason))
+                    {
+                        Bump(rejected, reason);
+                        continue;
+                    }
+                    duplicatable++;
+
+                    byte[] data = table.DuplicateRow(row);
+                    var copy = BuildTable.Read(data);
+                    if (copy.Rows.Count != table.Rows.Count + 1)
+                        throw new InvalidDataException(
+                            $"row {row} duplication produced {copy.Rows.Count} rows instead of {table.Rows.Count + 1}");
+                    byte[] copiedAgain = copy.Write();
+                    if (!copiedAgain.AsSpan().SequenceEqual(data))
+                        throw new InvalidDataException(
+                            $"row {row} duplicate roundtrip differs at 0x{FirstDifference(data, copiedAgain):X}");
+                    duplicated++;
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Bump(problems, ex.GetType().Name + ": " + ex.Message);
+                Console.WriteLine($"FAILED {entry.Name} / {resource.Name}: {ex.Message}");
+            }
+        }
+
+        if ((containers % 100) == 0)
+            Console.WriteLine($"checked {containers} BuildTable container(s), {tables} table(s), {duplicated} row duplication(s)…");
+    }
+
+    Console.WriteLine($"{containers} container(s), {tables} BuildTable(s), {rows} row(s)");
+    Console.WriteLine($"{duplicatable} safely duplicatable row(s), {duplicated} successful duplication(s), {failed} failure(s)");
+    if (problems.Count > 0)
+        Report("problems:", problems);
+    if (rejected.Count > 0)
+        Report("intentionally rejected rows:", rejected);
+    return failed == 0 && tables > 0 ? 0 : 1;
 }
 
 static int FirstDifference(byte[] left, byte[] right)
@@ -3301,7 +3811,7 @@ static int WhereIsResource(string gameFolder, string name, bool includeWorldMap)
     }
 
     var skipped = new List<string>();
-    var found = new List<(string Archive, string Container, string Resource, string Kind, int Bytes)>();
+    var found = new List<(string Archive, string Container, ulong Id, string Resource, string Kind, int Bytes)>();
 
     foreach (string path in archives)
     {
@@ -3333,7 +3843,7 @@ static int WhereIsResource(string gameFolder, string name, bool includeWorldMap)
                 {
                     if (!resource.Name.Contains(name, StringComparison.OrdinalIgnoreCase)) continue;
 
-                    found.Add((Path.GetFileName(path), entry.Name, resource.Name,
+                    found.Add((Path.GetFileName(path), entry.Name, resource.Id, resource.Name,
                         ResourceTypes.NameOf(resource.ClassHash), resource.Data.Length));
                 }
             }
@@ -3348,12 +3858,14 @@ static int WhereIsResource(string gameFolder, string name, bool includeWorldMap)
         return 1;
     }
 
-    foreach (var perResource in found.GroupBy(f => f.Resource).OrderBy(g => g.Key))
+    foreach (var perResource in found
+                 .GroupBy(foundResource => (foundResource.Resource, foundResource.Id))
+                 .OrderBy(group => group.Key.Resource))
     {
-        Console.WriteLine(perResource.Key + "  (" + perResource.First().Kind + ")");
+        Console.WriteLine(perResource.Key.Resource + "  (" + perResource.First().Kind + ")");
 
         foreach (var hit in perResource)
-            Console.WriteLine($"    {hit.Archive,-42} container \"{hit.Container}\"  {hit.Bytes} bytes");
+            Console.WriteLine($"    0x{hit.Id:X12}  {hit.Archive,-42} container \"{hit.Container}\"  {hit.Bytes} bytes");
 
         if (perResource.Count() > 1)
             Console.WriteLine($"    -> {perResource.Count()} copies. Change every one of them, or the game keeps showing an older copy.");
@@ -3407,4 +3919,641 @@ static int FindReferences(string path, string what)
 
     Console.WriteLine(found == 0 ? "  nothing" : $"  {found} resources");
     return 0;
+}
+
+static int InspectBuildTables(string archivePath, string containerFilter, string tableFilter)
+{
+    int found = 0;
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        foreach (Resource resource in file.Resources.Where(resource =>
+                     resource.ClassHash == BuildTable.ClassHash
+                     && resource.Name.Contains(tableFilter, StringComparison.OrdinalIgnoreCase)))
+        {
+            BuildTableAsset table;
+            try
+            {
+                table = BuildTable.Read(resource.Data);
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"0x{resource.Id:X12} {resource.Name}: {exception.Message}");
+                continue;
+            }
+
+            found++;
+            Console.WriteLine($"{Path.GetFileName(archivePath)} | {entry.Name} | "
+                + $"0x{resource.Id:X12} {resource.Name} | {table.RowCount} row(s)");
+            foreach (BuildTableRow row in table.Rows)
+            {
+                string possible = row.PossibleTags.Count == 0
+                    ? "-"
+                    : string.Join(",", row.PossibleTags.Select(tag => $"0x{tag:X8}"));
+                string references = string.Join(", ", row.References
+                    .Where(reference => reference.Value != 0)
+                    .Select(reference => $"{reference.Kind}:{reference.ComponentIndex?.ToString() ?? "-"}="
+                        + $"0x{reference.Value:X}"));
+                Console.WriteLine($"  row {row.Index} id=0x{row.Id:X} tag=0x{row.Tag:X8} "
+                    + $"possible=[{possible}] {references}");
+            }
+        }
+    }
+    Console.WriteLine($"{found} BuildTable(s)");
+    return found == 0 ? 1 : 0;
+}
+
+static int CheckDuplicatedBuildTable(string archivePath, string containerName,
+    string tableName, int rowIndex)
+{
+    using var archive = ForgeArchive.Open(archivePath);
+    ForgeEntry entry = archive.Entries.Single(entry => entry.FileExtension == ".data"
+        && string.Equals(entry.Name, containerName, StringComparison.OrdinalIgnoreCase));
+    using var stream = new MemoryStream(archive.ReadEntry(entry));
+    Resource resource = DataFile.Read(stream).Resources.Single(resource =>
+        resource.ClassHash == BuildTable.ClassHash
+        && string.Equals(resource.Name, tableName, StringComparison.OrdinalIgnoreCase));
+    BuildTableAsset original = BuildTable.Read(resource.Data);
+    BuildTableAsset duplicated = BuildTable.Read(original.DuplicateRow(rowIndex));
+    Console.WriteLine("rows: " + string.Join(", ", duplicated.Rows.Select(row => $"0x{row.Id:X}")));
+    Console.WriteLine("objects: " + string.Join(", ", duplicated.Objects
+        .Where(obj => obj.Id is >= 0xF0000000UL and <= uint.MaxValue)
+        .OrderBy(obj => obj.Offset).Select(obj => $"0x{obj.Id:X}")));
+    return 0;
+}
+
+static int FindForgeReferences(string archivePath, string containerFilter,
+    IReadOnlyList<string> texts)
+{
+    ulong[] wanted = texts.Select(text => text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt64(text[2..], 16)
+            : Convert.ToUInt64(text))
+        .Distinct()
+        .ToArray();
+    int found = 0;
+
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        foreach (Resource resource in file.Resources)
+        {
+            foreach (ulong value in wanted)
+            {
+                byte[] needle = BitConverter.GetBytes(value);
+                int start = 0;
+                while (start <= resource.Data.Length - needle.Length)
+                {
+                    int relative = resource.Data.AsSpan(start).IndexOf(needle);
+                    if (relative < 0)
+                        break;
+                    int offset = start + relative;
+                    int contextStart = Math.Max(0, offset - 24);
+                    int contextLength = Math.Min(resource.Data.Length - contextStart, 56);
+                    Console.WriteLine($"0x{value:X12}  {resource.Name}  "
+                        + $"{ResourceTypes.NameOf(resource.ClassHash)}  offset 0x{offset:X}  "
+                        + Convert.ToHexString(resource.Data.AsSpan(contextStart, contextLength)));
+                    found++;
+                    start = offset + 1;
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"{found} exact occurrence(s) in containers matching {containerFilter}");
+    return found == 0 ? 1 : 0;
+}
+
+static int FindForge32BitValues(string archivePath, string containerFilter,
+    IReadOnlyList<string> texts)
+{
+    uint[] wanted = texts.Select(text => text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt32(text[2..], 16)
+            : Convert.ToUInt32(text))
+        .Distinct()
+        .ToArray();
+    int found = 0;
+
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        foreach (Resource resource in file.Resources)
+        {
+            foreach (uint value in wanted)
+            {
+                byte[] needle = BitConverter.GetBytes(value);
+                var offsets = new List<int>();
+                int start = 0;
+                while (start <= resource.Data.Length - needle.Length)
+                {
+                    int relative = resource.Data.AsSpan(start).IndexOf(needle);
+                    if (relative < 0)
+                        break;
+                    offsets.Add(start + relative);
+                    start += relative + 1;
+                }
+                if (offsets.Count == 0)
+                    continue;
+                Console.WriteLine($"0x{value:X8}  {entry.Name}  {resource.Name}  "
+                    + $"{ResourceTypes.NameOf(resource.ClassHash)}  "
+                    + $"{offsets.Count} occurrence(s) at "
+                    + string.Join(",", offsets.Select(offset => $"0x{offset:X}")));
+                found += offsets.Count;
+            }
+        }
+    }
+
+    Console.WriteLine($"{found} exact occurrence(s) in containers matching {containerFilter}");
+    return found == 0 ? 1 : 0;
+}
+
+static int FindForgeResourceNames(string archivePath, string containerFilter,
+    string resourceFilter)
+{
+    int found = 0;
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        foreach (Resource resource in file.Resources.Where(resource =>
+                     resource.Name.Contains(resourceFilter, StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine($"0x{resource.Id:X12}  {ResourceTypes.NameOf(resource.ClassHash),-32} "
+                + $"{resource.Name}  in {entry.Name}");
+            found++;
+        }
+    }
+
+    Console.WriteLine($"{found} matching resource(s)");
+    return found == 0 ? 1 : 0;
+}
+
+static int CompareDatabaseResources(string archivePath, string containerFilter,
+    string baselineText, IReadOnlyList<string> candidateTexts)
+{
+    ulong baselineId = ParseResourceId(baselineText);
+    ulong[] candidateIds = candidateTexts.Select(ParseResourceId).Distinct().ToArray();
+    var wanted = candidateIds.Append(baselineId).ToHashSet();
+    var resources = new Dictionary<ulong, Resource>();
+    var knownIds = new HashSet<ulong>();
+
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            DataFile file = DataFile.Read(stream);
+            knownIds.UnionWith(file.Resources.Select(resource => resource.Id));
+            foreach (Resource resource in file.Resources.Where(resource => wanted.Contains(resource.Id)))
+                resources[resource.Id] = resource;
+        }
+        catch
+        {
+        }
+    }
+
+    if (!resources.TryGetValue(baselineId, out Resource? baseline))
+    {
+        Console.WriteLine($"baseline 0x{baselineId:X12} was not found");
+        return 1;
+    }
+
+    Console.WriteLine($"baseline 0x{baseline.Id:X12} {baseline.Name}: {baseline.Data.Length:N0} bytes");
+    HashSet<ulong> baselineReferences = KnownResourceReferences(baseline.Data, knownIds, baseline.Id);
+    foreach (ulong candidateId in candidateIds)
+    {
+        if (!resources.TryGetValue(candidateId, out Resource? candidate))
+        {
+            Console.WriteLine($"0x{candidateId:X12}: not found");
+            continue;
+        }
+
+        int compared = Math.Min(baseline.Data.Length, candidate.Data.Length);
+        int equal = 0;
+        for (int offset = 0; offset < compared; offset++)
+            if (baseline.Data[offset] == candidate.Data[offset])
+                equal++;
+        HashSet<ulong> candidateReferences = KnownResourceReferences(candidate.Data, knownIds, candidate.Id);
+        int sharedReferences = baselineReferences.Intersect(candidateReferences).Count();
+        int combinedReferences = baselineReferences.Union(candidateReferences).Count();
+        int subsequence = LongestCommonSubsequenceLength(baseline.Data, candidate.Data);
+        HashSet<ulong> baselineWindows = ByteWindows(baseline.Data, 8);
+        HashSet<ulong> candidateWindows = ByteWindows(candidate.Data, 8);
+        int sharedWindows = baselineWindows.Intersect(candidateWindows).Count();
+        int combinedWindows = baselineWindows.Union(candidateWindows).Count();
+        Console.WriteLine($"0x{candidate.Id:X12} {candidate.Name}: {candidate.Data.Length:N0} bytes, "
+            + $"{equal:N0}/{compared:N0} aligned bytes equal ({equal * 100d / compared:N2}%), "
+            + $"LCS {subsequence:N0}/{compared:N0} ({subsequence * 100d / compared:N2}%), "
+            + $"8-byte windows {sharedWindows:N0}/{combinedWindows:N0}, "
+            + $"{sharedReferences}/{combinedReferences} known references shared");
+    }
+    return 0;
+}
+
+static int PrintDatabaseResource(string archivePath, string containerFilter, string idText,
+    int count, int startOffset)
+{
+    ulong id = ParseResourceId(idText);
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        Resource? resource = file.Resources.FirstOrDefault(resource => resource.Id == id);
+        if (resource is null)
+            continue;
+        int start = Math.Clamp(startOffset, 0, resource.Data.Length);
+        int length = Math.Min(Math.Max(count, 0), resource.Data.Length - start);
+        Console.WriteLine($"0x{resource.Id:X12} {resource.Name}, {resource.Data.Length:N0} bytes");
+        for (int relative = 0; relative < length; relative += 16)
+        {
+            int lineLength = Math.Min(16, length - relative);
+            int offset = start + relative;
+            Console.WriteLine($"{offset:X4}  {Convert.ToHexString(resource.Data.AsSpan(offset, lineLength))}");
+        }
+        return 0;
+    }
+    Console.WriteLine($"0x{id:X12} was not found in containers matching {containerFilter}");
+    return 1;
+}
+
+static int ParseFlexibleInt32(string text)
+{
+    if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        return int.Parse(text.AsSpan(2), System.Globalization.NumberStyles.AllowHexSpecifier,
+            System.Globalization.CultureInfo.InvariantCulture);
+    return int.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+}
+
+static int InspectBuildTagColumnMaps(string archivePath, string containerFilter,
+    IReadOnlyList<string> tagTexts)
+{
+    const uint mapClassHash = 0xFFC5A970;
+    const uint entryMarker = 0xA31AA51D;
+    const int entryStride = 21;
+    var tags = tagTexts.Select(text => checked((uint)ParseResourceId(text))).ToList();
+    int found = 0;
+
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        foreach (Resource resource in file.Resources.Where(resource => resource.ClassHash == mapClassHash))
+        {
+            foreach (uint tag in tags)
+            {
+                byte[] needle = new byte[sizeof(uint)];
+                BinaryPrimitives.WriteUInt32LittleEndian(needle, tag);
+                int search = 0;
+                while (search <= resource.Data.Length - sizeof(uint))
+                {
+                    int relative = resource.Data.AsSpan(search).IndexOf(needle);
+                    if (relative < 0)
+                        break;
+                    int tagOffset = search + relative;
+                    int itemStart = tagOffset - 13;
+                    if (IsTagColumnMapEntry(resource.Data, itemStart, entryMarker))
+                    {
+                        int runStart = itemStart;
+                        while (IsTagColumnMapEntry(resource.Data, runStart - entryStride, entryMarker))
+                            runStart -= entryStride;
+                        int runEnd = itemStart;
+                        while (IsTagColumnMapEntry(resource.Data, runEnd + entryStride, entryMarker))
+                            runEnd += entryStride;
+                        int regularEntries = (runEnd - runStart) / entryStride + 1;
+                        int countOffset = runStart - 24;
+                        bool hasFirstEntry = countOffset >= 1
+                            && resource.Data[countOffset - 1] == 1
+                            && countOffset + 16 <= resource.Data.Length
+                            && BinaryPrimitives.ReadUInt32LittleEndian(
+                                resource.Data.AsSpan(countOffset + 12)) == entryMarker;
+                        int actualCount = regularEntries + (hasFirstEntry ? 1 : 0);
+                        uint declaredCount = countOffset >= 0
+                            ? BinaryPrimitives.ReadUInt32LittleEndian(resource.Data.AsSpan(countOffset))
+                            : 0;
+                        ulong localId = BinaryPrimitives.ReadUInt64LittleEndian(
+                            resource.Data.AsSpan(itemStart + 1));
+                        uint mask = BinaryPrimitives.ReadUInt32LittleEndian(
+                            resource.Data.AsSpan(tagOffset + sizeof(uint)));
+                        Console.WriteLine($"0x{tag:X8} {entry.Name} 0x{resource.Id:X}: "
+                            + $"tag@0x{tagOffset:X}, item@0x{itemStart:X}, local=0x{localId:X}, "
+                            + $"mask=0x{mask:X8}, run@0x{runStart:X}-0x{runEnd + entryStride:X}, "
+                            + $"count@0x{countOffset:X}=0x{declaredCount:X} ({declaredCount}), actual={actualCount}");
+                        found++;
+                    }
+                    search = tagOffset + sizeof(uint);
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"{found} structured tag-map occurrence(s)");
+    return found == 0 ? 1 : 0;
+
+    static bool IsTagColumnMapEntry(ReadOnlySpan<byte> data, int offset, uint marker) =>
+        offset >= 0 && offset + entryStride <= data.Length
+        && data[offset] == 1
+        && BinaryPrimitives.ReadUInt64LittleEndian(data[(offset + 1)..])
+            is >= 0xF8000000UL and < 0xF9000000UL
+        && BinaryPrimitives.ReadUInt32LittleEndian(data[(offset + 9)..]) == marker;
+}
+
+static int FindLocalizedString(string gameFolder, string idText)
+{
+    ulong id = ParseResourceId(idText);
+    int found = 0;
+    foreach (string path in ArchiveLocator.Find(gameFolder))
+    {
+        using var archive = ForgeArchive.Open(path);
+        foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                     && entry.Name.StartsWith("LocalizationPackage_", StringComparison.OrdinalIgnoreCase)))
+        {
+            DataFile file;
+            try
+            {
+                using var stream = new MemoryStream(archive.ReadEntry(entry));
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources.Where(resource =>
+                         resource.ClassHash == LocalizationPackage.ClassHash))
+            {
+                try
+                {
+                    if (!LocalizationPackage.Read(resource.Data).Strings.TryGetValue(id,
+                            out string? value))
+                        continue;
+                    Console.WriteLine($"{Path.GetFileName(path)} | {entry.Name} | "
+                        + $"0x{resource.Id:X12} {resource.Name} | {value}");
+                    found++;
+                }
+                catch
+                {
+                }
+            }
+        }
+    }
+    Console.WriteLine($"{found} localization package match(es) for 0x{id:X8}");
+    return found == 0 ? 1 : 0;
+}
+
+static int MeasureLocalizedStringIds(string gameFolder)
+{
+    int packages = 0;
+    long strings = 0;
+    long highBit = 0;
+    ulong maximum = 0;
+    foreach (string path in ArchiveLocator.Find(gameFolder))
+    {
+        using var archive = ForgeArchive.Open(path);
+        foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                     && entry.Name.StartsWith("LocalizationPackage_", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                using var stream = new MemoryStream(archive.ReadEntry(entry));
+                foreach (Resource resource in DataFile.Read(stream).Resources.Where(resource =>
+                             resource.ClassHash == LocalizationPackage.ClassHash))
+                {
+                    LocalizationPackageAsset package = LocalizationPackage.Read(resource.Data);
+                    packages++;
+                    strings += package.Strings.Count;
+                    highBit += package.Strings.Keys.Count(id => id > int.MaxValue);
+                    if (package.Strings.Count > 0)
+                        maximum = Math.Max(maximum, package.Strings.Keys.Max());
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+    Console.WriteLine($"{packages:N0} packages, {strings:N0} strings, {highBit:N0} ids above "
+        + $"0x7FFFFFFF, maximum 0x{maximum:X8}");
+    return packages == 0 ? 1 : 0;
+}
+
+static int LongestCommonSubsequenceLength(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+{
+    if (right.Length > left.Length)
+        return LongestCommonSubsequenceLength(right, left);
+
+    int[] previous = new int[right.Length + 1];
+    int[] current = new int[right.Length + 1];
+    for (int leftIndex = 1; leftIndex <= left.Length; leftIndex++)
+    {
+        for (int rightIndex = 1; rightIndex <= right.Length; rightIndex++)
+            current[rightIndex] = left[leftIndex - 1] == right[rightIndex - 1]
+                ? previous[rightIndex - 1] + 1
+                : Math.Max(previous[rightIndex], current[rightIndex - 1]);
+        (previous, current) = (current, previous);
+        Array.Clear(current);
+    }
+    return previous[^1];
+}
+
+static HashSet<ulong> ByteWindows(ReadOnlySpan<byte> data, int size)
+{
+    var windows = new HashSet<ulong>();
+    for (int offset = 0; offset <= data.Length - size; offset++)
+        windows.Add(BinaryPrimitives.ReadUInt64LittleEndian(data[offset..]));
+    return windows;
+}
+
+static HashSet<ulong> KnownResourceReferences(ReadOnlySpan<byte> data,
+    IReadOnlySet<ulong> knownIds, ulong self)
+{
+    var references = new HashSet<ulong>();
+    for (int offset = 0; offset <= data.Length - sizeof(ulong); offset++)
+    {
+        ulong id = BinaryPrimitives.ReadUInt64LittleEndian(data[offset..]);
+        if (id != self && knownIds.Contains(id))
+            references.Add(id);
+    }
+    return references;
+}
+
+static ulong ParseResourceId(string text) => text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+    ? Convert.ToUInt64(text[2..], 16)
+    : Convert.ToUInt64(text);
+
+static int FindAssetCopies(string archivePath, string text)
+{
+    ulong id = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+        ? Convert.ToUInt64(text[2..], 16)
+        : Convert.ToUInt64(text);
+    var progress = new Progress<string>(Console.WriteLine);
+    var copies = AssetUsageScanner.Find(archivePath, id, progress);
+
+    foreach (var copy in copies)
+        Console.WriteLine($"{copy.Archive} | {copy.Container} | {copy.Type} | {copy.Name} | {copy.SizeText}");
+    Console.WriteLine(copies.Count == 1 ? "1 exact copy" : $"{copies.Count} exact copies");
+    return copies.Count == 0 ? 1 : 0;
+}
+
+static int FindResourcesById(string archivePath, IReadOnlyList<string> texts)
+{
+    var wanted = texts.Select(text => text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt64(text[2..], 16)
+            : Convert.ToUInt64(text))
+        .Distinct()
+        .ToHashSet();
+    var found = new HashSet<ulong>();
+
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"))
+    {
+        IReadOnlyList<ResourceIndexEntry> resources;
+        try
+        {
+            resources = archive.ReadResourceIndex(entry);
+        }
+        catch
+        {
+            continue;
+        }
+
+        if (!resources.Any(resource => wanted.Contains(resource.Id)))
+            continue;
+
+        DataFile file;
+        try
+        {
+            using var stream = new MemoryStream(archive.ReadEntry(entry));
+            file = DataFile.Read(stream);
+        }
+        catch
+        {
+            continue;
+        }
+
+        foreach (Resource resource in file.Resources.Where(resource => wanted.Contains(resource.Id)))
+        {
+            found.Add(resource.Id);
+            Console.WriteLine($"0x{resource.Id:X12}  {ResourceTypes.NameOf(resource.ClassHash),-32} "
+                + $"{resource.Name}  in {entry.Name}");
+        }
+    }
+
+    foreach (ulong missing in wanted.Except(found))
+        Console.WriteLine($"0x{missing:X12}  not present in {Path.GetFileName(archivePath)}");
+    return found.Count == wanted.Count ? 0 : 1;
+}
+
+static int Find64BitValues(string path, IReadOnlyList<string> values)
+{
+    var wanted = values.Select(value => value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt64(value[2..], 16)
+            : Convert.ToUInt64(value))
+        .Distinct()
+        .ToArray();
+    string[] files = Directory.Exists(path)
+        ? Directory.GetFiles(path, "*.data", SearchOption.AllDirectories)
+        : [path];
+    var hits = new ConcurrentBag<string>();
+    int failed = 0;
+
+    Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = 4 }, filePath =>
+    {
+        DataFile file;
+        try { file = DataFile.Read(filePath); }
+        catch
+        {
+            Interlocked.Increment(ref failed);
+            return;
+        }
+
+        foreach (var resource in file.Resources)
+        {
+            var data = resource.Data.AsSpan();
+            foreach (ulong value in wanted)
+            {
+                byte[] needle = BitConverter.GetBytes(value);
+                int offset = data.IndexOf(needle);
+                if (offset < 0)
+                    continue;
+                hits.Add($"{Path.GetFileName(filePath)} | {resource.Name} | "
+                    + $"{ResourceTypes.NameOf(resource.ClassHash)} (0x{resource.ClassHash:X8}) | "
+                    + $"resource 0x{resource.Id:X} | offset 0x{offset:X} | value {value} (0x{value:X})");
+            }
+        }
+    });
+
+    foreach (string hit in hits.Order(StringComparer.OrdinalIgnoreCase))
+        Console.WriteLine(hit);
+    Console.WriteLine($"scanned {files.Length} container(s), {hits.Count} hit(s), {failed} unreadable");
+    return failed == files.Length ? 1 : 0;
 }

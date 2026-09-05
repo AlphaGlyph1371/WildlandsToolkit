@@ -89,7 +89,7 @@ public static class TextureImporter
         return changes;
     }
 
-    static List<byte[]> LevelsFor(string path, TextureMap texture, bool generateMips, out string how,
+    internal static List<byte[]> LevelsFor(string path, TextureMap texture, bool generateMips, out string how,
         out int width, out int height)
     {
         if (Path.GetExtension(path).Equals(".dds", StringComparison.OrdinalIgnoreCase))

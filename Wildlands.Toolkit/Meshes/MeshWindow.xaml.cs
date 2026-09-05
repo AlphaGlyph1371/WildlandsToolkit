@@ -28,10 +28,12 @@ public partial class MeshWindow : Window
         Color.FromRgb(0xD4, 0xD2, 0x96),
     ];
 
-    readonly Mesh _mesh;
+    Mesh _mesh;
+    byte[] _resourceData;
     readonly string _name;
     readonly AppSettings _settings;
-    readonly List<MeshPart> _parts;
+    readonly Action<byte[], string>? _queueImport;
+    List<MeshPart> _parts;
     readonly List<Resource> _siblings;
     readonly ArchiveSet? _archives;
     readonly SkeletonIndex? _skeletonIndex;
@@ -56,31 +58,54 @@ public partial class MeshWindow : Window
     bool _orbiting;
     bool _panning;
 
-    public MeshWindow(Mesh mesh, string name, List<Resource> siblings, ArchiveSet? archives,
-        SkeletonIndex? skeletonIndex, AppSettings settings)
+    public MeshWindow(Mesh mesh, byte[] resourceData, string name, List<Resource> siblings,
+        ArchiveSet? archives, SkeletonIndex? skeletonIndex, AppSettings settings,
+        Action<byte[], string>? queueImport = null, bool hasPendingChange = false)
     {
         InitializeComponent();
 
         _mesh = mesh;
+        _resourceData = (byte[])resourceData.Clone();
         _name = name;
         _siblings = siblings;
         _archives = archives;
         _skeletonIndex = skeletonIndex;
         _settings = settings;
+        _queueImport = queueImport;
         Title = name;
+        MeshNameText.Text = name;
+        bool isSkinned = mesh.Bones.Count > 0;
+        bool foundSkeleton = isSkinned
+            && SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex) is not null;
+        MeshTypeText.Text = !isSkinned
+            ? "Static mesh"
+            : foundSkeleton
+                ? $"Skinned mesh  ·  {mesh.Bones.Count} bones  ·  export skeleton resolved automatically"
+                : $"Skinned mesh  ·  {mesh.Bones.Count} bones  ·  no export skeleton found";
+        SkeletonButton.Visibility = isSkinned && !foundSkeleton
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PendingBadge.Visibility = hasPendingChange ? Visibility.Visible : Visibility.Collapsed;
+
+        ImportButton.IsEnabled = queueImport is not null;
+        if (queueImport is null)
+            ImportButton.ToolTip = "Import is available when the viewer was opened from a concrete Mesh resource inside a data container.";
 
         _parts = MeshScene.Build(mesh);
         _surfaces = MeshSurfaces.Load(mesh, siblings, archives, withTextures: false, out _borrowed);
         BuildScene();
         ShowFacts();
-
-        if (_parts.Count < 2)
-        {
-            ColourButton.IsEnabled = false;
-            ColourButton.ToolTip = "This mesh is drawn in one piece, so there is nothing to tell apart";
-        }
+        UpdateRangeControl();
 
         Loaded += (_, _) => Fit();
+    }
+
+    void UpdateRangeControl()
+    {
+        ColourButton.IsEnabled = _parts.Count >= 2;
+        ColourButton.ToolTip = ColourButton.IsEnabled
+            ? "Tint separate material draw ranges when no texture is being shown"
+            : "This mesh is drawn in one piece, so there are no ranges to distinguish";
     }
 
     void BuildScene()
@@ -124,6 +149,14 @@ public partial class MeshWindow : Window
             {
                 _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives, withTextures: true, out _borrowed);
                 _texturesLoaded = true;
+            }
+            catch (Exception ex)
+            {
+                TextureButton.IsChecked = false;
+                StatusText.Text = $"textures could not be loaded: {ex.Message}";
+                MessageBox.Show(this, ex.Message, "Could not load mesh textures",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
             }
             finally
             {
@@ -230,22 +263,16 @@ public partial class MeshWindow : Window
         BuildScene();
     }
 
-    void Backface_Click(object sender, RoutedEventArgs e)
+    void Backface_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        _backFaces = _backFaces switch
+        _backFaces = BackfaceBox.SelectedIndex switch
         {
-            BackFaces.FromMaterial => BackFaces.Always,
-            BackFaces.Always => BackFaces.Never,
+            1 => BackFaces.Always,
+            2 => BackFaces.Never,
             _ => BackFaces.FromMaterial,
         };
-
-        BackfaceButton.Content = _backFaces switch
-        {
-            BackFaces.Always => "Back faces: all",
-            BackFaces.Never => "Back faces: none",
-            _ => "Back faces: as material",
-        };
-        BuildScene();
+        if (IsLoaded)
+            BuildScene();
     }
 
     void Skeleton_Click(object sender, RoutedEventArgs e)
@@ -253,12 +280,71 @@ public partial class MeshWindow : Window
         if (_skeleton is not null)
         {
             _skeleton = null;
-            SkeletonButton.Content = "Skeleton";
+            SkeletonButton.Content = "Choose skeleton…";
+            SkeletonButton.ToolTip = "Override the skeleton used when exporting GLB or FBX";
             return;
         }
 
         _skeleton = SkeletonPicker.Choose(this, out string name);
-        SkeletonButton.Content = _skeleton is null ? "Skeleton" : "Skeleton: " + name;
+        SkeletonButton.Content = _skeleton is null ? "Choose skeleton…" : name;
+        SkeletonButton.ToolTip = _skeleton is null
+            ? "Override the skeleton used when exporting GLB or FBX"
+            : $"Export uses {name}. Click to return to automatic skeleton selection.";
+    }
+
+    void Replace_Click(object sender, RoutedEventArgs e)
+    {
+        if (_queueImport is null)
+            return;
+
+        byte[]? rebuilt = MeshImporter.Replace(this, _resourceData, _name, _settings,
+            out string summary);
+        if (rebuilt is null)
+            return;
+
+        Mesh imported;
+        List<MeshPart> parts;
+        try
+        {
+            imported = Mesh.Read(rebuilt);
+            parts = MeshScene.Build(imported);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "The imported mesh cannot be previewed",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        try
+        {
+            _queueImport(rebuilt, summary);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not queue the mesh change",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        _mesh = imported;
+        _resourceData = rebuilt;
+        _parts = parts;
+        _texturesLoaded = false;
+        _textured = false;
+        _borrowed = null;
+        TextureButton.IsChecked = false;
+        TextureButton.IsEnabled = true;
+        TextureButton.Content = "Textures";
+        _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives,
+            withTextures: false, out _borrowed);
+        UpdateRangeControl();
+        BuildScene();
+        ShowFacts();
+        Fit();
+
+        PendingBadge.Visibility = Visibility.Visible;
+        StatusText.Text = $"{summary}, waiting for Apply changes";
     }
 
     void Export_Click(object sender, RoutedEventArgs e)
@@ -320,7 +406,12 @@ public partial class MeshWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.F)
+        if (e.Key == Key.R && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
+            && ImportButton.IsEnabled)
+            Replace_Click(ImportButton, new RoutedEventArgs());
+        else if (e.Key == Key.E && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            Export_Click(this, new RoutedEventArgs());
+        else if (e.Key == Key.F)
             Fit();
         else if (e.Key == Key.Escape)
             Close();

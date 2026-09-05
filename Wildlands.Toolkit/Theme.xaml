@@ -72,6 +72,12 @@
                             <Setter TargetName="Root" Property="BorderBrush"
                                     Value="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.55"/>
+                            <Setter TargetName="Root" Property="Background" Value="#FF35353B"/>
+                            <Setter TargetName="Root" Property="BorderBrush" Value="#FF46464E"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextDisabled}"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

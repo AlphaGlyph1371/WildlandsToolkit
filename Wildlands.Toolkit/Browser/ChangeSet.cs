@@ -13,7 +13,21 @@ public sealed record PendingChange(
     string EntryName,
     int ResourceIndex,
     string ResourceName,
-    byte[] Data);
+    byte[] Data,
+    PendingResourceAddition? Addition = null,
+    PendingForgeEntryAddition? EntryAddition = null);
+
+public sealed record PendingResourceAddition(
+    ulong Id,
+    uint ClassHash,
+    byte[] Header);
+
+public sealed record PendingForgeEntryAddition(
+    ulong Id,
+    string Name,
+    uint Extension,
+    byte[] InfoTemplate,
+    byte[] PrefetchBlock);
 
 public sealed class ArchiveWork
 {
@@ -21,6 +35,7 @@ public sealed class ArchiveWork
     public long Size { get; init; }
     public Dictionary<int, byte[]> Entries { get; } = [];
     public List<string> EntryNames { get; } = [];
+    public List<ForgeEntryAddition> EntryAdditions { get; } = [];
     public bool NeedsRebuild { get; set; }
 
     public string Name => System.IO.Path.GetFileName(Path);
@@ -36,8 +51,12 @@ public sealed class ChangeSet
     public void Set(PendingChange change)
     {
         _changes.RemoveAll(x => x.ArchivePath == change.ArchivePath
-            && x.EntryIndex == change.EntryIndex
-            && x.ResourceIndex == change.ResourceIndex);
+            && (change.EntryAddition is not null
+                ? x.EntryAddition?.Id == change.EntryAddition.Id
+                : x.EntryIndex == change.EntryIndex && (change.Addition is not null
+                ? x.Addition?.Id == change.Addition.Id
+                : x.Addition is null && x.EntryAddition is null
+                    && x.ResourceIndex == change.ResourceIndex)));
 
         _changes.Add(change);
     }
@@ -45,6 +64,14 @@ public sealed class ChangeSet
     public bool Contains(string archivePath, int entryIndex, int resourceIndex) =>
         _changes.Any(x => x.ArchivePath == archivePath
             && x.EntryIndex == entryIndex
+            && x.EntryAddition is null
+            && x.ResourceIndex == resourceIndex);
+
+    public PendingChange? Find(string archivePath, int entryIndex, int resourceIndex) =>
+        _changes.LastOrDefault(x => x.ArchivePath == archivePath
+            && x.EntryIndex == entryIndex
+            && x.EntryAddition is null
+            && x.Addition is null
             && x.ResourceIndex == resourceIndex);
 
     public void Clear() => _changes.Clear();
@@ -61,7 +88,8 @@ public sealed class ChangeSet
             using var archive = ForgeArchive.Open(perArchive.Key);
             var work = new ArchiveWork { Path = perArchive.Key, Size = new FileInfo(perArchive.Key).Length };
 
-            foreach (var perEntry in perArchive.GroupBy(x => x.EntryIndex))
+            foreach (var perEntry in perArchive.Where(change => change.EntryAddition is null)
+                         .GroupBy(x => x.EntryIndex))
             {
                 var entry = archive.Entries.First(x => x.Index == perEntry.Key);
                 progress?.Report($"Building {entry.Name}...");
@@ -69,8 +97,28 @@ public sealed class ChangeSet
                 using var source = new MemoryStream(archive.ReadEntry(entry));
                 var file = DataFile.Read(source);
 
-                foreach (var change in perEntry)
+                foreach (var change in perEntry.Where(change => change.Addition is null))
+                {
+                    if ((uint)change.ResourceIndex >= (uint)file.Resources.Count)
+                        throw new InvalidDataException($"Resource index {change.ResourceIndex} is outside {entry.Name}.");
                     file.Resources[change.ResourceIndex].Data = change.Data;
+                }
+
+                foreach (var change in perEntry.Where(change => change.Addition is not null))
+                {
+                    var addition = change.Addition!;
+                    if (file.Resources.Any(resource => resource.Id == addition.Id))
+                        throw new InvalidDataException(
+                            $"{entry.Name} already contains resource 0x{addition.Id:X}.");
+                    file.Resources.Add(new Resource
+                    {
+                        Id = addition.Id,
+                        ClassHash = addition.ClassHash,
+                        Name = change.ResourceName,
+                        Header = (byte[])addition.Header.Clone(),
+                        Data = (byte[])change.Data.Clone(),
+                    });
+                }
 
                 using var rebuilt = new MemoryStream();
                 file.Write(rebuilt);
@@ -81,6 +129,16 @@ public sealed class ChangeSet
 
                 if (data.Length > archive.RoomFor(entry))
                     work.NeedsRebuild = true;
+            }
+
+            foreach (PendingChange change in perArchive.Where(change => change.EntryAddition is not null))
+            {
+                PendingForgeEntryAddition addition = change.EntryAddition!;
+                work.EntryAdditions.Add(new ForgeEntryAddition(addition.Id, addition.Name,
+                    addition.Extension, (byte[])addition.InfoTemplate.Clone(),
+                    (byte[])change.Data.Clone(), (byte[])addition.PrefetchBlock.Clone()));
+                work.EntryNames.Add(addition.Name);
+                work.NeedsRebuild = true;
             }
 
             plans.Add(work);
@@ -130,7 +188,7 @@ public sealed class ChangeSet
         string temp = work.Path + ".rebuild";
 
         using (var archive = ForgeArchive.Open(work.Path))
-            archive.Rebuild(temp, work.Entries, progress);
+            archive.Rebuild(temp, work.Entries, work.EntryAdditions, progress);
 
         File.Move(temp, work.Path, overwrite: true);
     }

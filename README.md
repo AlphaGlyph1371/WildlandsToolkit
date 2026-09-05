@@ -35,14 +35,17 @@ the picatinny rail, textures sitting where they belong, lighting and shadows cor
 still held properly in the hands. That mesh is vertex format 2, the richest one in the game, with
 three uv sets and vertex colours.
 
-What you still can't do is add a brand new mesh that was not in the game before. And keep the
-`.original` backups anyway.
+The Armory editor can also create a new attachment option with its own gameplay record, BuildTag,
+Gunsmith registration, cloned model resources and imported geometry. It does not require an unused
+Short/Medium/Long row, but it still starts from an existing attachment as the gameplay and material
+template. Keep the `.original` backups anyway.
 
 ### Archives
 
 - Opens every `.forge` of the game and lists its entries, **including the ones in the `dlc_*` folders**
   (23 archives in a full install, not just the 10 in the main folder)
 - Searches neighbouring archives in the background, so a resource is found even when it lives in a different archive or file
+- Right-click any resource and choose **Find copies in game...** to scan every installed archive for the same exact 64-bit resource ID. Results name the archive and data container for each confirmed copy; the scan never guesses from filenames.
 - **Replaces any resource with a raw file**, whatever its type: drop a `.Skeleton` or a `.BuildTable`
   straight in, from your own tools or from somewhere else. Bigger and smaller files are both fine
 - Before it accepts a raw file it checks the type, the id and whether it still reads back, and says
@@ -65,6 +68,12 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
 - Draws the real diffuse texture per draw range, back faces follow the original used material
 - Exports and **re-imports binary glTF** (`.glb`): positions, normals, tangents, every UV set,
   vertex colours, skin weights and one material per draw range, all of it round-trips
+- Imports the active glTF scene rather than every mesh stored in the file, applies nested object
+  transforms, supports interleaved and multiple buffers, and keeps tangent handedness across mirrored
+  UVs and mirrored object transforms
+- Validates triangle topology, accessor bounds, attribute counts and skin ownership before touching a
+  game resource. Unsupported compression extensions and unapplied morph targets stop with an explicit
+  explanation instead of producing malformed geometry
 - Exports **binary FBX** with skeleton and skin, without the Autodesk SDK
 - Exports and re-imports Wavefront OBJ as well, for tools that want it
 - Finds the matching skeleton across all archives through a bone name index, and uses it to give
@@ -91,8 +100,23 @@ shape. It tells you when it does that.
 system, and they are where a lot of the "what does this thing look like" actually lives.
 
 Practically: if you want a piece of gear to look different, changing the mesh is often the heavy
-way round, and bending one reference in the table chain is the light one. There is **no editor for
-that yet** - for now BuildTables can only be swapped whole, through the raw replace path.
+way round, and changing an option in the table chain is the light one. The BuildTable editor follows
+the connected tables and keeps their exact internal names visible. User-facing option names are not
+invented from asset filenames: where a root table has the exact same-container EntityBuilder key,
+the editor follows that EntityBuilder into `Game Bootstrap Settings`, reads the weapon/gear record's
+attachment references, matches their real BuildTags, and resolves their LocalizedString IDs from the
+installed package matching the Windows UI language (with `LocalizationPackage_English(US)` fallback).
+
+If that complete ID chain is absent or ambiguous, the UI says that the label is unresolved and shows
+the raw BuildTag. It does not claim that an asset is compatible merely because its filename, container
+or resource class looks similar. Arbitrary single-reference replacement is therefore available only
+as an explicitly unverified technical operation and always warns that companion selectors, tags and
+gameplay records are not updated automatically.
+
+Complete rows can be removed, and an exact row can be duplicated in technical mode. Every structural
+operation allocates fresh local ids and reparses the complete binary object graph before it reaches
+the change list; internal owner fields remain protected. Creating a genuinely new option still needs
+a complete, game-confirmed row template rather than a guessed collection of assets.
 
 ### Weather and lighting
 
@@ -168,8 +192,9 @@ an archive until you press **Apply changes**.
 One thing Blender cannot do for you: the bones. **The skeleton in your file is not imported.** The
 mesh keeps the bone table it already has, and your joints are matched back onto it by name - so
 leave the armature that came out of the export alone, and do not rename its bones. The toolkit
-shows you how many matched before it writes anything, and if none of them do it stops instead of
-guessing.
+shows you how many matched before it writes anything. Vertices whose bones do not exist on the target
+take the weights of the nearest original point; a wholly foreign or missing rig is rebound that way as
+well, and the confirmation dialog warns when the replacement shape makes that approximation risky.
 
 ---
 

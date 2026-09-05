@@ -5,6 +5,7 @@ namespace Wildlands.Formats.Models;
 public sealed class ClusteredMeshData
 {
     public const uint ClassHash = 0xC351EE43;
+    const int MaximumItems = 1_000_000;
 
     public int DataVersion { get; set; }
     public byte VertexFormat { get; set; }
@@ -34,18 +35,30 @@ public sealed class ClusteredMeshData
             VertexStride = reader.ReadInt32(),
             ClusterCount = reader.ReadInt32(),
         };
+        if (data.VertexStride < 0)
+            throw new InvalidDataException("The clustered mesh has a negative vertex stride.");
+        if (data.ClusterCount < 0 || data.ClusterCount > MaximumItems)
+            throw new InvalidDataException($"The cluster count {data.ClusterCount} is outside the supported range.");
 
         for (int i = 0; i < 3; i++) data.Center[i] = reader.ReadSingle();
         for (int i = 0; i < 3; i++) data.HalfExtent[i] = reader.ReadSingle();
 
-        data.DrawPrimitiveCount = reader.ReadInt32();
-        data.ClustersPerDrawPrimitive = ReadInts(reader);
-        data.VertexOffsetPerDrawPrimitive = ReadInts(reader);
+        data.DrawPrimitiveCount = ReadCount(reader, "draw primitive");
+        data.ClustersPerDrawPrimitive = ReadInts(reader, "clusters-per-draw-primitive");
+        data.VertexOffsetPerDrawPrimitive = ReadInts(reader, "vertex-offset-per-draw-primitive");
         data.FixedClusterSize = reader.ReadBoolean();
 
-        data.VertexBuffer = reader.ReadBytes(reader.ReadInt32());
-        data.IndexBuffer = reader.ReadBytes(reader.ReadInt32());
-        data.PrimitiveDescriptions = reader.ReadBytes(reader.ReadInt32());
+        data.VertexBuffer = ReadBytes(reader, "clustered vertex buffer");
+        data.IndexBuffer = ReadBytes(reader, "clustered index buffer");
+        data.PrimitiveDescriptions = ReadBytes(reader, "primitive descriptions");
+
+        if (data.VertexStride <= 0 && data.VertexBuffer.Length > 0)
+            throw new InvalidDataException("The clustered mesh has vertex data but no positive vertex stride.");
+        if (data.VertexStride > 0 && data.VertexBuffer.Length % data.VertexStride != 0)
+            throw new InvalidDataException("The clustered vertex buffer is not aligned to its stride.");
+        if (data.DrawPrimitiveCount != data.ClustersPerDrawPrimitive.Length
+            || data.DrawPrimitiveCount != data.VertexOffsetPerDrawPrimitive.Length)
+            throw new InvalidDataException("The clustered mesh draw tables have different lengths.");
 
         return data;
     }
@@ -73,14 +86,45 @@ public sealed class ClusteredMeshData
         writer.Write(PrimitiveDescriptions);
     }
 
-    static int[] ReadInts(BinaryReader reader)
+    static int[] ReadInts(BinaryReader reader, string label)
     {
-        var values = new int[reader.ReadInt32()];
+        int count = ReadCount(reader, label);
+        EnsureRemaining(reader, (long)count * sizeof(int), label);
+        var values = new int[count];
 
         for (int i = 0; i < values.Length; i++)
             values[i] = reader.ReadInt32();
 
         return values;
+    }
+
+    static int ReadCount(BinaryReader reader, string label)
+    {
+        EnsureRemaining(reader, sizeof(int), label + " count");
+        int count = reader.ReadInt32();
+        if (count < 0 || count > MaximumItems)
+            throw new InvalidDataException($"The {label} count {count} is outside the supported range.");
+        return count;
+    }
+
+    static byte[] ReadBytes(BinaryReader reader, string label)
+    {
+        EnsureRemaining(reader, sizeof(int), label + " byte count");
+        int length = reader.ReadInt32();
+        if (length < 0)
+            throw new InvalidDataException($"The {label} has a negative byte length.");
+        EnsureRemaining(reader, length, label);
+        byte[] bytes = reader.ReadBytes(length);
+        if (bytes.Length != length)
+            throw new EndOfStreamException($"The {label} ends after {bytes.Length} of {length} bytes.");
+        return bytes;
+    }
+
+    static void EnsureRemaining(BinaryReader reader, long length, string label)
+    {
+        if (length < 0 || reader.BaseStream.CanSeek
+            && length > reader.BaseStream.Length - reader.BaseStream.Position)
+            throw new EndOfStreamException($"The {label} runs past the end of the Mesh resource.");
     }
 
     static void WriteInts(BinaryWriter writer, int[] values)

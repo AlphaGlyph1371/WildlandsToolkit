@@ -30,7 +30,7 @@ public partial class TextureWindow : Window
         _view = view;
         _settings = settings;
         _onReplace = onReplace;
-        Title = view.Name;
+        UpdateHeader();
 
         if (onReplace is not null)
             ReplaceButton.Visibility = Visibility.Visible;
@@ -54,7 +54,7 @@ public partial class TextureWindow : Window
     public void ShowView(TextureView view)
     {
         _view = view;
-        Title = view.Name;
+        UpdateHeader();
 
         LevelBox.ItemsSource = view.Levels;
         LevelBox.IsEnabled = view.Levels.Count > 1;
@@ -62,6 +62,16 @@ public partial class TextureWindow : Window
 
         if (view.Focus is null)
             ShowNothing(TextureLoader.ExplainEmpty(view));
+    }
+
+    void UpdateHeader()
+    {
+        var texture = _view.Texture;
+        Title = _view.Name;
+        TextureNameText.Text = _view.Name;
+        TextureTypeText.Text =
+            $"{texture.Width} × {texture.Height}  ·  {texture.Format}  ·  {texture.MipCount} mip level(s)  ·  " +
+            $"{texture.StreamedMips.Length} streamed";
     }
 
     void Level_Changed(object sender, SelectionChangedEventArgs e)
@@ -79,6 +89,7 @@ public partial class TextureWindow : Window
 
         _invisible = TextureLoader.IsInvisibleWithAlpha(_decoded);
 
+        SetImageCommandsEnabled(true);
         ApplyChannels();
         UpdateSource(level);
         UpdateAlphaHint();
@@ -124,6 +135,20 @@ public partial class TextureWindow : Window
         ZoomText.Text = "";
         SourceBanner.Visibility = Visibility.Collapsed;
         AlphaHint.Visibility = Visibility.Collapsed;
+        SetImageCommandsEnabled(false);
+    }
+
+    void SetImageCommandsEnabled(bool enabled)
+    {
+        FitButton.IsEnabled = enabled;
+        ActualButton.IsEnabled = enabled;
+        ZoomOutButton.IsEnabled = enabled;
+        ZoomInButton.IsEnabled = enabled;
+        RedToggle.IsEnabled = enabled;
+        GreenToggle.IsEnabled = enabled;
+        BlueToggle.IsEnabled = enabled;
+        AlphaToggle.IsEnabled = enabled;
+        ExportButton.IsEnabled = enabled && LevelBox.SelectedItem is TextureMipLevel;
     }
 
     void Channel_Click(object sender, RoutedEventArgs e)
@@ -204,7 +229,13 @@ public partial class TextureWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.F)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.R
+            && ReplaceButton.Visibility == Visibility.Visible && ReplaceButton.IsEnabled)
+            Replace_Click(ReplaceButton, new RoutedEventArgs());
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.E
+            && ExportButton.IsEnabled)
+            Save_Click(ExportButton, new RoutedEventArgs());
+        else if (e.Key == Key.F)
             Fit();
         else if (e.Key == Key.Escape)
             Close();

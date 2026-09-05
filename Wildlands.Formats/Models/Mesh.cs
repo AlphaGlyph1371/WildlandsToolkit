@@ -21,7 +21,11 @@ public sealed class MeshInstancing
     public ushort SubMeshIndex { get; set; }
     public short Padding { get; set; }
     public ushort MaterialType { get; set; }
-    public short RenderingMask { get; set; }
+    // This UInt16 sits in the instancing draw record. Comparing shipped meshes
+    // shows that it is the vertex count for SubMeshIndex (not a rendering mask).
+    // Leaving the template's old value after replacing geometry makes Anvil read
+    // beyond the new vertex buffer and eventually destabilises the renderer.
+    public int VertexCount { get; set; }
     public byte MaterialPointerTag { get; set; }
     public ulong MaterialId { get; set; }
     public byte[] BoneTable { get; set; } = new byte[BoneTableSize];
@@ -291,6 +295,9 @@ public sealed class Mesh
             if (entry.BoneTable.Length != MeshInstancing.BoneTableSize)
                 throw new InvalidDataException(
                     $"An instancing entry has a {entry.BoneTable.Length}-byte bone table; {MeshInstancing.BoneTableSize} are required.");
+            if (entry.VertexCount < 0 || entry.VertexCount > ushort.MaxValue)
+                throw new InvalidDataException(
+                    $"An instancing entry has vertex count {entry.VertexCount}; only 0..{ushort.MaxValue} fit this mesh format.");
 
             writer.Write(entry.Id);
             writer.Write(MeshInstancing.ClassHash);
@@ -298,7 +305,7 @@ public sealed class Mesh
             writer.Write(entry.SubMeshIndex);
             writer.Write(entry.Padding);
             writer.Write(entry.MaterialType);
-            writer.Write(entry.RenderingMask);
+            writer.Write((ushort)entry.VertexCount);
             writer.Write(entry.MaterialPointerTag);
             writer.Write(entry.MaterialId);
             writer.Write(entry.BoneTable);
@@ -321,7 +328,7 @@ public sealed class Mesh
             SubMeshIndex = ReadUInt16(reader, $"instancing {index} sub-mesh index"),
             Padding = ReadInt16(reader, $"instancing {index} padding"),
             MaterialType = ReadUInt16(reader, $"instancing {index} material type"),
-            RenderingMask = ReadInt16(reader, $"instancing {index} rendering mask"),
+            VertexCount = ReadUInt16(reader, $"instancing {index} vertex count"),
             MaterialPointerTag = ReadByte(reader, $"instancing {index} material pointer tag"),
             MaterialId = ReadUInt64(reader, $"instancing {index} material id"),
             BoneTable = ReadBytes(reader, MeshInstancing.BoneTableSize, $"instancing {index} bone table"),

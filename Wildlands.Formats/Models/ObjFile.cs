@@ -66,6 +66,7 @@ public sealed class ObjFile
             throw new InvalidDataException($"{Path.GetFileName(path)} holds no faces.");
 
         obj.Groups.RemoveAll(g => g.Indices.Count == 0);
+        FillMissingNormals(obj);
         return obj;
     }
 
@@ -86,13 +87,99 @@ public sealed class ObjFile
         for (int i = 1; i < parts.Length; i++)
             corners[i - 1] = Corner(obj, parts[i], positions, normals, textures, byTriplet, line);
 
-        for (int i = 1; i + 1 < corners.Length; i++)
-        {
-            group.Indices.Add(corners[0]);
-            group.Indices.Add(corners[i]);
-            group.Indices.Add(corners[i + 1]);
-        }
+        Triangulate(obj, group, corners, line);
     }
+
+    static void Triangulate(ObjFile obj, ObjGroup group, int[] corners, int line)
+    {
+        if (corners.Length == 3)
+        {
+            group.Indices.AddRange(corners);
+            return;
+        }
+
+        // Ear clipping preserves concave OBJ polygons. A triangle fan silently folds those
+        // polygons across empty space and used to create invalid replacement geometry.
+        var normal = Vector3.Zero;
+        for (int i = 0; i < corners.Length; i++)
+        {
+            Vector3 current = obj.Positions[corners[i]];
+            Vector3 next = obj.Positions[corners[(i + 1) % corners.Length]];
+            normal.X += (current.Y - next.Y) * (current.Z + next.Z);
+            normal.Y += (current.Z - next.Z) * (current.X + next.X);
+            normal.Z += (current.X - next.X) * (current.Y + next.Y);
+        }
+        if (normal.LengthSquared() < 1e-20f)
+            throw new InvalidDataException($"Line {line} contains a degenerate polygon that cannot be triangulated.");
+
+        int drop = MathF.Abs(normal.X) >= MathF.Abs(normal.Y) && MathF.Abs(normal.X) >= MathF.Abs(normal.Z) ? 0
+            : MathF.Abs(normal.Y) >= MathF.Abs(normal.Z) ? 1 : 2;
+        var projected = new Vector2[corners.Length];
+        for (int i = 0; i < corners.Length; i++)
+        {
+            Vector3 p = obj.Positions[corners[i]];
+            projected[i] = drop switch { 0 => new Vector2(p.Y, p.Z), 1 => new Vector2(p.X, p.Z), _ => new Vector2(p.X, p.Y) };
+        }
+
+        float area = 0;
+        for (int i = 0; i < projected.Length; i++)
+        {
+            Vector2 a = projected[i], b = projected[(i + 1) % projected.Length];
+            area += a.X * b.Y - b.X * a.Y;
+        }
+        float orientation = MathF.Sign(area);
+        if (orientation == 0)
+            throw new InvalidDataException($"Line {line} contains a flat polygon that cannot be triangulated.");
+
+        var remaining = new List<int>(corners.Length);
+        for (int i = 0; i < corners.Length; i++) remaining.Add(i);
+        int guard = corners.Length * corners.Length;
+        while (remaining.Count > 3 && guard-- > 0)
+        {
+            bool clipped = false;
+            for (int at = 0; at < remaining.Count; at++)
+            {
+                int previous = remaining[(at + remaining.Count - 1) % remaining.Count];
+                int current = remaining[at];
+                int next = remaining[(at + 1) % remaining.Count];
+                if (orientation * Cross(projected[previous], projected[current], projected[next]) <= 1e-8f)
+                    continue;
+
+                bool contains = false;
+                foreach (int candidate in remaining)
+                    if (candidate != previous && candidate != current && candidate != next
+                        && Inside(projected[candidate], projected[previous], projected[current], projected[next], orientation))
+                    {
+                        contains = true;
+                        break;
+                    }
+                if (contains) continue;
+
+                group.Indices.Add(corners[previous]);
+                group.Indices.Add(corners[current]);
+                group.Indices.Add(corners[next]);
+                remaining.RemoveAt(at);
+                clipped = true;
+                break;
+            }
+            if (!clipped)
+                throw new InvalidDataException($"Line {line} contains a self-intersecting or degenerate polygon.");
+        }
+
+        if (remaining.Count != 3)
+            throw new InvalidDataException($"Line {line} could not be triangulated.");
+        group.Indices.Add(corners[remaining[0]]);
+        group.Indices.Add(corners[remaining[1]]);
+        group.Indices.Add(corners[remaining[2]]);
+    }
+
+    static float Cross(Vector2 a, Vector2 b, Vector2 c) =>
+        (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+
+    static bool Inside(Vector2 p, Vector2 a, Vector2 b, Vector2 c, float orientation) =>
+        orientation * Cross(a, b, p) >= -1e-8f
+        && orientation * Cross(b, c, p) >= -1e-8f
+        && orientation * Cross(c, a, p) >= -1e-8f;
 
     static int Corner(ObjFile obj, string text, List<Vector3> positions, List<Vector3> normals,
         List<Vector2> textures, Dictionary<(int, int, int), int> byTriplet, int line)
@@ -108,7 +195,7 @@ public sealed class ObjFile
 
         int index = obj.Positions.Count;
         obj.Positions.Add(positions[position]);
-        obj.Normals.Add(normal >= 0 ? normals[normal] : Vector3.UnitZ);
+        obj.Normals.Add(normal >= 0 ? normals[normal] : Vector3.Zero);
         obj.TextureCoordinates.Add(texture >= 0 ? textures[texture] : Vector2.Zero);
         byTriplet[key] = index;
         return index;
@@ -133,8 +220,10 @@ public sealed class ObjFile
 
     static float Number(string[] parts, int slot, int line)
     {
-        if (slot >= parts.Length || !float.TryParse(parts[slot], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
-            throw new InvalidDataException($"Line {line} is missing a number in position {slot}.");
+        if (slot >= parts.Length
+            || !float.TryParse(parts[slot], NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+            || !float.IsFinite(value))
+            throw new InvalidDataException($"Line {line} has no valid finite number in position {slot}.");
 
         return value;
     }
@@ -161,6 +250,7 @@ public sealed class ObjFile
                         Position = Positions[corner],
                         Normal = Normals[corner],
                         Uv = [new Vector2(uv.X, 1 - uv.Y)],
+                        Color = 0xFFFFFFFF,
                     });
                 }
 
@@ -171,6 +261,28 @@ public sealed class ObjFile
         }
 
         return geometry;
+    }
+
+    static void FillMissingNormals(ObjFile obj)
+    {
+        var accumulated = new Vector3[obj.Positions.Count];
+
+        foreach (var group in obj.Groups)
+            for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+            {
+                int a = group.Indices[i], b = group.Indices[i + 1], c = group.Indices[i + 2];
+                Vector3 face = Vector3.Cross(obj.Positions[b] - obj.Positions[a], obj.Positions[c] - obj.Positions[a]);
+                if (obj.Normals[a].LengthSquared() == 0) accumulated[a] += face;
+                if (obj.Normals[b].LengthSquared() == 0) accumulated[b] += face;
+                if (obj.Normals[c].LengthSquared() == 0) accumulated[c] += face;
+            }
+
+        for (int i = 0; i < obj.Normals.Count; i++)
+            obj.Normals[i] = obj.Normals[i].LengthSquared() > 1e-20f
+                ? Vector3.Normalize(obj.Normals[i])
+                : accumulated[i].LengthSquared() > 1e-20f
+                    ? Vector3.Normalize(accumulated[i])
+                    : Vector3.UnitZ;
     }
 
     public static void Write(Mesh mesh, string name, string path)

@@ -46,10 +46,14 @@ public static class MeshImport
 
         var vertices = new List<MeshVertex>();
         var perRange = new List<(int Start, int Count, int IndexStart, int IndexCount)>();
+        var rangesWithoutTangents = new List<(int Start, int Count, int IndexStart, int IndexCount)>();
         var indices = new List<int>();
 
         foreach (var group in geometry.Groups)
         {
+            if (group.Vertices.Count == 0 || group.Indices.Count == 0)
+                throw new InvalidDataException(
+                    $"Group {group.Name} has no renderable vertices and triangles.");
             if (group.Indices.Count % 3 != 0)
                 throw new InvalidDataException($"Group {group.Name} holds {group.Indices.Count} indices, which is not whole triangles.");
 
@@ -67,11 +71,14 @@ public static class MeshImport
                 indices.Add(corner);
             }
 
-            perRange.Add((vertexStart, vertices.Count - vertexStart, indexStart, indices.Count - indexStart));
+            var range = (vertexStart, vertices.Count - vertexStart, indexStart, indices.Count - indexStart);
+            perRange.Add(range);
+            if (!group.HasTangents)
+                rangesWithoutTangents.Add(range);
         }
 
-        if (!geometry.HasTangents)
-            BuildTangents(vertices, indices, perRange, layout);
+        if (rangesWithoutTangents.Count > 0)
+            BuildTangents(vertices, indices, rangesWithoutTangents, layout);
 
         bool skinned = layout.IsSkinned;
         bool transferred = false;
@@ -82,7 +89,18 @@ public static class MeshImport
         if (skinned)
         {
             if (geometry.HasSkinning)
+            {
                 patched = RemapJoints(vertices, geometry, mesh, original, out matched);
+                if (matched == 0)
+                {
+                    // A foreign rig is not a reason to reject otherwise valid geometry.
+                    // Treat it like an unskinned import and attach every vertex to the
+                    // nearest weights of the template mesh. Matching Wildlands bones are
+                    // still carried exactly when the file was exported from this asset.
+                    TransferSkinning(vertices, original, all: true);
+                    transferred = true;
+                }
+            }
             else
             {
                 TransferSkinning(vertices, original, all: true);
@@ -122,7 +140,7 @@ public static class MeshImport
         if (hadShadow)
             RebuildRanges(mesh.Data.Shadow, perRange, ref next);
 
-        MatchRangeCount(mesh, ranges, ref next);
+        MatchRangeCount(mesh, geometry.Groups, perRange, ref next);
 
         var clustered = mesh.Clustered;
         clustered.VertexFormat = (byte)mesh.VertexFormat;
@@ -149,6 +167,8 @@ public static class MeshImport
             mesh.DynamicMeshIndexCount = indices.Count;
         }
 
+        ValidateGpuLayout(mesh, perRange, indices.Count);
+
         return new MeshImportResult
         {
             Vertices = vertices.Count,
@@ -159,7 +179,7 @@ public static class MeshImport
             UvQuantizationFactor = uvQuantization,
             TransferredSkinning = transferred,
             Cloth = mesh.Dynamic,
-            CarriedSkinning = skinned && geometry.HasSkinning,
+            CarriedSkinning = skinned && geometry.HasSkinning && matched > 0,
             PatchedVertices = patched,
             JointsInFile = geometry.JointNames.Count,
             JointsMatched = matched,
@@ -185,6 +205,9 @@ public static class MeshImport
             weights[i] = i < source.JointWeights.Length ? source.JointWeights[i] : (byte)0;
         }
 
+        byte tangentSign = Vector3.Dot(Vector3.Cross(normal, source.Tangent), source.Binormal) < 0
+            ? (byte)0 : (byte)255;
+
         return new MeshVertex
         {
             Position = source.Position,
@@ -193,7 +216,7 @@ public static class MeshImport
             Binormal = source.Binormal,
             Uv = texture,
             Color = layout.HasColor ? source.Color : 0xFFFFFFFF,
-            TangentSign = layout.HasBinormal ? (byte)255 : (byte)128,
+            TangentSign = tangentSign,
             JointIndices = layout.IsSkinned ? joints : [],
             JointWeights = layout.IsSkinned ? weights : [],
         };
@@ -213,9 +236,7 @@ public static class MeshImport
         matched = slotOf.Count;
 
         if (slotOf.Count == 0)
-            throw new InvalidDataException(
-                "None of the bones in this file match the bones of this mesh. Export the mesh from the toolkit first "
-                + "so the bone names survive, or import a file without a skeleton.");
+            return 0;
 
         var stranded = new List<MeshVertex>();
 
@@ -327,6 +348,8 @@ public static class MeshImport
 
             vertices[i].Tangent = tangent;
             vertices[i].Binormal = binormal;
+            vertices[i].TangentSign = Vector3.Dot(Vector3.Cross(normal, tangent), binormal) < 0
+                ? (byte)0 : (byte)255;
         }
     }
 
@@ -401,47 +424,112 @@ public static class MeshImport
         return highest + 1;
     }
 
-    static void MatchRangeCount(Mesh mesh, int ranges, ref ulong next)
+    static void MatchRangeCount(Mesh mesh, IReadOnlyList<ImportedGroup> groups,
+        List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, ref ulong next)
     {
-        while (mesh.Materials.Count > ranges)
-            mesh.Materials.RemoveAt(mesh.Materials.Count - 1);
+        if (mesh.Materials.Count == 0)
+            throw new InvalidDataException("The mesh lists no material to copy for its draw ranges.");
+        if (mesh.Instancing.Count == 0)
+            throw new InvalidDataException("The mesh lists no instancing entry to copy for its draw ranges.");
 
-        while (mesh.Materials.Count < ranges)
+        var oldMaterials = new List<MeshMaterial>(mesh.Materials);
+        var oldInstancing = new List<MeshInstancing>(mesh.Instancing);
+        var used = new HashSet<int>();
+        mesh.Materials.Clear();
+        mesh.Instancing.Clear();
+
+        for (int i = 0; i < ranges.Count; i++)
         {
-            var last = mesh.Materials.Count > 0 ? mesh.Materials[^1]
-                : throw new InvalidDataException("The mesh lists no material to copy for the extra draw range(s).");
+            int source = FindMaterialSource(groups[i].Name, oldMaterials, oldInstancing, used);
+            if (source < 0 && i < Math.Min(oldMaterials.Count, oldInstancing.Count) && !used.Contains(i))
+                source = i;
+            if (source < 0)
+                source = Math.Min(oldMaterials.Count, oldInstancing.Count) - 1;
 
+            MeshMaterial material = oldMaterials[source];
+            MeshInstancing instancing = oldInstancing[source];
+            bool reused = used.Add(source);
             mesh.Materials.Add(new MeshMaterial
             {
-                Id = next++,
-                ReferenceTag = last.ReferenceTag,
-                Global = last.Global,
-                MaterialId = last.MaterialId,
-                HandleTag = last.HandleTag,
-                HandleId = last.HandleId,
+                Id = reused ? material.Id : next++,
+                ReferenceTag = material.ReferenceTag,
+                Global = material.Global,
+                MaterialId = material.MaterialId,
+                HandleTag = material.HandleTag,
+                HandleId = material.HandleId,
+            });
+            mesh.Instancing.Add(new MeshInstancing
+            {
+                Id = reused ? instancing.Id : next++,
+                ShadowCaster = instancing.ShadowCaster,
+                SubMeshIndex = checked((ushort)i),
+                Padding = instancing.Padding,
+                MaterialType = instancing.MaterialType,
+                VertexCount = ranges[i].Count,
+                MaterialPointerTag = instancing.MaterialPointerTag,
+                MaterialId = instancing.MaterialId,
+                BoneTable = (byte[])instancing.BoneTable.Clone(),
             });
         }
 
-        while (mesh.Instancing.Count > ranges)
-            mesh.Instancing.RemoveAt(mesh.Instancing.Count - 1);
-
-        while (mesh.Instancing.Count < ranges)
+        for (int i = 0; i < ranges.Count; i++)
         {
-            var last = mesh.Instancing.Count > 0 ? mesh.Instancing[^1]
-                : throw new InvalidDataException("The mesh lists no instancing entry to copy for the extra draw range(s).");
+            if (ranges[i].Count > ushort.MaxValue)
+                throw new InvalidDataException(
+                    $"Draw range {i} has {ranges[i].Count} vertices; the game mesh format stores at most {ushort.MaxValue} per range.");
+            mesh.Instancing[i].SubMeshIndex = checked((ushort)i);
+            mesh.Instancing[i].VertexCount = ranges[i].Count;
+        }
+    }
 
-            mesh.Instancing.Add(new MeshInstancing
-            {
-                Id = next++,
-                ShadowCaster = last.ShadowCaster,
-                SubMeshIndex = (ushort)(mesh.Instancing.Count),
-                Padding = last.Padding,
-                MaterialType = last.MaterialType,
-                RenderingMask = last.RenderingMask,
-                MaterialPointerTag = last.MaterialPointerTag,
-                MaterialId = last.MaterialId,
-                BoneTable = (byte[])last.BoneTable.Clone(),
-            });
+    static int FindMaterialSource(string name, IReadOnlyList<MeshMaterial> materials,
+        IReadOnlyList<MeshInstancing> instancing, HashSet<int> used)
+    {
+        const string prefix = "Material_";
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || !ulong.TryParse(name[prefix.Length..], System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out ulong materialId))
+            return -1;
+
+        for (int i = 0; i < Math.Min(materials.Count, instancing.Count); i++)
+            if (!used.Contains(i) && materials[i].MaterialId == materialId)
+                return i;
+        return -1;
+    }
+
+    static void ValidateGpuLayout(Mesh mesh,
+        List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, int indexCount)
+    {
+        var clustered = mesh.Clustered
+            ?? throw new InvalidDataException("The imported mesh lost its clustered GPU buffers.");
+        if (clustered.VertexStride <= 0
+            || clustered.VertexBuffer.Length % clustered.VertexStride != 0)
+            throw new InvalidDataException("The imported vertex buffer is not aligned to its stride.");
+        int indexSize = mesh.Data.Indices32Bit ? 4 : 2;
+        if (clustered.IndexBuffer.Length != checked(indexCount * indexSize))
+            throw new InvalidDataException("The imported index-buffer size does not match its index count.");
+        if (mesh.Data.Standard.Count != ranges.Count
+            || (mesh.Data.Shadow.Count != 0 && mesh.Data.Shadow.Count != ranges.Count)
+            || mesh.Materials.Count != ranges.Count
+            || mesh.Instancing.Count != ranges.Count
+            || clustered.DrawPrimitiveCount != ranges.Count
+            || clustered.ClustersPerDrawPrimitive.Length != ranges.Count
+            || clustered.VertexOffsetPerDrawPrimitive.Length != ranges.Count
+            || clustered.PrimitiveDescriptions.Length != ranges.Count * DescriptionSize)
+            throw new InvalidDataException("The imported GPU draw tables disagree about their range count.");
+
+        for (int i = 0; i < ranges.Count; i++)
+        {
+            MeshPrimitive primitive = mesh.Data.Standard[i];
+            MeshInstancing instancing = mesh.Instancing[i];
+            if (primitive.MinIndex != ranges[i].Start
+                || primitive.VertexCount != ranges[i].Count
+                || primitive.StartIndex != ranges[i].IndexStart
+                || primitive.TriangleCount * 3 != ranges[i].IndexCount
+                || instancing.SubMeshIndex != i
+                || instancing.VertexCount != ranges[i].Count)
+                throw new InvalidDataException(
+                    $"Imported draw range {i} disagrees with its primitive or instancing record.");
         }
     }
 

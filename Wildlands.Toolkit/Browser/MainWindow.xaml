@@ -5,7 +5,8 @@
         Background="{StaticResource Background}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" Cursor="Hand">
 
-    <DockPanel>
+    <Grid>
+    <DockPanel x:Name="MainContent">
 
         <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
                 BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="10,8">
@@ -30,11 +31,6 @@
                         <Path Style="{StaticResource NavIcon}" Data="M 4.5,11 L 4.5,0 M 0,4.5 L 4.5,0 L 9,4.5"/>
                     </Button>
                     <Button Content="Open file" Click="OpenFile_Click"/>
-                    <Button x:Name="ExtractButton" Content="Extract" Click="Extract_Click" IsEnabled="False"/>
-                    <Button x:Name="ExportButton" Content="Export" Click="MenuExport_Click" IsEnabled="False"
-                            ToolTip="Write the selected resource out in a format you can edit"/>
-                    <Button x:Name="ReplaceButton" Content="Replace" Click="MenuReplace_Click" IsEnabled="False"
-                            ToolTip="Put an edited file back into the selected resource"/>
                     <Button x:Name="ApplyButton" Content="Apply changes" Click="Apply_Click" IsEnabled="False"/>
                     <Button x:Name="DiscardButton" Content="Discard" Click="Discard_Click" IsEnabled="False"/>
                 </StackPanel>
@@ -121,13 +117,20 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Button x:Name="SkeletonIndexButton" Grid.Column="0" Content="Find skeletons"
-                                Click="SkeletonIndex_Click" Padding="6,3" Margin="0,0,3,0" FontSize="11"
+                            <Button x:Name="ArmoryIndexButton" Grid.Column="0" Content="Armory index"
+                                Click="ArmoryIndex_Click" Padding="6,3" Margin="0,0,3,0" FontSize="11"
+                                ToolTip="Prepare confirmed weapon, gear and character data for the Armory editor."/>
+                            <Button x:Name="SkeletonIndexButton" Grid.Column="1" Content="Skeleton index"
+                                Click="SkeletonIndex_Click" Padding="6,3" Margin="3,0" FontSize="11"
                                 ToolTip="Scan the game for skeletons, so exported meshes get a working one. Takes a few minutes."/>
-                            <Button Grid.Column="1" Content="Game folder" Click="ChangeGameFolder_Click"
-                                Padding="6,3" Margin="3,0,0,0" FontSize="11"/>
+                            <Button Grid.Column="2" Content="Indexes…" Click="Indexes_Click"
+                                Padding="6,3" Margin="3,0,0,0" FontSize="11"
+                                ToolTip="Explain or prepare the indexes used by the Toolkit."/>
                         </Grid>
+                        <Button Content="Game folder" Click="ChangeGameFolder_Click"
+                                Padding="6,3" Margin="0,6,0,0" FontSize="11"/>
                     </StackPanel>
 
                     <ListView x:Name="ArchiveList" SelectionChanged="ArchiveList_SelectionChanged"
@@ -159,14 +162,17 @@
                     <TextBlock DockPanel.Dock="Top" x:Name="PreviewTitle" Text="Nothing selected"
                            TextTrimming="CharacterEllipsis" FontSize="13" Margin="0,0,0,10"/>
 
-                    <Border DockPanel.Dock="Top" x:Name="ImageFrame" Height="300" Visibility="Collapsed"
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="0,0,4,0">
+                    <Border x:Name="ImageFrame" Height="300" Visibility="Collapsed"
                         Background="#FF141416" BorderBrush="{StaticResource Border}"
                         BorderThickness="1" CornerRadius="4" Margin="0,0,0,8">
                         <Image x:Name="PreviewImage" Stretch="Uniform" Margin="6"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
 
-                    <ItemsControl DockPanel.Dock="Top" x:Name="SetStrip" Visibility="Collapsed"
+                    <ItemsControl x:Name="SetStrip" Visibility="Collapsed"
                               Margin="0,0,0,8">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -185,7 +191,8 @@
                                            RenderOptions.BitmapScalingMode="HighQuality"/>
                                     </Border>
                                     <TextBlock Text="{Binding Slot}" Margin="0,3,0,0" FontSize="11"
-                                           HorizontalAlignment="Center"
+                                           HorizontalAlignment="Stretch" TextAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
                                            Foreground="{StaticResource Text}"/>
                                     <TextBlock Text="{Binding Size}" FontSize="10" FontFamily="Consolas"
                                            HorizontalAlignment="Center"
@@ -198,7 +205,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <Grid DockPanel.Dock="Top" x:Name="LevelRow" Visibility="Collapsed" Margin="0,0,0,8">
+                    <Grid x:Name="LevelRow" Visibility="Collapsed" Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
@@ -209,7 +216,7 @@
                               SelectionChanged="PreviewLevel_Changed"/>
                     </Grid>
 
-                    <Border DockPanel.Dock="Top" x:Name="SourceRow" Visibility="Collapsed"
+                    <Border x:Name="SourceRow" Visibility="Collapsed"
                         CornerRadius="4" Padding="8,6" Margin="0,0,0,8"
                         Background="{StaticResource Background}"
                         BorderBrush="{StaticResource Border}" BorderThickness="1">
@@ -226,18 +233,23 @@
                         </StackPanel>
                     </Border>
 
-                    <Button DockPanel.Dock="Top" x:Name="OpenViewerButton" Content="Open texture viewer"
+                    <Button x:Name="OpenViewerButton" Content="Open texture viewer"
                         Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
 
-                    <Button DockPanel.Dock="Top" x:Name="OpenMeshButton" Content="Open mesh viewer"
+                    <Button x:Name="OpenMeshButton" Content="Open mesh viewer"
                         Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
 
-                    <Button DockPanel.Dock="Top" x:Name="OpenCycleButton" Content="Open time cycle editor"
+                    <Button x:Name="OpenCycleButton" Content="Open time cycle editor"
                         Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
 
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                    <Button x:Name="OpenBuildTableButton" Content="Open BuildTable editor"
+                        Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto">
                         <TextBlock x:Name="PreviewInfo" FontFamily="Consolas" FontSize="12"
                                Foreground="{StaticResource TextDim}" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                    </StackPanel>
                     </ScrollViewer>
                 </DockPanel>
             </Border>
@@ -252,6 +264,8 @@
                         <MenuItem x:Name="MenuExport" Header="Export as..." Click="MenuExport_Click"/>
                         <MenuItem x:Name="MenuReplace" Header="Replace..." Click="MenuReplace_Click"/>
                         <MenuItem x:Name="MenuReplaceRaw" Header="Replace with raw resource file..." Click="MenuReplaceRaw_Click"/>
+                        <Separator/>
+                        <MenuItem x:Name="MenuFindCopies" Header="Find copies in game..." Click="FindCopies_Click"/>
                         <Separator/>
                         <MenuItem x:Name="MenuCopyName" Header="Copy name" Click="MenuCopyName_Click"/>
                         <MenuItem x:Name="MenuCopyId" Header="Copy id" Click="MenuCopyId_Click"/>
@@ -298,4 +312,25 @@
 
         </Grid>
     </DockPanel>
+
+    <Border x:Name="ApplyLoadingOverlay" Panel.ZIndex="200" Visibility="Collapsed"
+            Background="#D8141416" Cursor="Wait" Focusable="True">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" MinWidth="420"
+                Padding="32,26" CornerRadius="6" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="Applying changes" FontSize="18" FontWeight="SemiBold"
+                           Foreground="{StaticResource Text}" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="ApplyLoadingText" Margin="0,8,0,15" MaxWidth="560"
+                           Foreground="{StaticResource TextDim}" TextWrapping="Wrap"
+                           TextAlignment="Center" HorizontalAlignment="Center"/>
+                <ProgressBar Height="8" IsIndeterminate="True" Foreground="{StaticResource Accent}"
+                             Background="{StaticResource Background}"/>
+                <TextBlock Text="Please keep the Toolkit open until this finishes."
+                           Margin="0,14,0,0" Foreground="{StaticResource TextDim}"
+                           FontSize="11" TextAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Border>
+    </Grid>
 </Window>

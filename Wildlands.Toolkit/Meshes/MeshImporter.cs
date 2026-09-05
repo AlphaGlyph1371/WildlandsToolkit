@@ -14,7 +14,7 @@ public static class MeshImporter
 
         var dialog = new OpenFileDialog
         {
-            Title = $"Replace the geometry of {name}",
+            Title = $"Replace {name}",
             Filter = "glTF binary (*.glb;*.gltf)|*.glb;*.gltf|Wavefront OBJ (*.obj)|*.obj|All files (*.*)|*.*",
         };
 
@@ -40,7 +40,7 @@ public static class MeshImporter
         }
         catch (Exception ex)
         {
-            MessageBox.Show(owner, ex.Message, $"Could not import {Path.GetFileName(dialog.FileName)}",
+            MessageBox.Show(owner, ex.Message, $"Could not replace {name}",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return null;
         }
@@ -56,10 +56,20 @@ public static class MeshImporter
         }
 
         if (result.TransferredSkinning && !Ask(owner,
-            $"{name} moves with bones, but this file brings none.\n\n"
-            + "Every point of your new shape takes the weights of the closest point of the old one. "
-            + "That is a good guess when you only reshaped things a little, and a bad one when you "
-            + "changed the shape a lot.\n\nImport anyway?"))
+            $"The original mesh ({name}) is rigged to a skeleton, but the file you selected has no bone weights.\n\n"
+            + "The Toolkit can copy suitable bone weights from the original mesh automatically. "
+            + "This usually works well when the replacement has a similar shape, size and position.\n\n"
+            + "If the new mesh is very different, some parts may move or deform incorrectly in the game.\n\n"
+            + "Continue and create the bone weights automatically?"))
+        {
+            return null;
+        }
+
+        if (result.Cloth && !Ask(owner,
+            $"{name} is marked as a dynamic/cloth mesh. Its render geometry and vertex counts can be replaced, "
+            + "but the Toolkit does not rebuild the game's separate cloth simulation data.\n\n"
+            + "A substantially different shape may deform incorrectly or become unstable in the game. "
+            + "Continue with the replacement anyway?"))
         {
             return null;
         }
@@ -104,9 +114,9 @@ public static class MeshImporter
               + "weights of the closest point of the old shape instead. Those spots may bend oddly."
             : "";
 
-        return headline + fit + patched + "\n\nImport anyway?";
+        return headline + fit + patched + "\n\nReplace anyway?";
     }
 
     static bool Ask(Window owner, string question, MessageBoxImage icon = MessageBoxImage.Warning) =>
-        MessageBox.Show(owner, question, "Import mesh", MessageBoxButton.YesNo, icon) == MessageBoxResult.Yes;
+        MessageBox.Show(owner, question, "Replace mesh", MessageBoxButton.YesNo, icon) == MessageBoxResult.Yes;
 }

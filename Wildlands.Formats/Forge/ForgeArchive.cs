@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Wildlands.Formats.Data;
 
 namespace Wildlands.Formats.Forge;
 
@@ -10,11 +11,14 @@ public sealed class ForgeArchive : IDisposable
 {
     const string Magic = "scimitar";
     const int SupportedVersion = 27;
-    const int EntriesPerFileSet = 5000;
     const long FileAlignment = 32768;
 
     readonly Stream _stream;
     readonly BinaryReader _reader;
+    readonly List<ForgeFileSet> _fileSets = [];
+    long _totalEntryCountOffset;
+    long _totalEntryLimitOffset;
+    int _totalEntryLimit;
 
     ForgeArchive(Stream stream, string path)
     {
@@ -72,8 +76,25 @@ public sealed class ForgeArchive : IDisposable
     // and the offset of each entry are pulled behind, which is why rebuilding an archive that
     // nothing replaced gives the same bytes back.
     public void Rebuild(string outputPath, IReadOnlyDictionary<int, byte[]> replacements,
-        IProgress<string>? progress = null)
+        IProgress<string>? progress = null) =>
+        Rebuild(outputPath, replacements, [], progress);
+
+    public void Rebuild(string outputPath, IReadOnlyDictionary<int, byte[]> replacements,
+        IReadOnlyList<ForgeEntryAddition> additions, IProgress<string>? progress = null)
     {
+        ArgumentNullException.ThrowIfNull(additions);
+        var effectiveReplacements = replacements.ToDictionary(item => item.Key, item => item.Value);
+        if (additions.Count > 0)
+        {
+            ForgeEntry prefetch = Entries.SingleOrDefault(entry => entry.Id == 145)
+                ?? throw new InvalidDataException(
+                    "The Forge archive has no PrefetchingFileInfos registry for new entries.");
+            byte[] currentPrefetch = effectiveReplacements.TryGetValue(prefetch.Index, out byte[]? replacement)
+                ? replacement
+                : ReadEntry(prefetch);
+            effectiveReplacements[prefetch.Index] = PrefetchingFileInfos.AddObjects(currentPrefetch,
+                additions.Select(addition => (addition.Id, addition.PrefetchBlock)).ToList());
+        }
         var ordered = Entries.OrderBy(e => e.Offset).ToList();
         if (ordered.Count == 0)
             throw new InvalidDataException("The archive has no entries to rebuild.");
@@ -89,6 +110,11 @@ public sealed class ForgeArchive : IDisposable
 
         _stream.Position = 0;
         var prefix = _reader.ReadBytes((int)prefixLength);
+        var locationOffsets = Entries.ToDictionary(entry => entry.Index, entry => entry.LocationOffset);
+        var infoOffsets = Entries.ToDictionary(entry => entry.Index, entry => entry.InfoOffset);
+        AdditionTableLayout? additionLayout = additions.Count > 0
+            ? PrepareAdditionTables(prefix, additions, locationOffsets, infoOffsets)
+            : null;
 
         long tailStart = ordered[^1].Offset + ordered[^1].Length;
         _stream.Position = tailStart;
@@ -98,16 +124,26 @@ public sealed class ForgeArchive : IDisposable
         output.Position = prefixLength;
 
         int done = 0;
+        bool additionsWritten = false;
         foreach (var entry in ordered)
         {
-            var data = replacements.TryGetValue(entry.Index, out var replacement) ? replacement : ReadEntry(entry);
+            if (additionLayout is not null
+                && entry.Index == additionLayout.InsertEntryIndex)
+            {
+                WriteAdditions(output, prefix, additionLayout, additions, progress);
+                additionsWritten = true;
+            }
+
+            var data = effectiveReplacements.TryGetValue(entry.Index, out var replacement)
+                ? replacement
+                : ReadEntry(entry);
 
             long offset = output.Position;
             output.Write(data, 0, data.Length);
 
-            BitConverter.TryWriteBytes(prefix.AsSpan((int)entry.LocationOffset), offset);
-            BitConverter.TryWriteBytes(prefix.AsSpan((int)entry.LocationOffset + 16), data.Length);
-            BitConverter.TryWriteBytes(prefix.AsSpan((int)entry.InfoOffset), data.Length);
+            BitConverter.TryWriteBytes(prefix.AsSpan((int)locationOffsets[entry.Index]), offset);
+            BitConverter.TryWriteBytes(prefix.AsSpan((int)locationOffsets[entry.Index] + 16), data.Length);
+            BitConverter.TryWriteBytes(prefix.AsSpan((int)infoOffsets[entry.Index]), data.Length);
 
             entry.Offset = offset;
             entry.Length = data.Length;
@@ -116,12 +152,195 @@ public sealed class ForgeArchive : IDisposable
                 progress?.Report($"Rebuilding {Path.GetFileName(FilePath)}, {done} of {ordered.Count} entries");
         }
 
+        if (additionLayout is not null && !additionsWritten
+            && additionLayout.InsertEntryIndex == Entries.Count)
+            WriteAdditions(output, prefix, additionLayout, additions, progress);
+
         output.Write(tail, 0, tail.Length);
         output.SetLength((output.Position + FileAlignment - 1) / FileAlignment * FileAlignment);
 
         output.Position = 0;
         output.Write(prefix, 0, prefix.Length);
     }
+
+    AdditionTableLayout PrepareAdditionTables(byte[] prefix,
+        IReadOnlyList<ForgeEntryAddition> additions,
+        Dictionary<int, long> locationOffsets, Dictionary<int, long> infoOffsets)
+    {
+        if (_fileSets.Count == 0)
+            throw new InvalidDataException("The Forge archive has no file set for new entries.");
+        if (additions.Any(addition => addition.Id == 0 || addition.Data.Length == 0
+                || addition.PrefetchBlock.Length == 0
+                || addition.InfoTemplate.Length != ForgeEntry.InfoSize))
+            throw new InvalidDataException("A new Forge entry has incomplete data or metadata.");
+        var duplicate = Entries.Select(entry => entry.Id)
+            .Concat(additions.Select(addition => addition.Id))
+            .Where(id => id != 0)
+            .GroupBy(id => id)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new InvalidDataException($"Forge entry ID 0x{duplicate.Key:X} is already in use.");
+        var duplicateUmac = Entries.Select(entry => entry.UmacHash)
+            .Concat(additions.Select(addition => BitConverter.ToUInt64(addition.InfoTemplate, 4)))
+            .GroupBy(hash => hash)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateUmac is not null)
+            throw new InvalidDataException(
+                $"Forge entry UMAC 0x{duplicateUmac.Key:X16} is already in use.");
+
+        ForgeFileSet set = _fileSets[^1];
+        int insertLocalIndex = FindAdditionInsertionIndex(set);
+        int newSetCount = checked(set.EntryCount + additions.Count);
+        int newTotal = checked(Entries.Count + additions.Count);
+        long oldLocationEnd = checked(set.LocationTable + (long)set.EntryCount * 20);
+        long preservedGap = Math.Max(0, set.InfoTable - oldLocationEnd);
+        long newLocationEnd = checked(set.LocationTable + (long)newSetCount * 20);
+        long newInfoTable = checked(newLocationEnd + preservedGap);
+        long oldEntryInfoEnd = checked(set.InfoTable + (long)set.EntryCount * ForgeEntry.InfoSize);
+        long newEntryInfoEnd = checked(newInfoTable + (long)newSetCount * ForgeEntry.InfoSize);
+        if (set.InfoEnd < oldEntryInfoEnd || newEntryInfoEnd > prefix.Length)
+            throw new InvalidOperationException(
+                "The Forge header has no room to register another entry without moving game data.");
+
+        long tableGrowth = checked(newEntryInfoEnd - oldEntryInfoEnd);
+        if (tableGrowth <= 0 || tableGrowth > prefix.Length - oldEntryInfoEnd)
+            throw new InvalidDataException("The Forge entry tables have an invalid growth range.");
+
+        // The bytes following the ordinary entry infos are not entirely padding.
+        // Forge 27 stores a 192-byte sentinel/index block covered by InfoEnd, then
+        // more file-set trailer data (including _Lost&Found), followed by a large
+        // zero reserve. Grow over any of that and our parser remains happy while
+        // the game ignores the new container, so move the complete suffix.
+        ReadOnlySpan<byte> discarded = prefix.AsSpan(
+            checked(prefix.Length - (int)tableGrowth), checked((int)tableGrowth));
+        if (discarded.IndexOfAnyExcept((byte)0) >= 0)
+            throw new InvalidOperationException(
+                "The Forge header has no empty tail room for another registered entry.");
+        byte[] trailer = prefix.AsSpan(checked((int)oldEntryInfoEnd),
+            checked(prefix.Length - (int)oldEntryInfoEnd - (int)tableGrowth)).ToArray();
+        prefix.AsSpan(checked((int)oldEntryInfoEnd)).Clear();
+        trailer.CopyTo(prefix.AsSpan(checked((int)newEntryInfoEnd)));
+
+        byte[] oldLocations = prefix.AsSpan((int)set.LocationTable,
+            checked(set.EntryCount * 20)).ToArray();
+        byte[] oldInfos = prefix.AsSpan((int)set.InfoTable,
+            checked(set.EntryCount * ForgeEntry.InfoSize)).ToArray();
+
+        // Every entry info carries the index of the next and the previous entry at
+        // offset 28 and 32. The last entry ends the chain with -1 in every archive
+        // except DataPC.forge, which writes the entry count there instead, so the
+        // marker is taken from the archive rather than assumed.
+        int sentinel = BitConverter.ToInt32(oldInfos,
+            checked((set.EntryCount - 1) * ForgeEntry.InfoSize + 28)) == -1 ? -1 : newSetCount;
+
+        prefix.AsSpan((int)set.LocationTable, checked(newSetCount * 20)).Clear();
+        oldLocations.AsSpan(0, checked(insertLocalIndex * 20))
+            .CopyTo(prefix.AsSpan((int)set.LocationTable));
+        oldLocations.AsSpan(checked(insertLocalIndex * 20))
+            .CopyTo(prefix.AsSpan(checked((int)set.LocationTable
+                + (insertLocalIndex + additions.Count) * 20)));
+
+        prefix.AsSpan((int)newInfoTable,
+            checked(newSetCount * ForgeEntry.InfoSize)).Clear();
+        oldInfos.AsSpan(0, checked(insertLocalIndex * ForgeEntry.InfoSize))
+            .CopyTo(prefix.AsSpan((int)newInfoTable));
+        oldInfos.AsSpan(checked(insertLocalIndex * ForgeEntry.InfoSize))
+            .CopyTo(prefix.AsSpan(checked((int)newInfoTable
+                + (insertLocalIndex + additions.Count) * ForgeEntry.InfoSize)));
+
+        for (int i = 0; i < set.EntryCount; i++)
+        {
+            int shiftedIndex = i < insertLocalIndex ? i : i + additions.Count;
+            long locationOffset = set.LocationTable + (long)shiftedIndex * 20;
+            long infoOffset = newInfoTable + (long)shiftedIndex * ForgeEntry.InfoSize;
+            locationOffsets[set.FirstEntryIndex + i] = locationOffset;
+            infoOffsets[set.FirstEntryIndex + i] = infoOffset;
+            WriteInt32(prefix, infoOffset + 28,
+                shiftedIndex + 1 < newSetCount ? shiftedIndex + 1 : sentinel);
+            WriteInt32(prefix, infoOffset + 32, shiftedIndex - 1);
+        }
+
+        WriteInt32(prefix, _totalEntryCountOffset, newTotal);
+        WriteInt32(prefix, set.EntryCountOffset, newSetCount);
+        // The entry limit and the second file-set count sit one below the entry count in
+        // DataPC.forge and level with it everywhere else. Both are advanced by the number
+        // of new entries so that whatever they mean stays as far from the count as before.
+        WriteInt32(prefix, _totalEntryLimitOffset, checked(_totalEntryLimit + additions.Count));
+        WriteInt32(prefix, set.DuplicateCountOffset, checked(set.DuplicateCount + additions.Count));
+        WriteInt64(prefix, set.InfoTablePointerOffset, newInfoTable);
+        WriteInt64(prefix, set.InfoEndPointerOffset, checked(set.InfoEnd + tableGrowth));
+
+        return new AdditionTableLayout(set.LocationTable, newInfoTable,
+            insertLocalIndex, additions.Count,
+            set.FirstEntryIndex + insertLocalIndex, sentinel);
+    }
+
+    int FindAdditionInsertionIndex(ForgeFileSet set)
+    {
+        int index = set.EntryCount;
+        if (index > 0 && Entries[set.FirstEntryIndex + index - 1] is
+            { Id: 145, Name: "PrefetchingFileInfos" })
+            index--;
+        if (index > 0 && Entries[set.FirstEntryIndex + index - 1] is
+            { Id: 16, Name: "GlobalMetaFile" })
+            index--;
+        if (index == set.EntryCount)
+            throw new InvalidDataException(
+                "New Forge entries require the original trailing GlobalMetaFile and PrefetchingFileInfos entries.");
+        return index;
+    }
+
+    void WriteAdditions(Stream output, byte[] prefix, AdditionTableLayout layout,
+        IReadOnlyList<ForgeEntryAddition> additions, IProgress<string>? progress)
+    {
+        for (int i = 0; i < additions.Count; i++)
+        {
+            ForgeEntryAddition addition = additions[i];
+            long offset = output.Position;
+            output.Write(addition.Data, 0, addition.Data.Length);
+            WriteAddition(prefix, layout, i, addition, offset);
+            progress?.Report($"Adding {addition.Name} to {Path.GetFileName(FilePath)}...");
+        }
+    }
+
+    void WriteAddition(byte[] prefix, AdditionTableLayout layout, int index,
+        ForgeEntryAddition addition, long offset)
+    {
+        long locationOffset = layout.LocationTable
+            + (long)(layout.InsertLocalIndex + index) * 20;
+        WriteInt64(prefix, locationOffset, offset);
+        WriteUInt64(prefix, locationOffset + 8, addition.Id);
+        WriteInt32(prefix, locationOffset + 16, addition.Data.Length);
+
+        byte[] info = (byte[])addition.InfoTemplate.Clone();
+        WriteInt32(info, 0, addition.Data.Length);
+        WriteUInt32(info, 16, addition.Extension);
+        int entryIndex = layout.InsertLocalIndex + index;
+        bool hasNext = index + 1 < layout.AdditionCount
+            || layout.InsertEntryIndex < Entries.Count;
+        WriteInt32(info, 28, hasNext ? entryIndex + 1 : layout.Sentinel);
+        WriteInt32(info, 32, entryIndex - 1);
+        byte[] name = Encoding.UTF8.GetBytes(addition.Name);
+        if (name.Length >= 128)
+            throw new InvalidDataException("A new Forge entry name must be shorter than 128 UTF-8 bytes.");
+        Array.Clear(info, 44, 128);
+        name.CopyTo(info.AsSpan(44));
+        long infoOffset = layout.InfoTable
+            + (long)(layout.InsertLocalIndex + index) * ForgeEntry.InfoSize;
+        info.CopyTo(prefix.AsSpan((int)infoOffset));
+    }
+
+    static void WriteInt32(byte[] target, long offset, int value) =>
+        BitConverter.TryWriteBytes(target.AsSpan(checked((int)offset)), value);
+
+    static void WriteUInt32(byte[] target, long offset, uint value) =>
+        BitConverter.TryWriteBytes(target.AsSpan(checked((int)offset)), value);
+
+    static void WriteInt64(byte[] target, long offset, long value) =>
+        BitConverter.TryWriteBytes(target.AsSpan(checked((int)offset)), value);
+
+    static void WriteUInt64(byte[] target, long offset, ulong value) =>
+        BitConverter.TryWriteBytes(target.AsSpan(checked((int)offset)), value);
 
     public long RoomFor(ForgeEntry entry)
     {
@@ -148,11 +367,13 @@ public sealed class ForgeArchive : IDisposable
         ulong headerSize = _reader.ReadUInt64();
         _stream.Position += (long)headerSize - 21;
 
+        _totalEntryCountOffset = _stream.Position;
         _reader.ReadUInt32();
         _reader.ReadUInt32();
         _stream.Position += 12;
         _reader.ReadInt64();
-        _reader.ReadUInt32();
+        _totalEntryLimitOffset = _stream.Position;
+        _totalEntryLimit = _reader.ReadInt32();
 
         int fileSetCount = _reader.ReadInt32();
         long next = _reader.ReadInt64();
@@ -166,17 +387,25 @@ public sealed class ForgeArchive : IDisposable
 
     long ReadFileSet(int setIndex)
     {
+        int firstEntryIndex = Entries.Count;
+        long entryCountOffset = _stream.Position;
         int entryCount = _reader.ReadInt32();
         _reader.ReadInt32();
         _reader.ReadInt64();
 
         long nextSet = _reader.ReadInt64();
         _reader.ReadInt32();
-        _reader.ReadInt32();
+        long duplicateCountOffset = _stream.Position;
+        int duplicateCount = _reader.ReadInt32();
+        long infoTablePointerOffset = _stream.Position;
         long infoTable = _reader.ReadInt64();
-        _reader.ReadInt64();
+        long infoEndPointerOffset = _stream.Position;
+        long infoEnd = _reader.ReadInt64();
 
         long locationTable = _stream.Position;
+        _fileSets.Add(new ForgeFileSet(firstEntryIndex, entryCount,
+            entryCountOffset, duplicateCountOffset, duplicateCount, infoTablePointerOffset,
+            infoEndPointerOffset, locationTable, infoTable, infoEnd));
 
         // The two tables live in different parts of the archive. Seeking from one table
         // to the other for every entry turns a header read into thousands of random reads,
@@ -203,7 +432,7 @@ public sealed class ForgeArchive : IDisposable
             entry.ReadLocation(locationReader);
             entry.ReadInfo(infoReader);
 
-            entry.Index = setIndex * EntriesPerFileSet + i;
+            entry.Index = Entries.Count;
             Entries.Add(entry);
         }
 
@@ -214,6 +443,24 @@ public sealed class ForgeArchive : IDisposable
     {
         _stream.Position = entry.Offset;
         return _reader.ReadBytes(entry.Length);
+    }
+
+    public byte[] ReadEntryInfo(ForgeEntry entry)
+    {
+        _stream.Position = entry.InfoOffset;
+        return _reader.ReadBytes(ForgeEntry.InfoSize);
+    }
+
+    public IReadOnlyList<ResourceIndexEntry> ReadResourceIndex(ForgeEntry entry)
+    {
+        _stream.Position = entry.Offset;
+        return DataFile.ReadResourceIndex(_stream);
+    }
+
+    public bool ContainsResourceId(ForgeEntry entry, ulong id)
+    {
+        _stream.Position = entry.Offset;
+        return DataFile.ContainsResourceId(_stream, id);
     }
 
     Dictionary<ulong, ForgeEntry>? _byId;
@@ -292,4 +539,12 @@ public sealed class ForgeArchive : IDisposable
         _reader.Dispose();
         _stream.Dispose();
     }
+
+    sealed record ForgeFileSet(int FirstEntryIndex, int EntryCount,
+        long EntryCountOffset, long DuplicateCountOffset, int DuplicateCount,
+        long InfoTablePointerOffset, long InfoEndPointerOffset, long LocationTable,
+        long InfoTable, long InfoEnd);
+
+    sealed record AdditionTableLayout(long LocationTable, long InfoTable,
+        int InsertLocalIndex, int AdditionCount, int InsertEntryIndex, int Sentinel);
 }

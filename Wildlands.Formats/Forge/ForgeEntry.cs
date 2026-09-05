@@ -88,3 +88,11 @@ public sealed class ForgeEntry
         return builder.ToString();
     }
 }
+
+public sealed record ForgeEntryAddition(
+    ulong Id,
+    string Name,
+    uint Extension,
+    byte[] InfoTemplate,
+    byte[] Data,
+    byte[] PrefetchBlock);

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -35,13 +36,19 @@ public partial class MainWindow : Window
     ArchiveSet? _archives;
     readonly ChangeSet _changes = new();
     SkeletonIndex? _skeletonIndex;
+    ArmoryIndex? _armoryIndex;
+    bool _buildingArmoryIndex;
     bool _buildingSkeletonIndex;
     bool _loading;
+    bool _applying;
     List<BrowserItem> _shown = [];
     TextureView? _preview;
     readonly List<TextureWindow> _textureWindows = [];
     Mesh? _previewMesh;
+    byte[]? _previewMeshData;
     string _previewMeshName = "";
+    BrowserItem? _previewMeshItem;
+    Location? _previewMeshWhere;
 
     List<Resource> _previewSiblings = [];
 
@@ -51,6 +58,11 @@ public partial class MainWindow : Window
     TimeCycle? _previewCycle;
     BrowserItem? _previewCycleItem;
     Location? _previewCycleWhere;
+
+    BuildTableAsset? _previewBuildTable;
+    byte[]? _previewBuildTableData;
+    BrowserItem? _previewBuildTableItem;
+    Location? _previewBuildTableWhere;
 
     const int MaxPreviewBytes = 8 << 20;
 
@@ -66,7 +78,7 @@ public partial class MainWindow : Window
         if (_settings.IsConfigured)
         {
             LoadArchiveList();
-            LoadSkeletonIndex();
+            LoadIndexes();
         }
 
         ContentRendered += OnFirstRender;
@@ -78,19 +90,59 @@ public partial class MainWindow : Window
     {
         ContentRendered -= OnFirstRender;
 
-        ShowEarlyNotice();
-
-        if (_settings.IsConfigured)
-            return;
-
-        if (!RunSetup())
+        try
         {
-            SetStatus("No game folder set. Use \"Game folder\" or \"Open file\".");
-            return;
-        }
+            ShowEarlyNotice();
 
-        LoadArchiveList();
-        LoadSkeletonIndex();
+            if (_settings.IsConfigured)
+            {
+                ShowIndexSetupIfNeeded();
+                return;
+            }
+
+            if (!RunSetup())
+            {
+                SetStatus("No game folder set. Use \"Game folder\" or \"Open file\".");
+                return;
+            }
+
+            LoadArchiveList();
+            LoadIndexes();
+            ShowIndexSetupIfNeeded();
+        }
+        finally
+        {
+            BeginUpdateCheck();
+        }
+    }
+
+    void BeginUpdateCheck()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (_settings.LastUpdateCheckUtc is { } last
+            && last <= now && now - last < TimeSpan.FromHours(1))
+            return;
+
+        _settings.LastUpdateCheckUtc = now;
+        _settings.Save();
+        _ = CheckForUpdateAsync();
+    }
+
+    async Task CheckForUpdateAsync()
+    {
+        try
+        {
+            ToolkitUpdate? update = await UpdateChecker.CheckAsync();
+            if (update is null || !IsLoaded)
+                return;
+
+            if (update.IsAvailable)
+                new UpdateWindow(update) { Owner = this }.ShowDialog();
+        }
+        catch
+        {
+            // Update checks are optional and must never interrupt normal startup.
+        }
     }
 
     void ShowEarlyNotice()
@@ -127,7 +179,33 @@ public partial class MainWindow : Window
     void ChangeGameFolder_Click(object sender, RoutedEventArgs e)
     {
         if (RunSetup())
+        {
             LoadArchiveList();
+            LoadIndexes();
+            ShowIndexSetupIfNeeded();
+        }
+    }
+
+    void LoadIndexes()
+    {
+        LoadArmoryIndex();
+        LoadSkeletonIndex();
+    }
+
+    void LoadArmoryIndex()
+    {
+        _armoryIndex = null;
+        if (!_settings.IsConfigured)
+            return;
+
+        string path = AppSettings.ArmoryCachePath;
+        if (File.Exists(ArmoryIndex.PartialPath(path)))
+        {
+            try { File.Delete(ArmoryIndex.PartialPath(path)); } catch { }
+        }
+
+        _armoryIndex = ArmoryIndex.Load(path, ArchiveLocator.Find(_settings.GamePath));
+        UpdateArmoryIndexButton();
     }
 
     void LoadSkeletonIndex()
@@ -137,8 +215,8 @@ public partial class MainWindow : Window
         if (File.Exists(SkeletonIndex.PartialPath(path)))
         {
             try { File.Delete(SkeletonIndex.PartialPath(path)); } catch { }
-
-            Offer("The last scan was interrupted and did not finish.\n\nScan again now?");
+            _skeletonIndex = null;
+            UpdateSkeletonIndexButton();
             return;
         }
 
@@ -146,34 +224,86 @@ public partial class MainWindow : Window
         {
             _skeletonIndex = SkeletonIndex.Load(path);
             UpdateSkeletonIndexButton();
-
-            if (_skeletonIndex is null)
-                Offer("The saved scan is damaged and cannot be used.\n\nScan again now?");
-
             return;
         }
 
-        Offer("To export a mesh with a working skeleton, the toolkit has to scan the game once. "
-            + "This can take up to 10 minutes or more.\n\nScan now? You can also do it later and pick skeletons by hand.");
+        _skeletonIndex = null;
+        UpdateSkeletonIndexButton();
     }
 
-    void Offer(string question)
+    void ShowIndexSetupIfNeeded()
     {
-        UpdateSkeletonIndexButton();
+        if (!_settings.IsConfigured || _settings.SeenIndexSetup)
+            return;
 
+        ShowIndexSetup();
+    }
+
+    void Indexes_Click(object sender, RoutedEventArgs e) => ShowIndexSetup();
+
+    void ShowIndexSetup()
+    {
         if (!_settings.IsConfigured)
             return;
 
-        if (MessageBox.Show(this, question, "Skeletons", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-            BuildSkeletonIndex();
+        var setup = new IndexSetupWindow(_armoryIndex is not null, _skeletonIndex is not null) { Owner = this };
+        bool prepare = setup.ShowDialog() == true;
+        _settings.SeenIndexSetup = true;
+        _settings.Save();
+
+        if (prepare)
+            _ = PrepareIndexesAsync();
     }
 
-    void SkeletonIndex_Click(object sender, RoutedEventArgs e) => BuildSkeletonIndex();
+    async Task PrepareIndexesAsync()
+    {
+        if (_armoryIndex is null && !await BuildArmoryIndexAsync())
+            return;
+        if (_skeletonIndex is null)
+            await BuildSkeletonIndexAsync();
+    }
 
-    async void BuildSkeletonIndex()
+    void ArmoryIndex_Click(object sender, RoutedEventArgs e) => _ = BuildArmoryIndexAsync();
+    void SkeletonIndex_Click(object sender, RoutedEventArgs e) => _ = BuildSkeletonIndexAsync();
+
+    async Task<bool> BuildArmoryIndexAsync(Action? completed = null)
+    {
+        if (_buildingArmoryIndex || !_settings.IsConfigured)
+            return _armoryIndex is not null;
+
+        _buildingArmoryIndex = true;
+        ScanText.Text = "Preparing Armory index";
+        ScanText.Visibility = Visibility.Visible;
+        UpdateArmoryIndexButton();
+
+        try
+        {
+            var progress = new Progress<string>(message => ScanText.Text = message);
+            string folder = _settings.GamePath;
+            var index = await Task.Run(() => ArmoryIndex.Build(ArchiveLocator.Find(folder), progress));
+            index.Save(AppSettings.ArmoryCachePath);
+            _armoryIndex = index;
+            SetStatus($"Armory index ready: {index.DatabaseResourceCount:N0} game records.");
+            completed?.Invoke();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ShowError("Could not prepare the Armory index", ex);
+            return false;
+        }
+        finally
+        {
+            _buildingArmoryIndex = false;
+            ScanText.Visibility = Visibility.Collapsed;
+            UpdateArmoryIndexButton();
+        }
+    }
+
+    async Task<bool> BuildSkeletonIndexAsync()
     {
         if (_buildingSkeletonIndex || !_settings.IsConfigured)
-            return;
+            return _skeletonIndex is not null;
 
         _buildingSkeletonIndex = true;
         ScanText.Text = "Looking for skeletons";
@@ -202,10 +332,12 @@ public partial class MainWindow : Window
             index.Save(AppSettings.SkeletonCachePath);
             _skeletonIndex = index;
             SetStatus($"Found {index.SkeletonCount} skeletons.");
+            return true;
         }
         catch (Exception ex)
         {
             ShowError("Could not scan for skeletons", ex);
+            return false;
         }
         finally
         {
@@ -352,6 +484,13 @@ public partial class MainWindow : Window
         }
     }
 
+    void UpdateArmoryIndexButton()
+    {
+        ArmoryIndexButton.IsEnabled = !_buildingArmoryIndex;
+        ArmoryIndexButton.Content = _buildingArmoryIndex ? "Preparing…"
+            : _armoryIndex is null ? "Armory index" : "Refresh armory";
+    }
+
     static string Elapsed(Stopwatch watch) => watch.Elapsed.TotalSeconds >= 1
         ? $"{watch.Elapsed.TotalSeconds:0.0} s"
         : $"{watch.ElapsedMilliseconds} ms";
@@ -363,22 +502,17 @@ public partial class MainWindow : Window
         ArchiveLoadingOverlay.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
         ArchiveLoadingText.Text = status;
         FilterBox.IsEnabled = !loading;
-        Mouse.OverrideCursor = loading ? Cursors.Wait : null;
+        Mouse.OverrideCursor = loading || _applying ? Cursors.Wait : null;
 
         if (loading)
         {
             ArchiveLoadingOverlay.Focus();
-            ExtractButton.IsEnabled = false;
-            ExportButton.IsEnabled = false;
-            ReplaceButton.IsEnabled = false;
             ApplyButton.IsEnabled = false;
             DiscardButton.IsEnabled = false;
             SetStatus(status);
         }
         else
         {
-            ExtractButton.IsEnabled = ItemList.SelectedItems.Count > 0;
-            UpdateResourceButtons();
             UpdateChangeButtons();
         }
 
@@ -549,9 +683,11 @@ public partial class MainWindow : Window
         bool stepsIn = item?.Entry is not null && item.CanOpen;
         MenuOpen.Header = stepsIn ? "Open"
             : _previewCycle is not null ? "Open in time cycle editor"
+            : _previewBuildTable is not null ? "Open in BuildTable editor"
             : _previewMesh is not null ? "Open in mesh viewer"
             : "Open in texture viewer";
-        MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null || _previewMesh is not null || _previewCycle is not null));
+        MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null
+            || _previewMesh is not null || _previewCycle is not null || _previewBuildTable is not null));
 
         MenuExtract.IsEnabled = count > 0;
         MenuExtract.Header = count > 1 ? $"Extract {count} items..." : "Extract...";
@@ -561,10 +697,21 @@ public partial class MainWindow : Window
         MenuReplace.IsEnabled = item?.Resource is not null || _preview is not null;
         MenuReplace.Header = item?.Resource?.ClassHash == Mesh.ClassHash ? "Replace geometry..." : "Replace...";
         MenuReplaceRaw.IsEnabled = item?.Resource is not null;
-        UpdateResourceButtons();
 
+        MenuFindCopies.IsEnabled = item is { Id: not 0 } && _showing is not null;
         MenuCopyName.IsEnabled = item is not null;
         MenuCopyId.IsEnabled = item is { Id: not 0 };
+    }
+
+    void FindCopies_Click(object sender, RoutedEventArgs e)
+    {
+        if (ItemList.SelectedItem is not BrowserItem { Id: not 0 } item || _showing is null)
+            return;
+
+        new AssetUsageWindow(item.Name, item.Id, _showing.ArchivePath)
+        {
+            Owner = this,
+        }.Show();
     }
 
     static string VersionText()
@@ -645,20 +792,24 @@ public partial class MainWindow : Window
 
     async void Apply_Click(object sender, RoutedEventArgs e)
     {
-        if (_changes.Count == 0 || _showing is null)
+        if (_changes.Count == 0 || _showing is null || _applying)
             return;
 
-        SetStatus("Working out what has to be written...");
-
         List<ArchiveWork> plans;
+        SetApplying(true, "Preparing the changed archive data…");
         try
         {
-            plans = await Task.Run(() => _changes.Plan(new Progress<string>(SetStatus)));
+            var planningProgress = new Progress<string>(SetApplyProgress);
+            plans = await Task.Run(() => _changes.Plan(planningProgress));
         }
         catch (System.Exception ex)
         {
             ShowError("Could not build the changed files", ex);
             return;
+        }
+        finally
+        {
+            SetApplying(false);
         }
 
         var fresh = plans.Where(x => !ArchiveBackup.Exists(x.Path)).ToList();
@@ -705,31 +856,121 @@ public partial class MainWindow : Window
         }
 
         var place = _showing;
+        SetApplying(true, "Preparing the archives for writing…");
         _archives?.Dispose();
         _archive?.Dispose();
         _archive = null;
         _archives = null;
 
-        ApplyButton.IsEnabled = false;
-        DiscardButton.IsEnabled = false;
-
-        var progress = new Progress<string>(SetStatus);
+        var writingProgress = new Progress<string>(SetApplyProgress);
         var watch = Stopwatch.StartNew();
+        var appliedArmoryChanges = _changes.Changes
+            .Where(change => BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName))
+            .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex,
+                change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
+            .ToList();
+        bool changedLocalization = _changes.Changes.Any(change =>
+            BuildTableGameMetadataResolver.TryGetLanguagePackage(change.EntryName) is not null);
 
         try
         {
-            await Task.Run(() => _changes.Write(plans, progress));
+            await Task.Run(() => _changes.Write(plans, writingProgress));
+            string? cacheWarning = null;
+            if (_armoryIndex is not null)
+            {
+                if (changedLocalization)
+                {
+                    // A newly added attachment brings new gameplay and localization
+                    // resources which cannot be mirrored by replacing old cache rows.
+                    // Rebuild now so the next Armory window immediately resolves it.
+                    try
+                    {
+                        string gameFolder = _settings.GamePath;
+                        var refreshProgress = new Progress<string>(SetApplyProgress);
+                        SetApplyProgress("Refreshing the Armory index from the changed game files…");
+                        var refreshed = await Task.Run(() => ArmoryIndex.Build(
+                            ArchiveLocator.Find(gameFolder), refreshProgress));
+                        refreshed.Save(AppSettings.ArmoryCachePath);
+                        _armoryIndex = refreshed;
+                        UpdateArmoryIndexButton();
+                    }
+                    catch (Exception ex)
+                    {
+                        _armoryIndex = null;
+                        UpdateArmoryIndexButton();
+                        cacheWarning = ex.Message;
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        var index = _armoryIndex;
+                        string gameFolder = _settings.GamePath;
+                        await Task.Run(() =>
+                        {
+                            index.ApplyChanges(appliedArmoryChanges);
+                            index.RefreshFingerprint(ArchiveLocator.Find(gameFolder));
+                            index.Save(AppSettings.ArmoryCachePath);
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        cacheWarning = ex.Message;
+                    }
+                }
+            }
             watch.Stop();
             await Navigate(place);
-            SetStatus($"Applied in {watch.Elapsed.TotalSeconds:0.0} s");
+            SetStatus(cacheWarning is null
+                ? $"Applied in {watch.Elapsed.TotalSeconds:0.0} s"
+                : $"Applied in {watch.Elapsed.TotalSeconds:0.0} s, but the Armory cache could not be refreshed: {cacheWarning}");
         }
         catch (System.Exception ex)
         {
             ShowError("Could not write the changes", ex);
             await Navigate(place);
         }
+        finally
+        {
+            SetApplying(false);
+            UpdateChangeButtons();
+        }
+    }
 
-        UpdateChangeButtons();
+    void SetApplying(bool applying, string status = "")
+    {
+        _applying = applying;
+        // Disabling the content makes WPF apply disabled control styles, which
+        // replaces parts of the dark theme with washed-out system colors. The
+        // overlay already owns the foreground, so only block pointer input.
+        MainContent.IsHitTestVisible = !applying;
+        ApplyLoadingOverlay.Visibility = applying ? Visibility.Visible : Visibility.Collapsed;
+        Mouse.OverrideCursor = applying || _loading ? Cursors.Wait : null;
+
+        if (applying)
+        {
+            ApplyLoadingText.Text = status;
+            ApplyLoadingOverlay.Focus();
+            SetStatus(status);
+        }
+    }
+
+    void SetApplyProgress(string status)
+    {
+        ApplyLoadingText.Text = status;
+        SetStatus(status);
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (_applying)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        base.OnClosing(e);
     }
 
     static string Amount(int count, string one, string? many = null) =>
@@ -924,25 +1165,22 @@ public partial class MainWindow : Window
 
     void ItemList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        ExtractButton.IsEnabled = ItemList.SelectedItems.Count > 0;
         ShowPreview(ItemList.SelectedItem as BrowserItem);
-        UpdateResourceButtons();
-    }
-
-    void UpdateResourceButtons()
-    {
-        var item = ItemList.SelectedItem as BrowserItem;
-
-        ReplaceButton.IsEnabled = item?.Resource is not null || _preview is not null;
-        ExportButton.IsEnabled = _preview is not null || _previewMesh is not null || _previewSet is not null;
     }
 
     void ShowPreview(BrowserItem? item)
     {
         _preview = null;
         _previewMesh = null;
+        _previewMeshData = null;
+        _previewMeshItem = null;
+        _previewMeshWhere = null;
         _previewSet = null;
         _previewCycle = null;
+        _previewBuildTable = null;
+        _previewBuildTableData = null;
+        _previewBuildTableItem = null;
+        _previewBuildTableWhere = null;
         PreviewLevelBox.ItemsSource = null;
         PreviewImage.Source = null;
         SetStrip.ItemsSource = null;
@@ -953,6 +1191,7 @@ public partial class MainWindow : Window
         OpenViewerButton.Visibility = Visibility.Collapsed;
         OpenMeshButton.Visibility = Visibility.Collapsed;
         OpenCycleButton.Visibility = Visibility.Collapsed;
+        OpenBuildTableButton.Visibility = Visibility.Collapsed;
 
         if (item is null)
         {
@@ -979,6 +1218,13 @@ public partial class MainWindow : Window
         if (item.Resource is not null && TimeCycle.IsTimeCycle(item.Resource.ClassHash))
         {
             ShowCycle(item, lines);
+            PreviewInfo.Text = string.Join(Environment.NewLine, lines);
+            return;
+        }
+
+        if (item.Resource?.ClassHash == BuildTable.ClassHash)
+        {
+            ShowBuildTable(item, lines);
             PreviewInfo.Text = string.Join(Environment.NewLine, lines);
             return;
         }
@@ -1100,6 +1346,8 @@ public partial class MainWindow : Window
         lines.Add($"{material.Parameters.Count} parameters");
 
         var tiles = new List<SetTexture>();
+        var textureSets = new Dictionary<ulong, TextureSet?>();
+        TextureSet? defaultTextureSet = ResolveTextureSet(material.TextureSetId, textureSets);
         Mouse.OverrideCursor = Cursors.Wait;
 
         try
@@ -1107,7 +1355,17 @@ public partial class MainWindow : Window
             foreach (var parameter in material.Parameters)
             {
                 string name = ParameterNames.NameOf(parameter.Name);
-                lines.Add($"  {name,-20} {Describe(parameter, name, tiles)}");
+                if (name.StartsWith("0x") && parameter.TextureId != 0)
+                {
+                    TextureSet? selectedSet = parameter.TextureSetId != 0
+                        ? ResolveTextureSet(parameter.TextureSetId, textureSets)
+                        : defaultTextureSet;
+                    name = selectedSet?.Textures.FirstOrDefault(slot => slot.Id == parameter.TextureId)?.Name
+                        ?? defaultTextureSet?.Textures.FirstOrDefault(slot => slot.Id == parameter.TextureId)?.Name
+                        ?? name;
+                }
+                string description = Describe(parameter, ref name, tiles);
+                lines.Add($"  {name,-20} {description}");
             }
         }
         finally
@@ -1122,7 +1380,28 @@ public partial class MainWindow : Window
         SetStrip.Visibility = Visibility.Visible;
     }
 
-    string Describe(MaterialParameter parameter, string name, List<SetTexture> tiles)
+    TextureSet? ResolveTextureSet(ulong id, Dictionary<ulong, TextureSet?> cache)
+    {
+        if (id == 0)
+            return null;
+        if (cache.TryGetValue(id, out TextureSet? cached))
+            return cached;
+
+        try
+        {
+            var found = _archives?.FindResource(id, TextureSet.ClassHash);
+            TextureSet? set = found is null ? null : TextureSet.Read(found.Resource.Data);
+            cache[id] = set;
+            return set;
+        }
+        catch
+        {
+            cache[id] = null;
+            return null;
+        }
+    }
+
+    string Describe(MaterialParameter parameter, ref string name, List<SetTexture> tiles)
     {
         if (parameter.ObjectClass == UvTransform)
             return $"UVTransform  tiles {parameter.ScaleU:0.##} x {parameter.ScaleV:0.##}";
@@ -1138,6 +1417,8 @@ public partial class MainWindow : Window
 
         var texture = TextureMap.Read(found.Resource.Data);
         var thumbnail = Thumbnail(texture, out int level);
+        if (name.StartsWith("0x"))
+            name = found.Resource.Name;
 
         tiles.Add(new SetTexture
         {
@@ -1285,7 +1566,14 @@ public partial class MainWindow : Window
                     return null;
 
                 _previewSiblings = _shown.Select(i => i.Resource).OfType<Resource>().ToList();
-                return Mesh.Read(item.Resource.Data);
+                byte[] data = _showing is null
+                    ? item.Resource.Data
+                    : _changes.Find(_showing.ArchivePath, _showing.EntryIndex, item.Index)?.Data
+                        ?? item.Resource.Data;
+                _previewMeshData = data;
+                _previewMeshItem = item;
+                _previewMeshWhere = _showing;
+                return Mesh.Read(data);
             }
 
             if (item.Entry is not null && item.Entry.FileExtension == ".data"
@@ -1299,6 +1587,7 @@ public partial class MainWindow : Window
                     return null;
 
                 _previewSiblings = file.Resources;
+                _previewMeshData = resource.Data;
                 return Mesh.Read(resource.Data);
             }
         }
@@ -1348,6 +1637,44 @@ public partial class MainWindow : Window
         }
 
         OpenCycleButton.Visibility = Visibility.Visible;
+    }
+
+    void ShowBuildTable(BrowserItem item, List<string> lines)
+    {
+        if (item.Resource is null || _showing is null)
+            return;
+
+        byte[] data = _changes.Find(_showing.ArchivePath, _showing.EntryIndex, item.Index)?.Data
+            ?? item.Resource.Data;
+
+        try
+        {
+            _previewBuildTable = BuildTable.Read(data);
+            _previewBuildTableData = data;
+            _previewBuildTableItem = item;
+            _previewBuildTableWhere = _showing;
+        }
+        catch (Exception ex)
+        {
+            lines.Add("");
+            lines.Add($"       BuildTable unreadable: {ex.Message}");
+            return;
+        }
+
+        lines.Add("");
+        lines.Add($"columns     {_previewBuildTable.ColumnCount}");
+        lines.Add($"rows        {_previewBuildTable.RowCount}");
+        lines.Add($"references  {_previewBuildTable.References.Count - 1}");
+
+        foreach (var group in _previewBuildTable.References
+            .Where(reference => reference.Kind != BuildTableReferenceKind.TableIdentity)
+            .GroupBy(reference => reference.Kind))
+            lines.Add($"  {group.Key,-13} {group.Count(),4}");
+
+        if (_changes.Contains(_showing.ArchivePath, _showing.EntryIndex, item.Index))
+            lines.Add("       pending edit");
+
+        OpenBuildTableButton.Visibility = Visibility.Visible;
     }
 
     void ShowMesh(Mesh mesh, string name, List<string> lines)
@@ -1461,6 +1788,12 @@ public partial class MainWindow : Window
 
     void OpenViewer()
     {
+        if (_previewBuildTable is not null)
+        {
+            OpenBuildTableEditor();
+            return;
+        }
+
         if (_previewCycle is not null)
         {
             OpenCycleEditor();
@@ -1469,7 +1802,18 @@ public partial class MainWindow : Window
 
         if (_previewMesh is not null)
         {
-            new MeshWindow(_previewMesh, _previewMeshName, _previewSiblings, _archives, _skeletonIndex, _settings)
+            byte[] meshData = _previewMeshData ?? _previewMesh.Write();
+            Action<byte[], string>? queueImport = null;
+            bool pending = false;
+            if (_previewMeshItem?.Resource is not null && _previewMeshWhere is { } where)
+            {
+                BrowserItem item = _previewMeshItem;
+                pending = _changes.Contains(where.ArchivePath, where.EntryIndex, item.Index);
+                queueImport = (data, summary) => QueueMeshViewerImport(where, item, data, summary);
+            }
+
+            new MeshWindow(_previewMesh, meshData, _previewMeshName, _previewSiblings,
+                _archives, _skeletonIndex, _settings, queueImport, pending)
                 { Owner = this }.Show();
             return;
         }
@@ -1491,6 +1835,21 @@ public partial class MainWindow : Window
         window.Closed += (_, _) => _textureWindows.Remove(window);
         _textureWindows.Add(window);
         window.Show();
+    }
+
+    void QueueMeshViewerImport(Location where, BrowserItem item, byte[] rebuilt, string summary)
+    {
+        _changes.Set(new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName,
+            item.Index, item.Name, rebuilt));
+
+        if (ReferenceEquals(_previewMeshItem, item) && _previewMeshWhere == where)
+        {
+            _previewMeshData = (byte[])rebuilt.Clone();
+            _previewMesh = Mesh.Read(rebuilt);
+        }
+
+        SetStatus($"{item.Name}: {summary}, waiting for Apply");
+        UpdateChangeButtons();
     }
 
     TextureView? ReplaceTexture(TextureView view)
@@ -1591,6 +1950,134 @@ public partial class MainWindow : Window
             SetStatus($"{item.Name}: {item.Size} -> {data.Length} bytes, waiting for Apply");
             UpdateChangeButtons();
         })
+        { Owner = this }.Show();
+    }
+
+    void OpenBuildTableEditor()
+    {
+        if (_previewBuildTableData is null || _previewBuildTableItem is null || _previewBuildTableWhere is null)
+            return;
+
+        var currentArchivePaths = _settings.IsConfigured
+            ? ArchiveLocator.Find(_settings.GamePath)
+            : [];
+        if (_armoryIndex is not null && !_armoryIndex.MatchesArchives(currentArchivePaths))
+        {
+            _armoryIndex = null;
+            SetStatus("Game archives changed; rebuilding the Armory index before opening the editor…");
+            _ = BuildArmoryIndexAsync(OpenBuildTableEditor);
+            return;
+        }
+
+        if (_armoryIndex is null)
+        {
+            var answer = MessageBox.Show(this,
+                "The Armory editor needs the Armory index first. It reads the confirmed game database and language data once, so opening a weapon does not trigger a slow full archive search.\n\nPrepare it now?",
+                "Armory index required", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (answer == MessageBoxResult.Yes)
+                _ = BuildArmoryIndexAsync(OpenBuildTableEditor);
+            return;
+        }
+
+        var data = _previewBuildTableData;
+        var item = _previewBuildTableItem;
+        var where = _previewBuildTableWhere;
+        var targets = _shown
+            .Where(shown => shown.Resource is not null && shown.Id != 0)
+            .GroupBy(shown => shown.Id)
+            .Select(group => group.First())
+            .Select(shown => new BuildTableTarget(
+                shown.Id,
+                shown.Name,
+                shown.Resource!.ClassHash,
+                ResourceTypes.NameOf(shown.Resource.ClassHash),
+                where.EntryName,
+                Path.GetFileName(where.ArchivePath)))
+            .ToList();
+
+        var archivePaths = currentArchivePaths;
+        archivePaths.RemoveAll(path => string.Equals(path, where.ArchivePath, StringComparison.OrdinalIgnoreCase));
+        archivePaths.Insert(0, where.ArchivePath);
+
+        var familyResources = _shown
+            .Where(shown => shown.Resource?.ClassHash == BuildTable.ClassHash)
+            .Select(shown => new BuildTableResourceSource(
+                shown.Index, shown.Id, shown.Name,
+                _changes.Find(where.ArchivePath, where.EntryIndex, shown.Index)?.Data
+                    ?? shown.Resource!.Data))
+            .ToList();
+        var previewResources = _shown
+            .Where(shown => shown.Resource is not null && shown.Id != 0)
+            .Select(shown => new Resource
+            {
+                Id = shown.Resource!.Id,
+                Name = shown.Resource.Name,
+                ClassHash = shown.Resource.ClassHash,
+                Header = shown.Resource.Header,
+                Data = _changes.Find(where.ArchivePath, where.EntryIndex, shown.Index)?.Data
+                    ?? shown.Resource.Data,
+            })
+            .ToList();
+        var previewResourceIndexes = _shown
+            .Where(shown => shown.Resource is not null && shown.Id != 0)
+            .GroupBy(shown => shown.Id)
+            .ToDictionary(group => group.Key, group => group.First().Index);
+        var workingArmoryIndex = _armoryIndex?.CreateWorkingCopy();
+        if (workingArmoryIndex is not null)
+        {
+            var pendingArmoryChanges = _changes.Changes
+                .Where(change => BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName))
+                .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex,
+                    change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
+                .ToList();
+            workingArmoryIndex.ApplyChanges(pendingArmoryChanges);
+        }
+
+        new BuildTableWindow(data, item.Name, targets, archivePaths, familyResources, changed =>
+        {
+            foreach (var resource in changed)
+                _changes.Set(new PendingChange(
+                    where.ArchivePath, where.EntryIndex, where.EntryName,
+                    resource.ResourceIndex, resource.Name, resource.Data));
+
+            var current = changed.FirstOrDefault(change => change.ResourceIndex == item.Index);
+            if (current is not null && _previewBuildTableItem == item && _previewBuildTableWhere == where)
+            {
+                _previewBuildTableData = current.Data;
+                _previewBuildTable = BuildTable.Read(current.Data);
+            }
+
+            SetStatus($"{BuildTableNames.FamilyTitle(item.Name)}: {changed.Count} table change(s), waiting for Apply");
+            UpdateChangeButtons();
+        }, workingArmoryIndex, databaseChanges =>
+        {
+            foreach (var change in databaseChanges)
+                _changes.Set(new PendingChange(change.ArchivePath, change.EntryIndex, change.EntryName,
+                    change.ResourceIndex, change.ResourceName, change.Data));
+
+            SetStatus($"Prepared {databaseChanges.Count} confirmed Gunsmith database change(s), waiting for Apply");
+            UpdateChangeButtons();
+        }, previewResources, additions =>
+        {
+            foreach (var addition in additions)
+                _changes.Set(new PendingChange(addition.ArchivePath, addition.EntryIndex,
+                    addition.EntryName, -1, addition.ResourceName, addition.Data,
+                    new PendingResourceAddition(addition.ResourceId, addition.ClassHash,
+                        addition.Header)));
+
+            SetStatus($"Prepared {additions.Count} new attachment resource(s), waiting for Apply");
+            UpdateChangeButtons();
+        }, entryAdditions =>
+        {
+            foreach (var addition in entryAdditions)
+                _changes.Set(new PendingChange(addition.ArchivePath, -1,
+                    addition.EntryName, -1, addition.EntryName, addition.Data, null,
+                    new PendingForgeEntryAddition(addition.EntryId, addition.EntryName,
+                        addition.Extension, addition.InfoTemplate, addition.PrefetchBlock)));
+
+            SetStatus($"Prepared {entryAdditions.Count} new asset container(s), waiting for Apply");
+            UpdateChangeButtons();
+        }, where.ArchivePath, where.EntryIndex, where.EntryName, previewResourceIndexes)
         { Owner = this }.Show();
     }
 

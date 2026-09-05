@@ -16,6 +16,8 @@ public sealed class Resource
     public byte[] Data { get; set; } = [];
 }
 
+public sealed record ResourceIndexEntry(ulong Id, int Size);
+
 public sealed class DataFile
 {
     const int IndexEntrySize = 14;
@@ -67,6 +69,39 @@ public sealed class DataFile
         return file;
     }
 
+    // A Forge entry's resource index precedes its payload. This avoids decompressing
+    // textures, meshes and other large payloads when only an exact resource id is needed.
+    public static IReadOnlyList<ResourceIndexEntry> ReadResourceIndex(Stream stream)
+    {
+        using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+        var indexBlob = CompressedBlob.Read(reader);
+        return ReadIndex(indexBlob)
+            .Select(entry => new ResourceIndexEntry(entry.Id, entry.Size))
+            .ToList();
+    }
+
+    // The copy finder needs one answer, not an allocated list for every resource in every
+    // container. Scan the already-decompressed index directly to keep a full-game search light.
+    public static bool ContainsResourceId(Stream stream, ulong id)
+    {
+        using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+        var indexBlob = CompressedBlob.Read(reader);
+        if (indexBlob.Length < 2)
+            return false;
+
+        int count = BitConverter.ToUInt16(indexBlob, 0);
+        for (int i = 0; i < count; i++)
+        {
+            int at = 2 + i * IndexEntrySize;
+            if (at + sizeof(ulong) > indexBlob.Length)
+                return false;
+            if (BitConverter.ToUInt64(indexBlob, at) == id)
+                return true;
+        }
+
+        return false;
+    }
+
     public void Write(string path)
     {
         using var stream = File.Create(path);
@@ -75,6 +110,9 @@ public sealed class DataFile
 
     public void Write(Stream stream)
     {
+        if (Resources.Count > ushort.MaxValue)
+            throw new InvalidDataException($"A DataFile cannot contain more than {ushort.MaxValue:N0} resources.");
+
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
         var index = new byte[2 + Resources.Count * IndexEntrySize];
@@ -105,6 +143,38 @@ public sealed class DataFile
 
         CompressedBlob.Write(writer, index, IndexCompression, _index, _indexBlocks);
         CompressedBlob.Write(writer, payload, PayloadCompression, _payload, _payloadBlocks);
+    }
+
+    public static Resource CloneResource(Resource source, ulong id, string name, byte[] data)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(data);
+        if (source.Header.Length < 12)
+            throw new InvalidDataException("The source resource header is too short to clone.");
+
+        int oldNameLength = BitConverter.ToInt32(source.Header, 8);
+        if (oldNameLength < 0 || 12 + oldNameLength > source.Header.Length)
+            throw new InvalidDataException("The source resource header contains an invalid name length.");
+
+        byte[] encodedName = Encoding.UTF8.GetBytes(name);
+        int suffixOffset = 12 + oldNameLength;
+        var header = new byte[checked(12 + encodedName.Length + source.Header.Length - suffixOffset)];
+        source.Header.AsSpan(0, 12).CopyTo(header);
+        BitConverter.TryWriteBytes(header.AsSpan(0, 4), source.ClassHash);
+        BitConverter.TryWriteBytes(header.AsSpan(4, 4), data.Length);
+        BitConverter.TryWriteBytes(header.AsSpan(8, 4), encodedName.Length);
+        encodedName.CopyTo(header.AsSpan(12));
+        source.Header.AsSpan(suffixOffset).CopyTo(header.AsSpan(12 + encodedName.Length));
+
+        return new Resource
+        {
+            Id = id,
+            ClassHash = source.ClassHash,
+            Name = name,
+            Header = header,
+            Data = (byte[])data.Clone(),
+        };
     }
 
     static List<(ulong Id, int Size)> ReadIndex(byte[] blob)

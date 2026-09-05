@@ -1,7 +1,7 @@
 <Window x:Class="Wildlands.Toolkit.TextureWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Texture" Height="760" Width="1040"
+        Title="Texture" Height="760" Width="1040" MinHeight="520" MinWidth="960"
         Background="{StaticResource Background}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
 
@@ -23,47 +23,95 @@
 
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="10,8">
-            <DockPanel LastChildFill="False">
-                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                    <Button Content="Fit" Click="Fit_Click" ToolTip="Fit the image into the window"/>
-                    <Button Content="1:1" Click="Actual_Click" ToolTip="Show at full size"/>
-                    <Button Click="ZoomOut_Click" ToolTip="Zoom out"
-                            Style="{StaticResource IconButton}">
-                        <Path Style="{StaticResource NavIcon}" Data="M 0,5.5 L 11,5.5"/>
-                    </Button>
-                    <Button Click="ZoomIn_Click" ToolTip="Zoom in"
-                            Style="{StaticResource IconButton}">
-                        <Path Style="{StaticResource NavIcon}" Data="M 0,5.5 L 11,5.5 M 5.5,0 L 5.5,11"/>
-                    </Button>
-                    <Button x:Name="BackgroundButton" Content="Background: dark" Click="Background_Click"/>
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1"
+                Padding="14,10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-                    <ToggleButton x:Name="RedToggle" Content="R" IsChecked="True" Click="Channel_Click"
-                                  Style="{StaticResource ChannelToggle}" Tag="#FFB33A3A"
-                                  ToolTip="Show or hide the red channel"/>
-                    <ToggleButton x:Name="GreenToggle" Content="G" IsChecked="True" Click="Channel_Click"
-                                  Style="{StaticResource ChannelToggle}" Tag="#FF3A9E52"
-                                  ToolTip="Show or hide the green channel"/>
-                    <ToggleButton x:Name="BlueToggle" Content="B" IsChecked="True" Click="Channel_Click"
-                                  Style="{StaticResource ChannelToggle}" Tag="#FF3E77C2"
-                                  ToolTip="Show or hide the blue channel"/>
-                    <ToggleButton x:Name="AlphaToggle" Content="A" IsChecked="True" Click="Channel_Click"
-                                  Style="{StaticResource ChannelToggle}" Tag="{StaticResource Accent}"
-                                  Margin="0,0,10,0"
-                                  ToolTip="Blend with the background, or ignore the alpha channel"/>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock x:Name="TextureNameText" FontSize="16" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="TextureTypeText" Margin="0,2,0,0" FontSize="11"
+                                   Foreground="{StaticResource TextDim}"/>
+                    </StackPanel>
 
-                    <Button Content="Save as" Click="Save_Click"/>
-                    <Button x:Name="ReplaceButton" Content="Replace..." Click="Replace_Click"
-                            Visibility="Collapsed" Margin="12,0,0,0"
-                            ToolTip="Load an image to put in this texture's place"/>
-                </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="ReplaceButton" Content="Replace texture…" Click="Replace_Click"
+                                Visibility="Collapsed"
+                                ToolTip="Replace this texture from DDS, PNG or another supported image and queue it for Apply changes (Ctrl+R)"/>
+                        <Button x:Name="ExportButton" Content="Export…" Click="Save_Click" Margin="0"
+                                ToolTip="Export this mip level or the complete texture (Ctrl+E)"/>
+                    </StackPanel>
+                </Grid>
 
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <TextBlock Text="Mip level" VerticalAlignment="Center"
-                               Foreground="{StaticResource TextDim}" Margin="12,0,6,0"/>
-                    <ComboBox x:Name="LevelBox" Width="270" SelectionChanged="Level_Changed"/>
-                </StackPanel>
-            </DockPanel>
+                <Border Height="1" Background="{StaticResource Border}" Margin="0,10,0,9"/>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="VIEW" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="FitButton" Content="Frame image" Click="Fit_Click"
+                                    ToolTip="Fit the complete image into the viewer (F)"/>
+                            <Button x:Name="ActualButton" Content="Actual size" Click="Actual_Click"
+                                    ToolTip="Show one image pixel per screen pixel"/>
+                            <Button x:Name="ZoomOutButton" Click="ZoomOut_Click" ToolTip="Zoom out (Ctrl+mouse wheel)"
+                                    Style="{StaticResource IconButton}">
+                                <Path Style="{StaticResource NavIcon}" Data="M 0,5.5 L 11,5.5"/>
+                            </Button>
+                            <Button x:Name="ZoomInButton" Click="ZoomIn_Click" ToolTip="Zoom in (Ctrl+mouse wheel)"
+                                    Style="{StaticResource IconButton}" Margin="0">
+                                <Path Style="{StaticResource NavIcon}" Data="M 0,5.5 L 11,5.5 M 5.5,0 L 5.5,11"/>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Width="1" Background="{StaticResource Border}"
+                            Margin="14,0"/>
+
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="DISPLAY" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="BackgroundButton" Content="Background: dark"
+                                    Click="Background_Click"
+                                    ToolTip="Cycle through dark, black, white, magenta and checker backgrounds"/>
+                            <ToggleButton x:Name="RedToggle" Content="R" IsChecked="True" Click="Channel_Click"
+                                          Style="{StaticResource ChannelToggle}" Tag="#FFB33A3A"
+                                          ToolTip="Show or hide the red channel"/>
+                            <ToggleButton x:Name="GreenToggle" Content="G" IsChecked="True" Click="Channel_Click"
+                                          Style="{StaticResource ChannelToggle}" Tag="#FF3A9E52"
+                                          ToolTip="Show or hide the green channel"/>
+                            <ToggleButton x:Name="BlueToggle" Content="B" IsChecked="True" Click="Channel_Click"
+                                          Style="{StaticResource ChannelToggle}" Tag="#FF3E77C2"
+                                          ToolTip="Show or hide the blue channel"/>
+                            <ToggleButton x:Name="AlphaToggle" Content="A" IsChecked="True" Click="Channel_Click"
+                                          Style="{StaticResource ChannelToggle}" Tag="{StaticResource Accent}"
+                                          Margin="0"
+                                          ToolTip="Blend with the background, or ignore the alpha channel"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="4" Margin="18,0,0,0">
+                        <TextBlock Text="MIP LEVEL" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
+                        <ComboBox x:Name="LevelBox" Width="250" SelectionChanged="Level_Changed"
+                                  ToolTip="Choose which resolution level to inspect"/>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
         </Border>
 
         <Border DockPanel.Dock="Top" x:Name="SourceBanner" Padding="10,6"

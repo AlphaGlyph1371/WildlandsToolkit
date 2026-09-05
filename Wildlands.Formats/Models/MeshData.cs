@@ -19,6 +19,7 @@ public sealed class MeshPrimitive
 public sealed class MeshData
 {
     public const uint ClassHash = 0x0645ABB5;
+    const int MaximumItems = 1_000_000;
 
     public bool Indices32Bit { get; set; }
     public byte VertexFormat { get; set; }
@@ -45,8 +46,16 @@ public sealed class MeshData
         ReadPrimitives(reader, data.Standard);
         ReadPrimitives(reader, data.Shadow);
 
-        data.VertexBuffer = reader.ReadBytes(reader.ReadInt32());
-        data.IndexBuffer = reader.ReadBytes(reader.ReadInt32());
+        data.VertexBuffer = ReadBytes(reader, "plain vertex buffer");
+        data.IndexBuffer = ReadBytes(reader, "plain index buffer");
+
+        if (data.VertexStride == 0 && data.VertexBuffer.Length > 0)
+            throw new InvalidDataException("The plain mesh has vertex data but a zero vertex stride.");
+        if (data.VertexStride > 0 && data.VertexBuffer.Length % data.VertexStride != 0)
+            throw new InvalidDataException("The plain vertex buffer is not aligned to its stride.");
+        int indexSize = data.Indices32Bit ? 4 : 2;
+        if (data.IndexBuffer.Length % indexSize != 0)
+            throw new InvalidDataException("The plain index buffer is not aligned to its index size.");
 
         return data;
     }
@@ -68,7 +77,8 @@ public sealed class MeshData
 
     static void ReadPrimitives(BinaryReader reader, List<MeshPrimitive> target)
     {
-        int count = reader.ReadInt32();
+        int count = ReadCount(reader, "mesh primitive");
+        EnsureRemaining(reader, (long)count * 36, "mesh primitive records");
 
         for (int i = 0; i < count; i++)
         {
@@ -85,6 +95,35 @@ public sealed class MeshData
                 Type = reader.ReadInt32(),
             });
         }
+    }
+
+    static int ReadCount(BinaryReader reader, string label)
+    {
+        EnsureRemaining(reader, sizeof(int), label + " count");
+        int count = reader.ReadInt32();
+        if (count < 0 || count > MaximumItems)
+            throw new InvalidDataException($"The {label} count {count} is outside the supported range.");
+        return count;
+    }
+
+    static byte[] ReadBytes(BinaryReader reader, string label)
+    {
+        EnsureRemaining(reader, sizeof(int), label + " byte count");
+        int length = reader.ReadInt32();
+        if (length < 0)
+            throw new InvalidDataException($"The {label} has a negative byte length.");
+        EnsureRemaining(reader, length, label);
+        byte[] bytes = reader.ReadBytes(length);
+        if (bytes.Length != length)
+            throw new EndOfStreamException($"The {label} ends after {bytes.Length} of {length} bytes.");
+        return bytes;
+    }
+
+    static void EnsureRemaining(BinaryReader reader, long length, string label)
+    {
+        if (length < 0 || reader.BaseStream.CanSeek
+            && length > reader.BaseStream.Length - reader.BaseStream.Position)
+            throw new EndOfStreamException($"The {label} runs past the end of the Mesh resource.");
     }
 
     static void WritePrimitives(BinaryWriter writer, List<MeshPrimitive> source)
