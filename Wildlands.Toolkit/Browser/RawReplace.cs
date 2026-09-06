@@ -9,9 +9,8 @@ namespace Wildlands.Toolkit;
 
 public static class RawReplace
 {
-    public static byte[]? Choose(Window owner, Resource resource, AppSettings settings, out string summary)
+    public static byte[]? Choose(Window owner, Resource resource, AppSettings settings)
     {
-        summary = "";
         string kind = ResourceTypes.NameOf(resource.ClassHash);
 
         var dialog = new OpenFileDialog
@@ -39,6 +38,7 @@ public static class RawReplace
             return null;
         }
 
+        data = ResourceCheck.NormalizeExternalFile(data, resource.ClassHash, out _);
         string? complaint = ResourceCheck.Against(data, resource.Id, resource.ClassHash, resource.Name);
 
         if (complaint is not null && MessageBox.Show(owner,
@@ -50,9 +50,6 @@ public static class RawReplace
 
         settings.ExportFolder = Path.GetDirectoryName(dialog.FileName) ?? "";
         settings.Save();
-
-        summary = $"raw {kind}, {resource.Data.Length} -> {data.Length} bytes"
-            + (complaint is null ? ", checked" : ", forced past a warning");
 
         return data;
     }

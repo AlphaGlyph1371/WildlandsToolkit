@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -21,6 +20,14 @@ using System.Windows.Threading;
 
 namespace Wildlands.Toolkit;
 
+enum ApplyResult
+{
+    Applied,
+    Cancelled,
+    FailedBeforeWrite,
+    FailedDuringWrite,
+}
+
 public partial class MainWindow : Window
 {
     readonly AppSettings _settings = AppSettings.Load();
@@ -35,6 +42,8 @@ public partial class MainWindow : Window
     ForgeArchive? _archive;
     ArchiveSet? _archives;
     readonly ChangeSet _changes = new();
+    ChangeListWindow? _changeListWindow;
+    ModProject? _project;
     SkeletonIndex? _skeletonIndex;
     ArmoryIndex? _armoryIndex;
     bool _buildingArmoryIndex;
@@ -178,6 +187,21 @@ public partial class MainWindow : Window
 
     void ChangeGameFolder_Click(object sender, RoutedEventArgs e)
     {
+        if (_project is not null)
+        {
+            MessageBox.Show(this,
+                "Close the active mod project before changing the game folder.",
+                "Mod project is active", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (_changes.Count > 0)
+        {
+            MessageBox.Show(this,
+                "Apply or discard the queued changes before changing the game folder.",
+                "Changes are still queued", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         if (RunSetup())
         {
             LoadArchiveList();
@@ -185,6 +209,7 @@ public partial class MainWindow : Window
             ShowIndexSetupIfNeeded();
         }
     }
+
 
     void LoadIndexes()
     {
@@ -507,12 +532,13 @@ public partial class MainWindow : Window
         if (loading)
         {
             ArchiveLoadingOverlay.Focus();
-            ApplyButton.IsEnabled = false;
-            DiscardButton.IsEnabled = false;
+            ChangeListButton.IsEnabled = false;
+            _changeListWindow?.SetInteractionEnabled(false);
             SetStatus(status);
         }
         else
         {
+            _changeListWindow?.SetInteractionEnabled(true);
             UpdateChangeButtons();
         }
 
@@ -708,10 +734,7 @@ public partial class MainWindow : Window
         if (ItemList.SelectedItem is not BrowserItem { Id: not 0 } item || _showing is null)
             return;
 
-        new AssetUsageWindow(item.Name, item.Id, _showing.ArchivePath)
-        {
-            Owner = this,
-        }.Show();
+        new AssetUsageWindow(item.Name, item.Id, _showing.ArchivePath).Show();
     }
 
     static string VersionText()
@@ -734,288 +757,8 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    void MenuReplace_Click(object sender, RoutedEventArgs e)
-    {
-        if (_preview is not null)
-        {
-            ReplaceTexture(_preview);
-            return;
-        }
 
-        if (ItemList.SelectedItem is not BrowserItem item || item.Resource is null || _showing is null)
-            return;
-
-        if (item.Resource.ClassHash == Mesh.ClassHash)
-        {
-            ReplaceMesh(item);
-            return;
-        }
-
-        ReplaceRawResource(item);
-    }
-
-    void MenuReplaceRaw_Click(object sender, RoutedEventArgs e)
-    {
-        if (ItemList.SelectedItem is BrowserItem item && item.Resource is not null)
-            ReplaceRawResource(item);
-    }
-
-    void ReplaceRawResource(BrowserItem item)
-    {
-        if (item.Resource is null || _showing is null)
-            return;
-
-        var data = RawReplace.Choose(this, item.Resource, _settings, out string summary);
-        if (data is null)
-            return;
-
-        _changes.Set(new PendingChange(_showing.ArchivePath, _showing.EntryIndex, _showing.EntryName, item.Index, item.Name, data));
-
-        SetStatus($"{item.Name}: {summary}, waiting for Apply");
-        UpdateChangeButtons();
-    }
-
-    void ReplaceMesh(BrowserItem item)
-    {
-        if (item.Resource is null || _showing is null)
-            return;
-
-        var rebuilt = MeshImporter.Replace(this, item.Resource.Data, item.Name, _settings, out string summary);
-        if (rebuilt is null)
-            return;
-
-        _changes.Set(new PendingChange(_showing.ArchivePath, _showing.EntryIndex, _showing.EntryName, item.Index, item.Name, rebuilt));
-
-        SetStatus($"{item.Name}: {summary}, waiting for Apply");
-        UpdateChangeButtons();
-    }
-
-    async void Apply_Click(object sender, RoutedEventArgs e)
-    {
-        if (_changes.Count == 0 || _showing is null || _applying)
-            return;
-
-        List<ArchiveWork> plans;
-        SetApplying(true, "Preparing the changed archive data…");
-        try
-        {
-            var planningProgress = new Progress<string>(SetApplyProgress);
-            plans = await Task.Run(() => _changes.Plan(planningProgress));
-        }
-        catch (System.Exception ex)
-        {
-            ShowError("Could not build the changed files", ex);
-            return;
-        }
-        finally
-        {
-            SetApplying(false);
-        }
-
-        var fresh = plans.Where(x => !ArchiveBackup.Exists(x.Path)).ToList();
-        var rebuilds = plans.Where(x => x.NeedsRebuild).ToList();
-
-        long rebuildSize = rebuilds.Sum(x => x.Size) / (1L << 30);
-        long backupSize = fresh.Sum(x => x.Size) / (1L << 30);
-
-        var question = new StringBuilder();
-        question.AppendLine(plans.Count == 1
-            ? $"Write {Amount(_changes.Count, "change")} into {plans[0].Name}?"
-            : $"Write {Amount(_changes.Count, "change")} into {Amount(plans.Count, "archive")}?");
-        question.AppendLine();
-
-        if (plans.Count == 1)
-        {
-            var only = plans[0];
-            question.AppendLine(only.NeedsRebuild
-                ? $"{Amount(only.EntryNames.Count, "entry", "entries")} change, and the whole archive is written again."
-                : $"{Amount(only.EntryNames.Count, "entry", "entries")} change, written where they already are.");
-        }
-        else
-        {
-            foreach (var work in plans)
-                question.AppendLine($"{work.Name}   {Amount(work.EntryNames.Count, "entry", "entries")}" + (work.NeedsRebuild ? ", written again completely" : ""));
-        }
-
-        if (rebuilds.Count > 0)
-        {
-            question.AppendLine();
-            question.AppendLine($"That can take a few minutes and needs at least {rebuildSize + 1} GB of free disk space.");
-        }
-
-        if (fresh.Count > 0)
-        {
-            question.AppendLine();
-            question.AppendLine($"A backup is made first and needs another {backupSize + 1} GB.");
-        }
-
-        if (MessageBox.Show(this, question.ToString(), "Apply changes", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
-        {
-            SetStatus("Nothing written");
-            return;
-        }
-
-        var place = _showing;
-        SetApplying(true, "Preparing the archives for writing…");
-        _archives?.Dispose();
-        _archive?.Dispose();
-        _archive = null;
-        _archives = null;
-
-        var writingProgress = new Progress<string>(SetApplyProgress);
-        var watch = Stopwatch.StartNew();
-        var appliedArmoryChanges = _changes.Changes
-            .Where(change => BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName))
-            .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex,
-                change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
-            .ToList();
-        bool changedLocalization = _changes.Changes.Any(change =>
-            BuildTableGameMetadataResolver.TryGetLanguagePackage(change.EntryName) is not null);
-
-        try
-        {
-            await Task.Run(() => _changes.Write(plans, writingProgress));
-            string? cacheWarning = null;
-            if (_armoryIndex is not null)
-            {
-                if (changedLocalization)
-                {
-                    // A newly added attachment brings new gameplay and localization
-                    // resources which cannot be mirrored by replacing old cache rows.
-                    // Rebuild now so the next Armory window immediately resolves it.
-                    try
-                    {
-                        string gameFolder = _settings.GamePath;
-                        var refreshProgress = new Progress<string>(SetApplyProgress);
-                        SetApplyProgress("Refreshing the Armory index from the changed game files…");
-                        var refreshed = await Task.Run(() => ArmoryIndex.Build(
-                            ArchiveLocator.Find(gameFolder), refreshProgress));
-                        refreshed.Save(AppSettings.ArmoryCachePath);
-                        _armoryIndex = refreshed;
-                        UpdateArmoryIndexButton();
-                    }
-                    catch (Exception ex)
-                    {
-                        _armoryIndex = null;
-                        UpdateArmoryIndexButton();
-                        cacheWarning = ex.Message;
-                    }
-                }
-                else
-                {
-                    try
-                    {
-                        var index = _armoryIndex;
-                        string gameFolder = _settings.GamePath;
-                        await Task.Run(() =>
-                        {
-                            index.ApplyChanges(appliedArmoryChanges);
-                            index.RefreshFingerprint(ArchiveLocator.Find(gameFolder));
-                            index.Save(AppSettings.ArmoryCachePath);
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        cacheWarning = ex.Message;
-                    }
-                }
-            }
-            watch.Stop();
-            await Navigate(place);
-            SetStatus(cacheWarning is null
-                ? $"Applied in {watch.Elapsed.TotalSeconds:0.0} s"
-                : $"Applied in {watch.Elapsed.TotalSeconds:0.0} s, but the Armory cache could not be refreshed: {cacheWarning}");
-        }
-        catch (System.Exception ex)
-        {
-            ShowError("Could not write the changes", ex);
-            await Navigate(place);
-        }
-        finally
-        {
-            SetApplying(false);
-            UpdateChangeButtons();
-        }
-    }
-
-    void SetApplying(bool applying, string status = "")
-    {
-        _applying = applying;
-        // Disabling the content makes WPF apply disabled control styles, which
-        // replaces parts of the dark theme with washed-out system colors. The
-        // overlay already owns the foreground, so only block pointer input.
-        MainContent.IsHitTestVisible = !applying;
-        ApplyLoadingOverlay.Visibility = applying ? Visibility.Visible : Visibility.Collapsed;
-        Mouse.OverrideCursor = applying || _loading ? Cursors.Wait : null;
-
-        if (applying)
-        {
-            ApplyLoadingText.Text = status;
-            ApplyLoadingOverlay.Focus();
-            SetStatus(status);
-        }
-    }
-
-    void SetApplyProgress(string status)
-    {
-        ApplyLoadingText.Text = status;
-        SetStatus(status);
-    }
-
-    protected override void OnClosing(CancelEventArgs e)
-    {
-        if (_applying)
-        {
-            e.Cancel = true;
-            return;
-        }
-
-        base.OnClosing(e);
-    }
-
-    static string Amount(int count, string one, string? many = null) =>
-        count == 1 ? $"1 {one}" : $"{count} {many ?? one + "s"}";
-
-    void Discard_Click(object sender, RoutedEventArgs e)
-    {
-        if (_changes.Count == 0)
-            return;
-
-        _changes.Clear();
-        SetStatus("Changes discarded");
-        UpdateChangeButtons();
-        ShowArchiveAgain();
-    }
-
-    // Nothing was written, so both the preview and any open texture window have to go back
-    // to what the archive holds.
-    void ShowArchiveAgain()
-    {
-        ShowPreview(ItemList.SelectedItem as BrowserItem);
-
-        foreach (var window in _textureWindows.ToList())
-        {
-            try
-            {
-                var (resource, _, _) = LocateTexture(window.View);
-                var texture = TextureMap.Read(resource.Data);
-                window.ShowView(TextureLoader.FromTexture(resource.Name, texture, _archives));
-            }
-            catch
-            {
-                // A window whose texture cannot be found again simply keeps what it shows
-            }
-        }
-    }
-
-    void UpdateChangeButtons()
-    {
-        ApplyButton.IsEnabled = _changes.Count > 0;
-        DiscardButton.IsEnabled = _changes.Count > 0;
-        ApplyButton.Content = _changes.Count > 0 ? $"Apply {_changes.Count} changes" : "Apply changes";
-    }
-
-    async void MenuOpen_Click(object sender, RoutedEventArgs e)
+   async void MenuOpen_Click(object sender, RoutedEventArgs e)
     {
         if (ItemList.SelectedItem is not BrowserItem item)
             return;
@@ -1262,7 +1005,7 @@ public partial class MainWindow : Window
                 lines.Add($"       {note}");
 
             if (item.Resource is not null && set is null && material is null)
-                AddHexDump(item.Resource.Data, lines);
+                AddHexDump(EffectiveData(item), lines);
         }
 
         PreviewInfo.Text = string.Join(Environment.NewLine, lines);
@@ -1276,7 +1019,7 @@ public partial class MainWindow : Window
         try
         {
             if (item.Resource is not null)
-                return FromResource(item.Name, item.Resource, out note);
+                return FromResource(item.Name, item.Resource, EffectiveData(item), out note);
 
             if (item.Entry is not null && item.Entry.FileExtension == ".data"
                 && item.Entry.Length <= MaxPreviewBytes)
@@ -1294,15 +1037,16 @@ public partial class MainWindow : Window
         return null;
     }
 
-    TextureView? FromResource(string name, Resource resource, out string note)
+    TextureView? FromResource(string name, Resource resource, byte[] data, out string note)
     {
         note = "";
 
         if (resource.ClassHash == TextureMap.ClassHash)
-            return TextureLoader.FromTexture(name, TextureMap.Read(resource.Data), _archives);
+            return TextureLoader.FromTexture(name, TextureMap.Read(data), _archives,
+                PendingCompiledMips());
 
         if (resource.ClassHash == CompiledMip.ClassHash)
-            return TextureLoader.FromMip(name, CompiledMip.Read(resource.Data), _archives, out note);
+            return TextureLoader.FromMip(name, CompiledMip.Read(data), _archives, out note);
 
         return null;
     }
@@ -1316,7 +1060,7 @@ public partial class MainWindow : Window
 
         var resource = file.Resources.FirstOrDefault(r => r.ClassHash == TextureMap.ClassHash) ?? file.Resources.FirstOrDefault(r => r.ClassHash == CompiledMip.ClassHash);
 
-        return resource is null ? null : FromResource(resource.Name, resource, out note);
+        return resource is null ? null : FromResource(resource.Name, resource, resource.Data, out note);
     }
 
     Material? ResolveMaterial(BrowserItem item)
@@ -1326,7 +1070,7 @@ public partial class MainWindow : Window
 
         try
         {
-            return Material.Read(item.Resource.Data);
+            return Material.Read(EffectiveData(item));
         }
         catch
         {
@@ -1442,7 +1186,7 @@ public partial class MainWindow : Window
 
         try
         {
-            return TextureSet.Read(item.Resource.Data);
+            return TextureSet.Read(EffectiveData(item));
         }
         catch
         {
@@ -1547,7 +1291,6 @@ public partial class MainWindow : Window
             if (ReplaceTexture(view) is { } fresh)
                 window!.ShowView(fresh);
         });
-        window.Owner = this;
         window.Closed += (_, _) => _textureWindows.Remove(window);
         _textureWindows.Add(window);
         window.Show();
@@ -1607,7 +1350,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            _previewCycle = TimeCycle.Read(item.Resource!.Data);
+            _previewCycle = TimeCycle.Read(EffectiveData(item));
         }
         catch (Exception ex)
         {
@@ -1813,8 +1556,7 @@ public partial class MainWindow : Window
             }
 
             new MeshWindow(_previewMesh, meshData, _previewMeshName, _previewSiblings,
-                _archives, _skeletonIndex, _settings, queueImport, pending)
-                { Owner = this }.Show();
+                _archives, _skeletonIndex, _settings, queueImport, pending).Show();
             return;
         }
 
@@ -1831,16 +1573,17 @@ public partial class MainWindow : Window
             if (ReplaceTexture(view) is { } fresh)
                 window!.ShowView(fresh);
         });
-        window.Owner = this;
         window.Closed += (_, _) => _textureWindows.Remove(window);
         _textureWindows.Add(window);
         window.Show();
     }
 
-    void QueueMeshViewerImport(Location where, BrowserItem item, byte[] rebuilt, string summary)
+    void QueueMeshViewerImport(Location where, BrowserItem item, byte[] rebuilt, string _)
     {
-        _changes.Set(new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName,
-            item.Index, item.Name, rebuilt));
+        if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex,
+                where.EntryName, item.Index, item.Name, rebuilt,
+                ResourceClassHash: Mesh.ClassHash)]))
+            return;
 
         if (ReferenceEquals(_previewMeshItem, item) && _previewMeshWhere == where)
         {
@@ -1848,7 +1591,7 @@ public partial class MainWindow : Window
             _previewMesh = Mesh.Read(rebuilt);
         }
 
-        SetStatus($"{item.Name}: {summary}, waiting for Apply");
+        SetStatus($"{item.Name}: replacement queued");
         UpdateChangeButtons();
     }
 
@@ -1862,7 +1605,7 @@ public partial class MainWindow : Window
         try
         {
             (resource, location, index) = LocateTexture(view);
-            texture = TextureMap.Read(resource.Data);
+            texture = TextureMap.Read(EffectiveData(location, index, resource));
         }
         catch (Exception ex)
         {
@@ -1881,12 +1624,12 @@ public partial class MainWindow : Window
         try
         {
             var changes = TextureImporter.Build(dialog.Path, texture, resource.Data, location, index,
-                resource.Name, _archives, dialog.GenerateMips, out string summary);
+                resource.Name, _archives, dialog.GenerateMips, out _);
 
-            foreach (var change in changes)
-                _changes.Set(change);
+            if (!QueueChanges(changes, $"Replace textures for {resource.Name}"))
+                return null;
 
-            SetStatus($"{resource.Name}: {summary}, waiting for Apply");
+            SetStatus($"{resource.Name}: texture replacement queued");
             UpdateChangeButtons();
 
             return ShowPending(resource.Name, changes);
@@ -1907,11 +1650,10 @@ public partial class MainWindow : Window
     {
         var replaced = new Dictionary<ulong, byte[]>();
 
-        foreach (var change in changes.Skip(1))
-        {
-            try { replaced[CompiledMip.Read(change.Data).Id] = change.Data; }
-            catch { }
-        }
+        foreach (PendingChange change in changes.Where(change =>
+                     change.ResourceClassHash == CompiledMip.ClassHash
+                     && change.Data.Length >= sizeof(ulong)))
+            replaced[BitConverter.ToUInt64(change.Data, 0)] = change.Data;
 
         var view = TextureLoader.FromTexture(name, TextureMap.Read(changes[0].Data), _archives, replaced);
 
@@ -1945,12 +1687,14 @@ public partial class MainWindow : Window
 
         new TimeCycleWindow(cycle, item.Name, data =>
         {
-            _changes.Set(new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName, item.Index, item.Name, data));
+            if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex,
+                    where.EntryName, item.Index, item.Name, data,
+                    ResourceClassHash: item.Resource!.ClassHash)], $"Edit {item.Name}"))
+                return;
 
-            SetStatus($"{item.Name}: {item.Size} -> {data.Length} bytes, waiting for Apply");
+            SetStatus($"{item.Name}: changes queued");
             UpdateChangeButtons();
-        })
-        { Owner = this }.Show();
+        }).Show();
     }
 
     void OpenBuildTableEditor()
@@ -2035,10 +1779,12 @@ public partial class MainWindow : Window
 
         new BuildTableWindow(data, item.Name, targets, archivePaths, familyResources, changed =>
         {
-            foreach (var resource in changed)
-                _changes.Set(new PendingChange(
+            var queued = changed.Select(resource => new PendingChange(
                     where.ArchivePath, where.EntryIndex, where.EntryName,
-                    resource.ResourceIndex, resource.Name, resource.Data));
+                    resource.ResourceIndex, resource.Name, resource.Data,
+                    ResourceClassHash: BuildTable.ClassHash)).ToList();
+            if (!QueueChanges(queued, $"Edit {BuildTableNames.FamilyTitle(item.Name)}"))
+                return;
 
             var current = changed.FirstOrDefault(change => change.ResourceIndex == item.Index);
             if (current is not null && _previewBuildTableItem == item && _previewBuildTableWhere == where)
@@ -2047,38 +1793,55 @@ public partial class MainWindow : Window
                 _previewBuildTable = BuildTable.Read(current.Data);
             }
 
-            SetStatus($"{BuildTableNames.FamilyTitle(item.Name)}: {changed.Count} table change(s), waiting for Apply");
+            SetStatus($"{BuildTableNames.FamilyTitle(item.Name)}: changes queued");
             UpdateChangeButtons();
         }, workingArmoryIndex, databaseChanges =>
         {
-            foreach (var change in databaseChanges)
-                _changes.Set(new PendingChange(change.ArchivePath, change.EntryIndex, change.EntryName,
-                    change.ResourceIndex, change.ResourceName, change.Data));
+            var queued = databaseChanges.Select(change => new PendingChange(change.ArchivePath,
+                change.EntryIndex, change.EntryName, change.ResourceIndex,
+                change.ResourceName, change.Data)).ToList();
+            if (!QueueChanges(queued, "Update Gunsmith visibility"))
+                return;
 
-            SetStatus($"Prepared {databaseChanges.Count} confirmed Gunsmith database change(s), waiting for Apply");
+            SetStatus("Gunsmith visibility change queued");
             UpdateChangeButtons();
-        }, previewResources, additions =>
-        {
-            foreach (var addition in additions)
-                _changes.Set(new PendingChange(addition.ArchivePath, addition.EntryIndex,
-                    addition.EntryName, -1, addition.ResourceName, addition.Data,
+        }, previewResources, saveAttachment: attachment =>
+            {
+                var queued = new List<PendingChange>();
+                queued.AddRange(attachment.LocalChanges.Select(resource => new PendingChange(
+                    where.ArchivePath, where.EntryIndex, where.EntryName,
+                    resource.ResourceIndex, resource.Name, resource.Data,
+                    ResourceClassHash: BuildTable.ClassHash)));
+                queued.AddRange(attachment.DatabaseChanges.Select(change => new PendingChange(
+                    change.ArchivePath, change.EntryIndex, change.EntryName,
+                    change.ResourceIndex, change.ResourceName, change.Data)));
+                queued.AddRange(attachment.ResourceAdditions.Select(addition => new PendingChange(
+                    addition.ArchivePath, addition.EntryIndex, addition.EntryName, -1,
+                    addition.ResourceName, addition.Data,
                     new PendingResourceAddition(addition.ResourceId, addition.ClassHash,
-                        addition.Header)));
+                        addition.Header), ResourceClassHash: addition.ClassHash)));
+                queued.AddRange(attachment.EntryAdditions.Select(addition => new PendingChange(
+                    addition.ArchivePath, -1, addition.EntryName, -1, addition.EntryName,
+                    addition.Data, null, new PendingForgeEntryAddition(addition.EntryId,
+                        addition.EntryName, addition.Extension, addition.InfoTemplate,
+                        addition.PrefetchBlock))));
 
-            SetStatus($"Prepared {additions.Count} new attachment resource(s), waiting for Apply");
-            UpdateChangeButtons();
-        }, entryAdditions =>
-        {
-            foreach (var addition in entryAdditions)
-                _changes.Set(new PendingChange(addition.ArchivePath, -1,
-                    addition.EntryName, -1, addition.EntryName, addition.Data, null,
-                    new PendingForgeEntryAddition(addition.EntryId, addition.EntryName,
-                        addition.Extension, addition.InfoTemplate, addition.PrefetchBlock)));
+                if (!QueueChanges(queued, $"Add attachment {attachment.DisplayName}"))
+                    throw new InvalidOperationException(
+                        "The attachment could not be added to the change list.");
 
-            SetStatus($"Prepared {entryAdditions.Count} new asset container(s), waiting for Apply");
-            UpdateChangeButtons();
-        }, where.ArchivePath, where.EntryIndex, where.EntryName, previewResourceIndexes)
-        { Owner = this }.Show();
+                BuildTableResourceChange? current = attachment.LocalChanges
+                    .FirstOrDefault(change => change.ResourceIndex == item.Index);
+                if (current is not null && _previewBuildTableItem == item
+                    && _previewBuildTableWhere == where)
+                {
+                    _previewBuildTableData = current.Data;
+                    _previewBuildTable = BuildTable.Read(current.Data);
+                }
+                SetStatus($"{attachment.DisplayName}: attachment queued");
+            }, localArchivePath: where.ArchivePath, localEntryIndex: where.EntryIndex,
+            localEntryName: where.EntryName,
+            localResourceIndexes: previewResourceIndexes).Show();
     }
 
     const int HexColumns = 8;
@@ -2135,12 +1898,14 @@ public partial class MainWindow : Window
         StatusText.Foreground = (Brush)FindResource("TextDim");
     }
 
-    void ShowError(string what, Exception ex)
+    void ShowError(string what, Exception ex, Window? owner = null)
     {
         SetStatus($"{what}: {ex.Message}");
         StatusText.Foreground = (Brush)FindResource("Warning");
 
-        MessageBox.Show(this, $"{what}.{Environment.NewLine}{Environment.NewLine}{ex.Message}", "Wildlands Toolkit", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(owner ?? this,
+            $"{what}.{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+            "Wildlands Toolkit", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     protected override void OnClosed(EventArgs e)

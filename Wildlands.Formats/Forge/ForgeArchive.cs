@@ -83,18 +83,7 @@ public sealed class ForgeArchive : IDisposable
         IReadOnlyList<ForgeEntryAddition> additions, IProgress<string>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(additions);
-        var effectiveReplacements = replacements.ToDictionary(item => item.Key, item => item.Value);
-        if (additions.Count > 0)
-        {
-            ForgeEntry prefetch = Entries.SingleOrDefault(entry => entry.Id == 145)
-                ?? throw new InvalidDataException(
-                    "The Forge archive has no PrefetchingFileInfos registry for new entries.");
-            byte[] currentPrefetch = effectiveReplacements.TryGetValue(prefetch.Index, out byte[]? replacement)
-                ? replacement
-                : ReadEntry(prefetch);
-            effectiveReplacements[prefetch.Index] = PrefetchingFileInfos.AddObjects(currentPrefetch,
-                additions.Select(addition => (addition.Id, addition.PrefetchBlock)).ToList());
-        }
+        var effectiveReplacements = PrepareReplacements(replacements, additions);
         var ordered = Entries.OrderBy(e => e.Offset).ToList();
         if (ordered.Count == 0)
             throw new InvalidDataException("The archive has no entries to rebuild.");
@@ -157,11 +146,54 @@ public sealed class ForgeArchive : IDisposable
             WriteAdditions(output, prefix, additionLayout, additions, progress);
 
         output.Write(tail, 0, tail.Length);
-        output.SetLength((output.Position + FileAlignment - 1) / FileAlignment * FileAlignment);
+        output.SetLength(Align(output.Position));
 
         output.Position = 0;
         output.Write(prefix, 0, prefix.Length);
     }
+
+    public long EstimateRebuiltSize(IReadOnlyDictionary<int, byte[]> replacements,
+        IReadOnlyList<ForgeEntryAddition> additions)
+    {
+        ArgumentNullException.ThrowIfNull(additions);
+        Dictionary<int, byte[]> effectiveReplacements = PrepareReplacements(replacements, additions);
+        List<ForgeEntry> ordered = Entries.OrderBy(entry => entry.Offset).ToList();
+        if (ordered.Count == 0)
+            throw new InvalidDataException("The archive has no entries to rebuild.");
+
+        long size = ordered[0].Offset;
+        foreach (ForgeEntry entry in ordered)
+            size = checked(size + (effectiveReplacements.TryGetValue(entry.Index, out byte[]? data)
+                ? data.Length : entry.Length));
+        foreach (ForgeEntryAddition addition in additions)
+            size = checked(size + addition.Data.Length);
+
+        long tailStart = checked(ordered[^1].Offset + ordered[^1].Length);
+        size = checked(size + (_stream.Length - tailStart));
+        return Align(size);
+    }
+
+    Dictionary<int, byte[]> PrepareReplacements(
+        IReadOnlyDictionary<int, byte[]> replacements,
+        IReadOnlyList<ForgeEntryAddition> additions)
+    {
+        var effectiveReplacements = replacements.ToDictionary(item => item.Key, item => item.Value);
+        if (additions.Count > 0)
+        {
+            ForgeEntry prefetch = Entries.SingleOrDefault(entry => entry.Id == 145)
+                ?? throw new InvalidDataException(
+                    "The Forge archive has no PrefetchingFileInfos registry for new entries.");
+            byte[] currentPrefetch = effectiveReplacements.TryGetValue(prefetch.Index, out byte[]? replacement)
+                ? replacement
+                : ReadEntry(prefetch);
+            effectiveReplacements[prefetch.Index] = PrefetchingFileInfos.AddObjects(currentPrefetch,
+                additions.Select(addition => (addition.Id, addition.PrefetchBlock)).ToList());
+        }
+        return effectiveReplacements;
+    }
+
+    static long Align(long value) => checked(
+        (value + FileAlignment - 1) / FileAlignment * FileAlignment);
 
     AdditionTableLayout PrepareAdditionTables(byte[] prefix,
         IReadOnlyList<ForgeEntryAddition> additions,

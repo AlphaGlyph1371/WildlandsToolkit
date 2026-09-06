@@ -45,7 +45,8 @@ public static class TextureImporter
         var changes = new List<PendingChange>
         {
             new(location.ArchivePath, location.EntryIndex, location.EntryName, resourceIndex, resourceName,
-                TextureImport.Resize(texture, resource, width, height, chain)),
+                TextureImport.Resize(texture, resource, width, height, chain),
+                ResourceClassHash: TextureMap.ClassHash),
         };
 
         int streamed = 0;
@@ -71,7 +72,8 @@ public static class TextureImporter
 
             changes.Add(new PendingChange(found.File.ArchivePath, found.File.EntryIndex, found.File.Name,
                 found.ResourceIndex, found.Resource.Name,
-                TextureImport.ReplacePixels(found.Resource.Data, mip.PixelOffset, pixels)));
+                TextureImport.ReplacePixels(found.Resource.Data, mip.PixelOffset, pixels),
+                ResourceClassHash: CompiledMip.ClassHash));
 
             streamed++;
         }

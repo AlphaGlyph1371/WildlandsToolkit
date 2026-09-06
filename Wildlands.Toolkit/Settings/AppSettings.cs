@@ -20,6 +20,7 @@ public sealed class AppSettings
     // Kept separately so older Toolkit versions, which only know about the skeleton
     // cache, continue to start normally after an update.
     public static string ArmoryCachePath => Path.Combine(Folder, "armory.cache");
+    public static string ModLibraryPath => Path.Combine(Folder, "Mods");
     public bool SeenIndexSetup { get; set; }
 
     static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WildlandsToolkit");

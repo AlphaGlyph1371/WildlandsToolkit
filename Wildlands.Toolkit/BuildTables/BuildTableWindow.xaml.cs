@@ -18,6 +18,13 @@ using Wildlands.Formats.Models;
 
 namespace Wildlands.Toolkit;
 
+public sealed record AttachmentSaveChanges(
+    string DisplayName,
+    IReadOnlyList<BuildTableResourceChange> LocalChanges,
+    IReadOnlyList<ArmoryDatabaseResourceChange> DatabaseChanges,
+    IReadOnlyList<ArmoryArchiveResourceAddition> ResourceAdditions,
+    IReadOnlyList<ArmoryArchiveEntryAddition> EntryAdditions);
+
 public partial class BuildTableWindow : Window
 {
     BuildTableAsset _table;
@@ -37,8 +44,7 @@ public partial class BuildTableWindow : Window
     readonly ArmoryIndex? _armoryIndex;
     readonly Action<IReadOnlyList<BuildTableResourceChange>> _save;
     readonly Action<IReadOnlyList<ArmoryDatabaseResourceChange>>? _saveGunsmith;
-    readonly Action<IReadOnlyList<ArmoryArchiveResourceAddition>>? _saveAdditions;
-    readonly Action<IReadOnlyList<ArmoryArchiveEntryAddition>>? _saveEntryAdditions;
+    readonly Action<AttachmentSaveChanges>? _saveAttachment;
     readonly string _localArchivePath;
     readonly int _localEntryIndex;
     readonly string _localEntryName;
@@ -88,8 +94,7 @@ public partial class BuildTableWindow : Window
         ArmoryIndex? armoryIndex = null,
         Action<IReadOnlyList<ArmoryDatabaseResourceChange>>? saveGunsmith = null,
         IReadOnlyList<Resource>? previewResources = null,
-        Action<IReadOnlyList<ArmoryArchiveResourceAddition>>? saveAdditions = null,
-        Action<IReadOnlyList<ArmoryArchiveEntryAddition>>? saveEntryAdditions = null,
+        Action<AttachmentSaveChanges>? saveAttachment = null,
         string localArchivePath = "",
         int localEntryIndex = -1,
         string localEntryName = "",
@@ -114,8 +119,7 @@ public partial class BuildTableWindow : Window
         _armoryIndex = armoryIndex;
         _save = save;
         _saveGunsmith = saveGunsmith;
-        _saveAdditions = saveAdditions;
-        _saveEntryAdditions = saveEntryAdditions;
+        _saveAttachment = saveAttachment;
         _localArchivePath = localArchivePath;
         _localEntryIndex = localEntryIndex;
         _localEntryName = localEntryName;
@@ -579,7 +583,7 @@ public partial class BuildTableWindow : Window
                 "Armory index changed", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (_saveAdditions is null || _saveEntryAdditions is null
+        if (_saveAttachment is null
             || string.IsNullOrWhiteSpace(_localArchivePath)
             || _localEntryIndex < 0)
         {
@@ -670,19 +674,13 @@ public partial class BuildTableWindow : Window
             }
             AttachmentAddPlan plan = attempt.Plan!;
 
-            _saveAdditions(plan.ResourceAdditions);
-            _saveEntryAdditions(plan.EntryAdditions);
-            _armoryIndex.ApplyAdditions(plan.ResourceAdditions);
-            if (plan.DatabaseChanges.Count > 0)
-            {
-                if (_saveGunsmith is null)
-                    throw new InvalidOperationException("This editor has no Game Bootstrap write target.");
-                _saveGunsmith(plan.DatabaseChanges);
-                _armoryIndex.ApplyChanges(plan.DatabaseChanges);
-            }
             var localChanges = plan.LocalChanges.Append(new BuildTableResourceChange(
                 _currentDocument.Source.ResourceIndex, _currentDocument.Name, plan.BuildTableData)).ToList();
-            _save(localChanges);
+            _saveAttachment(new AttachmentSaveChanges(draft.DisplayName, localChanges,
+                plan.DatabaseChanges, plan.ResourceAdditions, plan.EntryAdditions));
+            _armoryIndex.ApplyAdditions(plan.ResourceAdditions);
+            if (plan.DatabaseChanges.Count > 0)
+                _armoryIndex.ApplyChanges(plan.DatabaseChanges);
 
             foreach (BuildTableResourceChange change in plan.LocalChanges)
             {

@@ -3,7 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Wildlands Toolkit" Height="740" Width="1200"
         Background="{StaticResource Background}"
-        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" Cursor="Hand">
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" Cursor="Hand"
+        AllowDrop="True"
+        PreviewDragOver="Window_PreviewDragOver"
+        PreviewDrop="Window_PreviewDrop">
 
     <Grid>
     <DockPanel x:Name="MainContent">
@@ -30,9 +33,34 @@
                             Style="{StaticResource IconButton}" IsEnabled="False" Margin="0,0,12,0">
                         <Path Style="{StaticResource NavIcon}" Data="M 4.5,11 L 4.5,0 M 0,4.5 L 4.5,0 L 9,4.5"/>
                     </Button>
-                    <Button Content="Open file" Click="OpenFile_Click"/>
-                    <Button x:Name="ApplyButton" Content="Apply changes" Click="Apply_Click" IsEnabled="False"/>
-                    <Button x:Name="DiscardButton" Content="Discard" Click="Discard_Click" IsEnabled="False"/>
+                    <Button Content="Open" Click="OpenFile_Click" ToolTip="Open a Forge archive"/>
+                    <Button x:Name="ChangeListButton" Content="Changes" Click="ChangeList_Click"
+                            ToolTip="Review or remove pending changes"/>
+                    <Button x:Name="ProjectButton" Click="ProjectMenu_Click"
+                            MinWidth="105" MaxWidth="210" Margin="12,0,10,0"
+                            ToolTip="Create or open a persistent mod project">
+                        <Button.Content>
+                            <TextBlock x:Name="ProjectText" Text="Project: None ▾"
+                                       Foreground="{StaticResource TextDim}"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </Button.Content>
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="New mod project…" Click="NewProject_Click"/>
+                                <MenuItem Header="Open mod project…" Click="OpenProject_Click"/>
+                                <MenuItem Header="Install .wlmod package…" Click="OpenModPackage_Click"/>
+                                <Separator/>
+                                <MenuItem x:Name="ProjectSettingsMenu" Header="Project settings…"
+                                          Click="ProjectSettings_Click" IsEnabled="False"/>
+                                <MenuItem x:Name="ReloadProjectMenu" Header="Reload project changes"
+                                          Click="ReloadProject_Click" IsEnabled="False"/>
+                                <MenuItem x:Name="BuildModMenu" Header="Build .wlmod package…"
+                                          Click="BuildMod_Click" IsEnabled="False"/>
+                                <MenuItem x:Name="CloseProjectMenu" Header="Close project"
+                                          Click="CloseProject_Click" IsEnabled="False"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
                 </StackPanel>
 
                 <Border Grid.Column="1" Background="{StaticResource Background}"

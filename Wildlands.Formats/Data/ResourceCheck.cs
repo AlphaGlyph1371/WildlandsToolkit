@@ -7,6 +7,32 @@ namespace Wildlands.Formats.Data;
 
 public static class ResourceCheck
 {
+    public static byte[] NormalizeExternalFile(byte[] data, uint classHash, out string note)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        note = "";
+
+        // Some external extractors serialize an object-presence byte in front of the
+        // resource itself. It is not part of the resource payload stored by DataFile.
+        // Only unwrap it when both the shifted header and the complete parser agree.
+        if (data.Length < 13 || data[0] > 1
+            || BitConverter.ToUInt32(data, 9) != classHash
+            || !HasParser(classHash))
+            return data;
+
+        byte[] candidate = data.AsSpan(1).ToArray();
+        try
+        {
+            Parse(candidate, classHash);
+            note = "removed a 1-byte external object wrapper";
+            return candidate;
+        }
+        catch
+        {
+            return data;
+        }
+    }
+
     public static string? Against(byte[] data, ulong id, uint classHash, string name)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -47,4 +73,10 @@ public static class ResourceCheck
         else if (classHash == TextureMap.ClassHash) TextureMap.Read(data);
         else if (TimeCycle.IsTimeCycle(classHash)) TimeCycle.Read(data);
     }
+
+    static bool HasParser(uint classHash) => classHash == Mesh.ClassHash
+        || classHash == Skeleton.ClassHash
+        || classHash == BuildTable.ClassHash
+        || classHash == TextureMap.ClassHash
+        || TimeCycle.IsTimeCycle(classHash);
 }

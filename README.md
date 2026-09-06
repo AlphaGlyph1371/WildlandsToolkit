@@ -40,6 +40,23 @@ Gunsmith registration, cloned model resources and imported geometry. It does not
 Short/Medium/Long row, but it still starts from an existing attachment as the gameplay and material
 template. Keep the `.original` backups anyway.
 
+Changes can be made without a project, or inside an optional mod project. A project keeps
+every changed, added or newly created Forge resource across Toolkit restarts and builds the exact
+tested revision as a portable `.wlmod` package. Opening a `.wlmod` resolves those operations against
+the recipient's game archives, reports missing or conflicting resources, and queues the complete mod
+for one normal, backed-up **Apply** action.
+
+Free Mode and mod projects are separate workspaces. Pending Free Mode changes are discarded only
+after confirmation when a project is opened; they are never imported into that project. Leaving or
+switching a project removes its changes from the current workspace but keeps them in its project
+folder. Reopening the project shows its saved operations again, including operations that are already
+applied to the local game.
+
+The **Changes** window lists those edits as the actions the user performed, not as an unexplained pile
+of internal writes. A complete attachment addition remains one change even when it touches dozens
+of resources. Pending changes can be opened again or removed before Apply; saved project operations
+remain listed after Apply so the project's contents do not disappear from the UI.
+
 ### Archives
 
 - Opens every `.forge` of the game and lists its entries, **including the ones in the `dlc_*` folders**
@@ -163,8 +180,9 @@ Over all of `DataPC.forge`:
 
 1. Select the texture, open the texture viewer, press **Replace** in the toolbar (or **Replace...** in the right-click menu)
 2. Pick an image. The dialog shows the target format, the mip levels and **which resources will be written**, before you agree to anything
-3. The change lands on a pile and is shown right away. Nothing is written yet
-4. **Apply changes** writes every change in one pass, **Discard** throws the pile away
+3. The edit appears in **Changes** and is shown right away. Nothing is written yet
+4. **Apply** writes every pending change in one pass. The **Changes** window can remove individual
+   changes or clear the complete list
 
 ### Example: Replacing any other resource
 
@@ -195,6 +213,30 @@ leave the armature that came out of the export alone, and do not rename its bone
 shows you how many matched before it writes anything. Vertices whose bones do not exist on the target
 take the weights of the nearest original point; a wholly foreign or missing rig is rebound that way as
 well, and the confirmation dialog warns when the replacement shape makes that approximation risky.
+
+### Example: Building and installing a mod package
+
+1. Leave **Project** set to **None** for one-off experiments, or open its menu and choose **New mod project…**
+   before making the changes that should belong to a distributable mod
+2. Make and test changes normally. While the project is active, every queued replacement, new
+   resource and new Forge container is persisted inside the selected project folder. Its
+   `project.wlproj` manifest and `assets` folder together are the editable project
+3. Use **Project settings…** to set the release name, author and version, then choose
+   **Build .wlmod package…**. The Toolkit warns when the current project revision has not been
+   deployed and tested yet
+4. A recipient chooses **Install .wlmod package…** or drops one `.wlmod` file anywhere onto the
+   main Toolkit window. A modal review shows the package name, author, version, affected archives
+   and every grouped change before anything is installed. **Install**
+   then shows a final confirmation with the exact archive writes, backup requirement and disk-space
+   estimate
+5. Confirming that final step writes the mod into the game archives. The same archive backup rules
+   apply with or without a project
+
+The current package format stores exact compiled game resources, not Blender or image source files.
+It deliberately refuses to overwrite a resource that no longer matches either the clean baseline or
+this project's own previous deployment. Automatic multi-mod load ordering, semantic merging of two
+mods that edit the same database resource, and uninstalling one mod out of a stack are not implemented
+yet; conflicting packages are stopped instead of silently overwriting each other.
 
 ---
 
