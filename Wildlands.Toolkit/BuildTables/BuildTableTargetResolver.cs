@@ -1,9 +1,5 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Threading;
 using Wildlands.Formats;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
@@ -18,10 +14,7 @@ public sealed record BuildTableTarget(
     string Container,
     string Archive)
 {
-    public string Location => Container.Length > 0
-        && !string.Equals(Container, Name, StringComparison.OrdinalIgnoreCase)
-            ? $"{Archive}  ›  {Container}"
-            : Archive;
+    public string Location => Container.Length > 0 && !string.Equals(Container, Name, StringComparison.OrdinalIgnoreCase) ? $"{Archive}  ›  {Container}" : Archive;
 
     public string Details
     {
@@ -62,18 +55,14 @@ public static class BuildTableTargetResolver
     static string _cachedKey = "";
     static InstalledIndex? _cachedIndex;
 
-    public static BuildTableTarget? ResolveOne(
-        IReadOnlyList<string> archivePaths,
-        ulong id,
-        CancellationToken cancellationToken = default)
+    public static BuildTableTarget? ResolveOne(IReadOnlyList<string> archivePaths, ulong id, CancellationToken cancellationToken = default)
     {
         if (id == 0)
             return null;
 
         var installed = Installed(archivePaths, null, cancellationToken);
         installed.ById.TryGetValue(id, out var fallback);
-        if (!installed.Locations.TryGetValue(id, out var location)
-            && !TryFindGeneratedLocation(archivePaths, id, cancellationToken, out location))
+        if (!installed.Locations.TryGetValue(id, out var location) && !TryFindGeneratedLocation(archivePaths, id, cancellationToken, out location))
             return fallback;
 
         try
@@ -89,8 +78,7 @@ public static class BuildTableTargetResolver
             var resource = file.Resources.FirstOrDefault(resource => resource.Id == id);
             return resource is null
                 ? fallback
-                : new BuildTableTarget(resource.Id, resource.Name, resource.ClassHash,
-                    ResourceTypes.NameOf(resource.ClassHash), entry.Name, Path.GetFileName(location.Path));
+                : new BuildTableTarget(resource.Id, resource.Name, resource.ClassHash, ResourceTypes.NameOf(resource.ClassHash), entry.Name, Path.GetFileName(location.Path));
         }
         catch (OperationCanceledException)
         {
@@ -102,32 +90,20 @@ public static class BuildTableTargetResolver
         }
     }
 
-    public static Resource? LoadResource(
-        IReadOnlyList<string> archivePaths,
-        ulong id,
-        CancellationToken cancellationToken = default)
-        => LoadResourceGroup(archivePaths, id, cancellationToken)
-            .FirstOrDefault(resource => resource.Id == id);
+    public static Resource? LoadResource(IReadOnlyList<string> archivePaths, ulong id, CancellationToken cancellationToken = default)
+        => LoadResourceGroup(archivePaths, id, cancellationToken).FirstOrDefault(resource => resource.Id == id);
 
-    public static IReadOnlyList<Resource> LoadResourceGroup(
-        IReadOnlyList<string> archivePaths,
-        ulong id,
-        CancellationToken cancellationToken = default)
+    public static IReadOnlyList<Resource> LoadResourceGroup(IReadOnlyList<string> archivePaths, ulong id, CancellationToken cancellationToken = default)
     {
         if (id == 0)
             return [];
 
         var installed = Installed(archivePaths, null, cancellationToken);
-        if (installed.Locations.TryGetValue(id, out var exact)
-            && TryLoadResourceGroup(exact.Path, exact.EntryIndex, id, cancellationToken) is { } exactGroup)
+        if (installed.Locations.TryGetValue(id, out var exact) && TryLoadResourceGroup(exact.Path, exact.EntryIndex, id, cancellationToken) is { } exactGroup)
             return exactGroup;
-        if (TryFindGeneratedLocation(archivePaths, id, cancellationToken, out var generated)
-            && TryLoadResourceGroup(generated.Path, generated.EntryIndex, id, cancellationToken) is { } generatedGroup)
+        if (TryFindGeneratedLocation(archivePaths, id, cancellationToken, out var generated) && TryLoadResourceGroup(generated.Path, generated.EntryIndex, id, cancellationToken) is { } generatedGroup)
             return generatedGroup;
 
-        // A BuildTable can point at a resource nested in a data container whose
-        // top-level forge ID is different. Resolve those lazily for card previews;
-        // this work always runs off the UI thread.
         foreach (string path in archivePaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -148,24 +124,19 @@ public static class BuildTableTargetResolver
             }
             catch
             {
-                // Continue with the remaining installed archives.
+                // Continue with the remaining installed archives
             }
         }
 
         return [];
     }
 
-    static bool TryFindGeneratedLocation(IReadOnlyList<string> archivePaths, ulong id,
-        CancellationToken cancellationToken, out EntryLocation location)
+    static bool TryFindGeneratedLocation(IReadOnlyList<string> archivePaths, ulong id, CancellationToken cancellationToken, out EntryLocation location)
     {
         if (GeneratedLocations.TryGetValue(id, out location!))
             return true;
 
-        // Toolkit-created resources are added to entries in archives for which Apply
-        // already made an .original backup. Comparing entry lengths with that backup
-        // narrows a full installation scan to the handful of entries actually edited.
-        foreach (string path in archivePaths.Where(ArchiveBackup.Exists)
-            .Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (string path in archivePaths.Where(ArchiveBackup.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -173,9 +144,7 @@ public static class BuildTableTargetResolver
                 using var archive = ForgeArchive.Open(path);
                 using var original = ForgeArchive.Open(ArchiveBackup.PathFor(path));
                 var originalLengths = original.Entries.ToDictionary(entry => entry.Index, entry => entry.Length);
-                foreach (var entry in archive.Entries.Where(entry =>
-                    !originalLengths.TryGetValue(entry.Index, out int originalLength)
-                    || originalLength != entry.Length))
+                foreach (var entry in archive.Entries.Where(entry => !originalLengths.TryGetValue(entry.Index, out int originalLength) || originalLength != entry.Length))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     try
@@ -188,7 +157,7 @@ public static class BuildTableTargetResolver
                     }
                     catch
                     {
-                        // Some Forge entries are raw payloads rather than DataFiles.
+                        // Some Forge entries are raw payloads rather than DataFiles
                     }
                 }
             }
@@ -198,7 +167,7 @@ public static class BuildTableTargetResolver
             }
             catch
             {
-                // One damaged or unavailable backup must not block other archives.
+                // One damaged or unavailable backup must not block other archives
             }
         }
 
@@ -206,8 +175,7 @@ public static class BuildTableTargetResolver
         return false;
     }
 
-    static IReadOnlyList<Resource>? TryLoadResourceGroup(string path, int entryIndex, ulong id,
-        CancellationToken cancellationToken)
+    static IReadOnlyList<Resource>? TryLoadResourceGroup(string path, int entryIndex, ulong id, CancellationToken cancellationToken)
     {
         try
         {
@@ -259,14 +227,10 @@ public static class BuildTableTargetResolver
             }
 
             if (TryFindGeneratedLocation(archivePaths, id, cancellationToken, out var generated)
-                && TryLoadResourceGroup(generated.Path, generated.EntryIndex, id, cancellationToken)
-                    is { } generatedGroup
+                && TryLoadResourceGroup(generated.Path, generated.EntryIndex, id, cancellationToken) is { } generatedGroup
                 && generatedGroup.FirstOrDefault(resource => resource.Id == id) is { } resource)
             {
-                catalog.ById[id] = new BuildTableTarget(resource.Id, resource.Name,
-                    resource.ClassHash, ResourceTypes.NameOf(resource.ClassHash),
-                    generated.EntryName,
-                    Path.GetFileName(generated.Path));
+                catalog.ById[id] = new BuildTableTarget(resource.Id, resource.Name, resource.ClassHash, ResourceTypes.NameOf(resource.ClassHash), generated.EntryName, Path.GetFileName(generated.Path));
             }
         }
 
@@ -302,17 +266,14 @@ public static class BuildTableTargetResolver
             }
             catch
             {
-                // The header-level name remains useful if the payload cannot be decoded.
+                // The header-level name remains useful if the payload cannot be decoded
             }
         }
 
-        // The current data file is authoritative and may contain resources that have no
-        // top-level forge entry of their own.
         foreach (var target in localTargets)
             if (target.Id != 0)
                 catalog.ById[target.Id] = target;
 
-        // Installed targets are shared by every editor window; only the small local tail is new.
         catalog.Targets = installed.Targets
             .Select(installedTarget => catalog.ById.GetValueOrDefault(installedTarget.Id) ?? installedTarget)
             .Concat(localTargets.Where(local => !installed.ById.ContainsKey(local.Id)))
@@ -320,8 +281,7 @@ public static class BuildTableTargetResolver
         return catalog;
     }
 
-    static InstalledIndex Installed(IReadOnlyList<string> archivePaths,
-        IProgress<string>? progress, CancellationToken cancellationToken)
+    static InstalledIndex Installed(IReadOnlyList<string> archivePaths, IProgress<string>? progress, CancellationToken cancellationToken)
     {
         string key = CacheKey(archivePaths);
         lock (CacheLock)
@@ -352,7 +312,7 @@ public static class BuildTableTargetResolver
             }
             catch
             {
-                // One unreadable archive must not prevent names from every other archive.
+                // One unreadable archive must not prevent names from every other archive
             }
         }
 
@@ -390,8 +350,7 @@ public static class BuildTableTargetResolver
         }));
     }
 
-    static void TryReadTargets(ForgeArchive archive, ForgeEntry entry,
-        IReadOnlySet<ulong> wantedIds, BuildTableTargetCatalog catalog, string archiveName)
+    static void TryReadTargets(ForgeArchive archive, ForgeEntry entry, IReadOnlySet<ulong> wantedIds, BuildTableTargetCatalog catalog, string archiveName)
     {
         try
         {
@@ -401,13 +360,12 @@ public static class BuildTableTargetResolver
             foreach (var resource in file.Resources.Where(resource => wantedIds.Contains(resource.Id)))
             {
                 string type = ResourceTypes.NameOf(resource.ClassHash);
-                catalog.ById[resource.Id] = new BuildTableTarget(
-                    resource.Id, resource.Name, resource.ClassHash, type, entry.Name, archiveName);
+                catalog.ById[resource.Id] = new BuildTableTarget(resource.Id, resource.Name, resource.ClassHash, type, entry.Name, archiveName);
             }
         }
         catch
         {
-            // The forge entry name and id still provide a useful fallback target.
+            // The forge entry name and id still provide a useful fallback target
         }
     }
 }

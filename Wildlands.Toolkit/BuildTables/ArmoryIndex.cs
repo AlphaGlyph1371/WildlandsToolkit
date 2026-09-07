@@ -6,9 +6,6 @@ using Wildlands.Formats.Models;
 
 namespace Wildlands.Toolkit;
 
-// A deliberately small index.  It only stores the named game-database and
-// localization containers that the Armory needs; it is not a copy of every
-// resource in the installation.
 public sealed class ArmoryIndex
 {
     const uint FileMagic = 0x41524D31; // ARM1
@@ -16,8 +13,7 @@ public sealed class ArmoryIndex
 
     readonly List<IndexedResource> _databaseResources = [];
     readonly List<AvailabilityListCandidate> _availabilityLists = [];
-    readonly Dictionary<string, Dictionary<ulong, string>> _strings =
-        new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, Dictionary<ulong, string>> _strings = new(StringComparer.OrdinalIgnoreCase);
 
     public string Fingerprint { get; private set; } = "";
     public int DatabaseResourceCount => _databaseResources.Count;
@@ -29,8 +25,7 @@ public sealed class ArmoryIndex
     internal IReadOnlyList<IndexedResource> DatabaseResources => _databaseResources;
     internal IReadOnlyList<AvailabilityListCandidate> AvailabilityLists => _availabilityLists;
 
-    public static ArmoryIndex Build(IReadOnlyList<string> archivePaths,
-        IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    public static ArmoryIndex Build(IReadOnlyList<string> archivePaths, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         var index = new ArmoryIndex { Fingerprint = CreateFingerprint(archivePaths) };
         var localizedResources = new List<(string Package, byte[] Data)>();
@@ -45,9 +40,7 @@ public sealed class ArmoryIndex
             try
             {
                 using var archive = ForgeArchive.Open(archivePath);
-                foreach (var entry in archive.Entries.Where(entry =>
-                    BuildTableGameMetadataResolver.IsGameDatabaseContainer(entry.Name)
-                    || BuildTableGameMetadataResolver.TryGetLanguagePackage(entry.Name) is not null))
+                foreach (var entry in archive.Entries.Where(entry => BuildTableGameMetadataResolver.IsGameDatabaseContainer(entry.Name) || BuildTableGameMetadataResolver.TryGetLanguagePackage(entry.Name) is not null))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     using var stream = new MemoryStream(archive.ReadEntry(entry));
@@ -66,12 +59,9 @@ public sealed class ArmoryIndex
                     {
                         var resource = file.Resources[resourceIndex];
                         int indexedResource = index._databaseResources.Count;
-                        index._databaseResources.Add(new IndexedResource(
-                            resource.Id, resource.Name, resource.ClassHash, resource.Data,
-                            archivePath, entry.Index, entry.Name, resourceIndex));
+                        index._databaseResources.Add(new IndexedResource(resource.Id, resource.Name, resource.ClassHash, resource.Data, archivePath, entry.Index, entry.Name, resourceIndex));
                         BuildTableGameMetadataResolver.CollectLocalizedStringIds(resource.Data, wantedStrings);
-                        index._availabilityLists.AddRange(ReadAvailabilityLists(resource.Data, indexedResource,
-                            cancellationToken));
+                        index._availabilityLists.AddRange(ReadAvailabilityLists(resource.Data, indexedResource, cancellationToken));
                     }
                 }
             }
@@ -81,7 +71,7 @@ public sealed class ArmoryIndex
             }
             catch
             {
-                // A missing optional archive must not make the installed game unusable.
+                // A missing optional archive must not make the installed game unusable
             }
         }
 
@@ -99,12 +89,11 @@ public sealed class ArmoryIndex
             }
             catch
             {
-                // Keep the remaining intact language packages available.
+                // Keep the remaining intact language packages available
             }
         }
 
-        progress?.Report($"Armory data ready: {index.DatabaseResourceCount:N0} game records and "
-            + $"{index.LanguagePackages.Count} language packages.");
+        progress?.Report($"BuildTable index ready: {index.DatabaseResourceCount:N0} game records and {index.LanguagePackages.Count} language packages.");
         return index;
     }
 
@@ -144,42 +133,28 @@ public sealed class ArmoryIndex
             var owner = _databaseResources[ownerIndex];
             _databaseResources[ownerIndex] = owner with { Data = (byte[])change.Data.Clone() };
             _availabilityLists.RemoveAll(candidate => candidate.OwnerResourceIndex == ownerIndex);
-            _availabilityLists.AddRange(ReadAvailabilityLists(change.Data, ownerIndex,
-                CancellationToken.None));
+            _availabilityLists.AddRange(ReadAvailabilityLists(change.Data, ownerIndex, CancellationToken.None));
         }
     }
 
     internal void ApplyAdditions(IReadOnlyList<ArmoryArchiveResourceAddition> additions)
     {
-        foreach (var addition in additions.Where(addition =>
-                     BuildTableGameMetadataResolver.IsGameDatabaseContainer(addition.EntryName)))
+        foreach (var addition in additions.Where(addition => BuildTableGameMetadataResolver.IsGameDatabaseContainer(addition.EntryName)))
         {
             if (_databaseResources.Any(resource => resource.Id == addition.ResourceId))
                 continue;
 
-            // Pending resources do not have a DataFile index until Apply rewrites the archive.
-            // Give each one a distinct negative index so registry-owner identity remains stable
-            // while several attachments are prepared in the same editor session.
             int syntheticResourceIndex = -1;
-            while (_databaseResources.Any(resource =>
-                       string.Equals(resource.ArchivePath, addition.ArchivePath,
-                           StringComparison.OrdinalIgnoreCase)
-                       && resource.EntryIndex == addition.EntryIndex
-                       && resource.ResourceIndex == syntheticResourceIndex))
+            while (_databaseResources.Any(resource => string.Equals(resource.ArchivePath, addition.ArchivePath, StringComparison.OrdinalIgnoreCase) && resource.EntryIndex == addition.EntryIndex && resource.ResourceIndex == syntheticResourceIndex))
                 syntheticResourceIndex--;
 
             int indexedResource = _databaseResources.Count;
-            _databaseResources.Add(new IndexedResource(
-                addition.ResourceId, addition.ResourceName, addition.ClassHash,
-                (byte[])addition.Data.Clone(), addition.ArchivePath, addition.EntryIndex,
-                addition.EntryName, syntheticResourceIndex));
-            _availabilityLists.AddRange(ReadAvailabilityLists(addition.Data, indexedResource,
-                CancellationToken.None));
+            _databaseResources.Add(new IndexedResource(addition.ResourceId, addition.ResourceName, addition.ClassHash, (byte[])addition.Data.Clone(), addition.ArchivePath, addition.EntryIndex, addition.EntryName, syntheticResourceIndex));
+            _availabilityLists.AddRange(ReadAvailabilityLists(addition.Data, indexedResource, CancellationToken.None));
         }
     }
 
-    internal void RefreshFingerprint(IReadOnlyList<string> archivePaths) =>
-        Fingerprint = CreateFingerprint(archivePaths);
+    internal void RefreshFingerprint(IReadOnlyList<string> archivePaths) => Fingerprint = CreateFingerprint(archivePaths);
 
     public void Save(string path)
     {
@@ -281,8 +256,7 @@ public sealed class ArmoryIndex
                 int length = reader.ReadInt32();
                 if (length < 0 || length > 64 << 20)
                     return null;
-                index._databaseResources.Add(new IndexedResource(id, name, classHash, reader.ReadBytes(length),
-                    archivePath, entryIndex, entryName, dataResourceIndex));
+                index._databaseResources.Add(new IndexedResource(id, name, classHash, reader.ReadBytes(length), archivePath, entryIndex, entryName, dataResourceIndex));
             }
 
             int availabilityCount = reader.ReadInt32();
@@ -295,15 +269,12 @@ public sealed class ArmoryIndex
                 int entryStride = reader.ReadInt32();
                 int valueOffset = reader.ReadInt32();
                 int recordCount = reader.ReadInt32();
-                if ((uint)ownerResourceIndex >= (uint)index._databaseResources.Count
-                    || countOffset < 0 || entryStride is < 8 or > 16 || valueOffset < 0
-                    || valueOffset + sizeof(ulong) > entryStride || recordCount is < 1 or > 512)
+                if ((uint)ownerResourceIndex >= (uint)index._databaseResources.Count || countOffset < 0 || entryStride is < 8 or > 16 || valueOffset < 0 || valueOffset + sizeof(ulong) > entryStride || recordCount is < 1 or > 512)
                     return null;
                 var ids = new ulong[recordCount];
                 for (int recordIndex = 0; recordIndex < ids.Length; recordIndex++)
                     ids[recordIndex] = reader.ReadUInt64();
-                index._availabilityLists.Add(new AvailabilityListCandidate(ownerResourceIndex, countOffset,
-                    entryStride, valueOffset, ids));
+                index._availabilityLists.Add(new AvailabilityListCandidate(ownerResourceIndex, countOffset, entryStride, valueOffset, ids));
             }
 
             return index;
@@ -314,11 +285,9 @@ public sealed class ArmoryIndex
         }
     }
 
-    public static bool IsCurrent(string path, IReadOnlyList<string> archivePaths) =>
-        Load(path, archivePaths) is not null;
+    public static bool IsCurrent(string path, IReadOnlyList<string> archivePaths) => Load(path, archivePaths) is not null;
 
-    public bool MatchesArchives(IReadOnlyList<string> archivePaths) =>
-        string.Equals(Fingerprint, CreateFingerprint(archivePaths), StringComparison.Ordinal);
+    public bool MatchesArchives(IReadOnlyList<string> archivePaths) => string.Equals(Fingerprint, CreateFingerprint(archivePaths), StringComparison.Ordinal);
 
     public static string PartialPath(string path) => path + ".partial";
 
@@ -330,8 +299,7 @@ public sealed class ArmoryIndex
             return $"{Path.GetFullPath(path)}:{file.Length}:{file.LastWriteTimeUtc.Ticks}";
         }));
 
-    static List<AvailabilityListCandidate> ReadAvailabilityLists(ReadOnlySpan<byte> data,
-        int ownerResourceIndex, CancellationToken cancellationToken)
+    static List<AvailabilityListCandidate> ReadAvailabilityLists(ReadOnlySpan<byte> data, int ownerResourceIndex, CancellationToken cancellationToken)
     {
         const int maxEntries = 512;
         var results = new List<AvailabilityListCandidate>();
@@ -341,22 +309,17 @@ public sealed class ArmoryIndex
                 cancellationToken.ThrowIfCancellationRequested();
 
             uint count = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
-            if (count is < 1 or > maxEntries
-                || offset + sizeof(uint) + (long)count * sizeof(ulong) > data.Length)
+            if (count is < 1 or > maxEntries || offset + sizeof(uint) + (long)count * sizeof(ulong) > data.Length)
                 continue;
 
             TryAddLayout(data, ownerResourceIndex, offset, (int)count, sizeof(ulong), 0, results);
 
-            // Game Bootstrap lists store a one-byte field marker before every 64-bit ID.
-            // This is the layout used by the confirmed AK-12 Gunsmith records.
-            TryAddLayout(data, ownerResourceIndex, offset, (int)count, sizeof(byte) + sizeof(ulong),
-                sizeof(byte), results, requireZeroMarker: true);
+            TryAddLayout(data, ownerResourceIndex, offset, (int)count, sizeof(byte) + sizeof(ulong), sizeof(byte), results, requireZeroMarker: true);
         }
         return results;
     }
 
-    static void TryAddLayout(ReadOnlySpan<byte> data, int ownerResourceIndex, int countOffset, int count,
-        int entryStride, int valueOffset, List<AvailabilityListCandidate> results, bool requireZeroMarker = false)
+    static void TryAddLayout(ReadOnlySpan<byte> data, int ownerResourceIndex, int countOffset, int count, int entryStride, int valueOffset, List<AvailabilityListCandidate> results, bool requireZeroMarker = false)
     {
         int entriesOffset = countOffset + sizeof(uint);
         if (entriesOffset + (long)count * entryStride > data.Length)
@@ -378,14 +341,17 @@ public sealed class ArmoryIndex
             results.Add(new AvailabilityListCandidate(ownerResourceIndex, countOffset, entryStride, valueOffset, ids));
     }
 
-    internal sealed record IndexedResource(ulong Id, string Name, uint ClassHash, byte[] Data,
-        string ArchivePath, int EntryIndex, string EntryName, int ResourceIndex);
-    internal sealed record AvailabilityListCandidate(int OwnerResourceIndex, int CountOffset,
-        int EntryStride, int ValueOffset, ulong[] RecordIds);
+    internal sealed record IndexedResource(ulong Id, string Name, uint ClassHash, byte[] Data, string ArchivePath, int EntryIndex, string EntryName, int ResourceIndex);
+    internal sealed record AvailabilityListCandidate(int OwnerResourceIndex, int CountOffset, int EntryStride, int ValueOffset, ulong[] RecordIds);
 }
 
 public sealed record ArmoryDatabaseResourceChange(
-    string ArchivePath, int EntryIndex, string EntryName, int ResourceIndex, string ResourceName, byte[] Data);
+    string ArchivePath,
+    int EntryIndex,
+    string EntryName,
+    int ResourceIndex,
+    string ResourceName,
+    byte[] Data);
 
 public sealed record ArmoryArchiveResourceAddition(
     string ArchivePath,

@@ -105,6 +105,8 @@ public partial class MainWindow
             }
             if (_changes.Count == 0)
             {
+                project.MarkDeployed();
+                FinishPackageInstallation(project);
                 SetStatus($"{package.Name}: already installed");
                 MessageBox.Show(this, $"{package.Name} is already present in the game archives. No files needed to be written.", "Mod already installed", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
@@ -112,7 +114,11 @@ public partial class MainWindow
 
             ApplyResult result = await ApplyChanges(this, package.Name);
             if (result == ApplyResult.Applied)
+            {
+                FinishPackageInstallation(project);
+                SetStatus($"{package.Name} was installed successfully");
                 MessageBox.Show(this, $"{package.Name} was installed successfully.", "Mod installed", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
             else if (result is ApplyResult.Cancelled or ApplyResult.FailedBeforeWrite)
             {
                 RestoreWorkspace(previousProject, previousChanges);
@@ -123,6 +129,15 @@ public partial class MainWindow
         {
             ShowError("Could not install the mod package", ex);
         }
+    }
+
+    void FinishPackageInstallation(ModProject installedPackage)
+    {
+        _changes.Clear();
+        if (ReferenceEquals(_project, installedPackage))
+            _project = null;
+        UpdateChangeButtons();
+        ShowArchiveAgain();
     }
 
     void RestoreWorkspace(ModProject? project, IReadOnlyList<PendingChange> changes)

@@ -86,6 +86,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  armorymeta <game folder> <build tag> [build tag...]  resolve gameplay records for exact BuildTags");
     Console.WriteLine("  duprowcheck <archive.forge> <container> <table> <row>  verify an in-memory row duplication");
     Console.WriteLine("  memwatch <process|pid> <u32:0xvalue|u64:0xvalue> [...]  compare exact values in two live process states");
     Console.WriteLine("  memfind <process|pid> <u32:0xvalue|u64:0xvalue> [...]  find exact values in a live process");
@@ -250,6 +251,8 @@ try
         return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
     case "buildinfo" when args.Length >= 3:
         return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+    case "armorymeta" when args.Length >= 3:
+        return InspectArmoryMetadata(args[1], args[2..]);
     case "duprowcheck" when args.Length >= 5:
         return CheckDuplicatedBuildTable(args[1], args[2], args[3], int.Parse(args[4]));
     case "memwatch" when args.Length >= 3:
@@ -4564,4 +4567,42 @@ static int Find64BitValues(string path, IReadOnlyList<string> values)
         Console.WriteLine(hit);
     Console.WriteLine($"scanned {files.Length} container(s), {hits.Count} hit(s), {failed} unreadable");
     return failed == files.Length ? 1 : 0;
+}
+
+static int InspectArmoryMetadata(string gameFolder, IReadOnlyList<string> values)
+{
+    var tags = values.Select(value => value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt32(value[2..], 16)
+            : Convert.ToUInt32(value))
+        .Distinct()
+        .ToArray();
+    var archivePaths = ArchiveLocator.Find(gameFolder);
+    if (archivePaths.Count == 0)
+    {
+        Console.WriteLine("no forge archives in " + gameFolder);
+        return 1;
+    }
+
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths)
+        ?? ArmoryIndex.Build(archivePaths);
+    BuildTableGameMetadata metadata = BuildTableGameMetadataResolver.Build(index, [],
+        preferredLanguagePackage: "English(US)", buildTags: tags);
+    foreach (uint tag in tags)
+    {
+        if (metadata.ByBuildTag.TryGetValue(tag, out BuildTableOptionMetadata? record))
+        {
+            Console.WriteLine($"0x{tag:X8}  0x{record.RecordId:X12}  "
+                + $"class 0x{record.RecordClassHash:X8}  {record.RecordName}  |  "
+                + record.DisplayName);
+        }
+        else if (metadata.AmbiguousBuildTags.Contains(tag))
+        {
+            Console.WriteLine($"0x{tag:X8}  ambiguous");
+        }
+        else
+        {
+            Console.WriteLine($"0x{tag:X8}  no localized gameplay record");
+        }
+    }
+    return 0;
 }

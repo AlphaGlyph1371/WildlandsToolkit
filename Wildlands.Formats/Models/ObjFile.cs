@@ -14,6 +14,8 @@ public sealed class ObjGroup
 
 public sealed class ObjFile
 {
+    bool _flipTextureV = true;
+
     public List<Vector3> Positions { get; } = [];
     public List<Vector3> Normals { get; } = [];
     public List<Vector2> TextureCoordinates { get; } = [];
@@ -33,6 +35,14 @@ public sealed class ObjFile
         {
             line++;
             string text = raw.Trim();
+            if (text.StartsWith("# Exported using AnvilToolkit", StringComparison.OrdinalIgnoreCase))
+            {
+                // AnvilToolkit writes the game's UV coordinates directly. Most OBJ tools use
+                // the opposite V origin, which is why ordinary OBJ files are flipped below.
+                obj._flipTextureV = false;
+                continue;
+            }
+
             if (text.Length == 0 || text[0] == '#')
                 continue;
 
@@ -241,7 +251,7 @@ public sealed class ObjFile
                     {
                         Position = Positions[corner],
                         Normal = Normals[corner],
-                        Uv = [new Vector2(uv.X, 1 - uv.Y)],
+                        Uv = [new Vector2(uv.X, _flipTextureV ? 1 - uv.Y : uv.Y)],
                         Color = 0xFFFFFFFF,
                     });
                 }

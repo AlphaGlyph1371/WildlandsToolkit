@@ -73,7 +73,7 @@
 
                 <Grid Grid.Column="2" Width="220">
                     <TextBox x:Name="FilterBox" TextChanged="Filter_Changed"/>
-                    <TextBlock x:Name="FilterHint" Text="Filter by name" Margin="9,0,0,0"
+                    <TextBlock x:Name="FilterHint" Text="Search by name" Margin="9,0,0,0"
                                VerticalAlignment="Center" IsHitTestVisible="False"
                                Foreground="{StaticResource TextDim}"/>
                 </Grid>
@@ -139,25 +139,23 @@
             <Border Grid.Column="0" Background="{StaticResource Surface}"
                 BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
                 <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Margin="10,10,10,6">
-                        <TextBlock Text="Archives" Margin="0,0,0,6"/>
-                        <Grid>
+                        <StackPanel DockPanel.Dock="Top" Margin="10,10,10,6">
+                            <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="ArmoryIndexButton" Grid.Column="0" Content="Armory index"
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                            <Button x:Name="ArmoryIndexButton" Grid.Column="0" Content="Build BT index"
                                 Click="ArmoryIndex_Click" Padding="6,3" Margin="0,0,3,0" FontSize="11"
-                                ToolTip="Prepare confirmed weapon, gear and character data for the Armory editor."/>
-                            <Button x:Name="SkeletonIndexButton" Grid.Column="1" Content="Skeleton index"
+                                ToolTip="Prepare confirmed weapon, gear and character data for the BuildTable editor."/>
+                            <Button x:Name="SkeletonIndexButton" Grid.Column="1" Content="Build SK index"
                                 Click="SkeletonIndex_Click" Padding="6,3" Margin="3,0" FontSize="11"
-                                ToolTip="Scan the game for skeletons, so exported meshes get a working one. Takes a few minutes."/>
-                            <Button Grid.Column="2" Content="Indexes…" Click="Indexes_Click"
+                                ToolTip="Scan the game for skeletons, so exported meshes get a working one."/>
+                            <!--<Button Grid.Column="2" Content="Indexes…" Click="Indexes_Click"
                                 Padding="6,3" Margin="3,0,0,0" FontSize="11"
-                                ToolTip="Explain or prepare the indexes used by the Toolkit."/>
+                                ToolTip="Explain or prepare the indexes used by the Toolkit."/>-->
                         </Grid>
-                        <Button Content="Game folder" Click="ChangeGameFolder_Click"
+                        <Button Content="Set game folder" Click="ChangeGameFolder_Click"
                                 Padding="6,3" Margin="0,6,0,0" FontSize="11"/>
                     </StackPanel>
 

@@ -1,10 +1,6 @@
-using System;
 using System.Buffers.Binary;
-using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
-using System.Threading;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
 using Wildlands.Formats.Models;
@@ -24,9 +20,7 @@ public sealed record BuildTableOptionMetadata(
 
 public sealed class BuildTableGameMetadata
 {
-    public static BuildTableGameMetadata Empty { get; } = new(
-        new Dictionary<uint, BuildTableOptionMetadata>(), new HashSet<uint>(), Array.Empty<string>(),
-        new HashSet<ulong>(), new Dictionary<ulong, IReadOnlyList<string>>(), 0, "");
+    public static BuildTableGameMetadata Empty { get; } = new(new Dictionary<uint, BuildTableOptionMetadata>(), new HashSet<uint>(), Array.Empty<string>(), new HashSet<ulong>(), new Dictionary<ulong, IReadOnlyList<string>>(), 0, "");
 
     internal BuildTableGameMetadata(
         IReadOnlyDictionary<uint, BuildTableOptionMetadata> byBuildTag,
@@ -84,8 +78,7 @@ public static class BuildTableGameMetadataResolver
             try
             {
                 using var archive = ForgeArchive.Open(path);
-                foreach (var entry in archive.Entries.Where(entry =>
-                    IsGameDatabaseContainer(entry.Name) || LocalizationPriority(entry.Name, preferredPackage) >= 0))
+                foreach (var entry in archive.Entries.Where(entry => IsGameDatabaseContainer(entry.Name) || LocalizationPriority(entry.Name, preferredPackage) >= 0))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     using var stream = new MemoryStream(archive.ReadEntry(entry));
@@ -110,7 +103,7 @@ public static class BuildTableGameMetadataResolver
             }
             catch
             {
-                // Missing optional archives do not invalidate metadata read from the others.
+                // Missing optional archives do not invalidate metadata read from the others
             }
         }
 
@@ -125,18 +118,15 @@ public static class BuildTableGameMetadataResolver
             }
             catch
             {
-                // A damaged language package must not create labels from partial data.
+                // A damaged language package must not create labels from partial data
             }
         }
 
-        return BuildFromResources(databaseResources, strings, ownerEntityIds, buildTags,
-            preferredPackage, cancellationToken);
+        return BuildFromResources(databaseResources, strings, ownerEntityIds, buildTags, preferredPackage, cancellationToken);
     }
 
-    public static BuildTableGameMetadata Build(ArmoryIndex index,
-        IReadOnlyCollection<ulong> ownerEntityIds, string? preferredLanguagePackage = null,
-        CancellationToken cancellationToken = default,
-        IReadOnlyCollection<uint>? buildTags = null)
+    public static BuildTableGameMetadata Build(ArmoryIndex index, IReadOnlyCollection<ulong> ownerEntityIds, string? preferredLanguagePackage = null,
+        CancellationToken cancellationToken = default, IReadOnlyCollection<uint>? buildTags = null)
     {
         ArgumentNullException.ThrowIfNull(index);
         string preferredPackage = string.IsNullOrWhiteSpace(preferredLanguagePackage)
@@ -151,14 +141,11 @@ public static class BuildTableGameMetadataResolver
                 Data = resource.Data,
             })
             .ToList();
-        return BuildFromResources(resources, index.StringsFor(preferredPackage), ownerEntityIds,
-            buildTags, preferredPackage, cancellationToken);
+        return BuildFromResources(resources, index.StringsFor(preferredPackage), ownerEntityIds, buildTags, preferredPackage, cancellationToken);
     }
 
-    static BuildTableGameMetadata BuildFromResources(IReadOnlyList<Resource> databaseResources,
-        IReadOnlyDictionary<ulong, string> strings, IReadOnlyCollection<ulong> ownerEntityIds,
-        IReadOnlyCollection<uint>? buildTags, string preferredPackage,
-        CancellationToken cancellationToken)
+    static BuildTableGameMetadata BuildFromResources(IReadOnlyList<Resource> databaseResources, IReadOnlyDictionary<ulong, string> strings, IReadOnlyCollection<ulong> ownerEntityIds,
+        IReadOnlyCollection<uint>? buildTags, string preferredPackage, CancellationToken cancellationToken)
     {
         var records = new List<BuildTableOptionMetadata>();
         foreach (var resource in databaseResources)
@@ -169,8 +156,7 @@ public static class BuildTableGameMetadataResolver
         }
 
         var recordIds = records.Select(record => record.RecordId).ToHashSet();
-        var owners = databaseResources.Where(resource => ownerEntityIds.Any(id => ContainsUInt64(resource.Data, id)))
-            .ToList();
+        var owners = databaseResources.Where(resource => ownerEntityIds.Any(id => ContainsUInt64(resource.Data, id))).ToList();
         var directlyLinkedIds = new HashSet<ulong>();
         var ownersByRecordId = new Dictionary<ulong, HashSet<string>>();
         foreach (var owner in owners)
@@ -183,14 +169,8 @@ public static class BuildTableGameMetadataResolver
                     linkedOwners.Add(owner.Name);
                 }
 
-        // A Gunsmith removal deletes the record ID from the owner list, but it does
-        // not delete the option record or the BuildTable row. Keep resolving labels
-        // from exact BuildTags in the opened family so availability and identity are
-        // not accidentally treated as the same state.
         var requestedTags = buildTags?.ToHashSet() ?? [];
-        var relevantRecords = records.Where(record => directlyLinkedIds.Contains(record.RecordId)
-                || requestedTags.Contains(record.BuildTag))
-            .ToList();
+        var relevantRecords = records.Where(record => directlyLinkedIds.Contains(record.RecordId) || requestedTags.Contains(record.BuildTag)).ToList();
         var byTag = new Dictionary<uint, BuildTableOptionMetadata>();
         var ambiguous = new HashSet<uint>();
         foreach (var group in relevantRecords.GroupBy(record => record.BuildTag))
@@ -198,8 +178,7 @@ public static class BuildTableGameMetadataResolver
             var linked = group.Where(record => directlyLinkedIds.Contains(record.RecordId)).ToList();
             var candidates = linked.Count > 0 ? linked : group.ToList();
             var names = candidates.Select(record => record.NameStringId).Distinct().ToList();
-            if (names.Count != 1
-                || linked.Count == 0 && candidates.Select(record => record.RecordId).Distinct().Count() != 1)
+            if (names.Count != 1 || linked.Count == 0 && candidates.Select(record => record.RecordId).Distinct().Count() != 1)
             {
                 ambiguous.Add(group.Key);
                 continue;
@@ -210,18 +189,12 @@ public static class BuildTableGameMetadataResolver
                 .First();
         }
 
-        var readOnlyOwners = ownersByRecordId.ToDictionary(
-            pair => pair.Key,
-            pair => (IReadOnlyList<string>)pair.Value.Order(StringComparer.OrdinalIgnoreCase).ToList());
-        return new BuildTableGameMetadata(byTag, ambiguous,
-            owners.Select(owner => owner.Name).Order(StringComparer.OrdinalIgnoreCase).ToList(),
-            owners.Select(owner => owner.Id).ToHashSet(), readOnlyOwners, strings.Count,
-            strings.Count > 0 ? preferredPackage : "English(US)");
+        var readOnlyOwners = ownersByRecordId.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.Order(StringComparer.OrdinalIgnoreCase).ToList());
+        return new BuildTableGameMetadata(byTag, ambiguous, owners.Select(owner => owner.Name).Order(StringComparer.OrdinalIgnoreCase).ToList(),
+            owners.Select(owner => owner.Id).ToHashSet(), readOnlyOwners, strings.Count, strings.Count > 0 ? preferredPackage : "English(US)");
     }
 
-    internal static bool IsGameDatabaseContainer(string name) =>
-        string.Equals(Path.GetFileNameWithoutExtension(name), "Game Bootstrap Settings",
-            StringComparison.OrdinalIgnoreCase);
+    internal static bool IsGameDatabaseContainer(string name) => string.Equals(Path.GetFileNameWithoutExtension(name), "Game Bootstrap Settings", StringComparison.OrdinalIgnoreCase);
 
     static int LocalizationPriority(string name, string preferredPackage)
     {
@@ -233,8 +206,7 @@ public static class BuildTableGameMetadataResolver
         return string.Equals(package, "English(US)", StringComparison.OrdinalIgnoreCase) ? 0 : -1;
     }
 
-    public static IReadOnlyList<string> FindAvailableLanguagePackages(
-        IReadOnlyList<string> archivePaths, CancellationToken cancellationToken = default)
+    public static IReadOnlyList<string> FindAvailableLanguagePackages(IReadOnlyList<string> archivePaths, CancellationToken cancellationToken = default)
     {
         var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string path in archivePaths)
@@ -257,7 +229,7 @@ public static class BuildTableGameMetadataResolver
             }
             catch
             {
-                // An unavailable archive simply cannot contribute a language package.
+                // An unavailable archive simply cannot contribute a language package
             }
         }
 
@@ -286,17 +258,14 @@ public static class BuildTableGameMetadataResolver
         string value = Path.GetFileNameWithoutExtension(name);
         const string prefix = "LocalizationPackage_";
         int index = value.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (index < 0
-            || value.Contains("Subtitles", StringComparison.OrdinalIgnoreCase)
-            || value.Contains("EManual", StringComparison.OrdinalIgnoreCase))
+        if (index < 0 || value.Contains("Subtitles", StringComparison.OrdinalIgnoreCase) || value.Contains("EManual", StringComparison.OrdinalIgnoreCase))
             return null;
 
         string package = value[(index + prefix.Length)..];
         return string.IsNullOrWhiteSpace(package) ? null : package;
     }
 
-    static bool TryReadRecord(Resource resource, IReadOnlyDictionary<ulong, string> strings,
-        out BuildTableOptionMetadata record)
+    static bool TryReadRecord(Resource resource, IReadOnlyDictionary<ulong, string> strings, out BuildTableOptionMetadata record)
     {
         record = null!;
         ReadOnlySpan<byte> data = resource.Data;
@@ -312,9 +281,7 @@ public static class BuildTableGameMetadataResolver
             if (at + 8 > data.Length)
                 break;
             ulong id = BinaryPrimitives.ReadUInt32LittleEndian(data[(at + 4)..]);
-            if (id != 0 && strings.TryGetValue(id, out string? text)
-                && !string.IsNullOrWhiteSpace(text))
-                localized.Add((id, text));
+            if (id != 0 && strings.TryGetValue(id, out string? text) && !string.IsNullOrWhiteSpace(text)) localized.Add((id, text));
             at += 8;
         }
 
@@ -344,17 +311,11 @@ public static class BuildTableGameMetadataResolver
     static bool TryReadConfirmedMagazineCapacity(Resource resource, string localizedName, out int capacity)
     {
         capacity = 0;
-        if (resource.ClassHash != MagazineAttachmentClassHash
-            || !localizedName.Contains("[VALUE]", StringComparison.Ordinal)
-            || resource.Data.Length < 7)
+        if (resource.ClassHash != MagazineAttachmentClassHash || !localizedName.Contains("[VALUE]", StringComparison.Ordinal) || resource.Data.Length < 7)
             return false;
 
-        // Confirmed against the three ASR_AK12 magazine records directly linked by
-        // the game database: their fixed footer is 00 <rounds> 00 CD CC CC 3D and
-        // contains 20, 30 and 50 respectively, matching the in-game Gunsmith text.
         ReadOnlySpan<byte> footer = resource.Data.AsSpan()[^7..];
-        if (footer[0] != 0 || footer[2] != 0
-            || !footer[3..].SequenceEqual(new byte[] { 0xCD, 0xCC, 0xCC, 0x3D }))
+        if (footer[0] != 0 || footer[2] != 0 || !footer[3..].SequenceEqual(new byte[] { 0xCD, 0xCC, 0xCC, 0x3D }))
             return false;
 
         capacity = footer[1];

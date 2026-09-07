@@ -49,15 +49,13 @@ internal static class AttachmentAddPipeline
         string localArchivePath,
         int localEntryIndex,
         string localEntryName,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData,
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData,
         IReadOnlyCollection<ulong> preparedIds)
     {
         ArgumentNullException.ThrowIfNull(index);
         if ((uint)templateRowIndex >= (uint)table.Rows.Count)
             throw new InvalidOperationException("The selected attachment template no longer exists.");
-        if (index.DatabaseResources.Any(resource =>
-                string.Equals(resource.Name, draft.InternalName, StringComparison.OrdinalIgnoreCase)))
+        if (index.DatabaseResources.Any(resource => string.Equals(resource.Name, draft.InternalName, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A gameplay resource named {draft.InternalName} already exists.");
 
         var used64 = index.DatabaseResources.Select(resource => resource.Id)
@@ -79,10 +77,8 @@ internal static class AttachmentAddPipeline
             .Concat(table.Rows.Select(row => row.Tag))
             .ToHashSet();
 
-        AttachmentCategory category = draft.ReplaceTemplate || draft.ReuseTemplateCategory
-            || draft.CreateUniqueBuildTag
-            ? new AttachmentCategory(templateMetadata.BuildTag, templateMetadata.RecordId,
-                "template category", 1)
+        AttachmentCategory category = draft.ReplaceTemplate || draft.ReuseTemplateCategory || draft.CreateUniqueBuildTag
+            ? new AttachmentCategory(templateMetadata.BuildTag, templateMetadata.RecordId, "template category", 1)
             : ResolveFreeCategory(index, table, templateMetadata, ownerRecordIds);
         uint buildTag = draft.CreateUniqueBuildTag
             ? Allocate32("build-tag:" + draft.InternalName, usedBuildTags)
@@ -98,27 +94,21 @@ internal static class AttachmentAddPipeline
         var sharedTextureIds = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
         if (draft.ImportModel)
         {
-            var modelPlan = CloneModelResources(draft, modelSource.Id, archivePaths,
-                localArchivePath, localEntryIndex, used64, sharedTextureIds);
+            var modelPlan = CloneModelResources(draft, modelSource.Id, archivePaths, localArchivePath, localEntryIndex, used64, sharedTextureIds);
             modelSelectorId = modelPlan.SelectorId;
             entryAdditions.AddRange(modelPlan.EntryAdditions);
             previewResources.AddRange(modelPlan.Resources);
 
-            if (!draft.ReplaceTemplate && !draft.ReuseTemplateCategory && draft.AddToGunsmith
-                && localResources.TryGetValue(table.Id, out Resource? localLeafTable))
+            if (!draft.ReplaceTemplate && !draft.ReuseTemplateCategory && draft.AddToGunsmith && localResources.TryGetValue(table.Id, out Resource? localLeafTable))
             {
-                ulong gunsmithTemplateModelId = FindGunsmithPreviewTemplateModel(archivePaths,
-                    localEntryName, localLeafTable.Name, templateMetadata.BuildTag,
-                    preparedResourceData);
+                ulong gunsmithTemplateModelId = FindGunsmithPreviewTemplateModel(archivePaths, localEntryName, localLeafTable.Name, templateMetadata.BuildTag, preparedResourceData);
                 if (gunsmithTemplateModelId != 0)
                 {
                     var gunsmithDraft = draft with
                     {
                         InternalName = draft.InternalName + "_Gunsmith"
                     };
-                    var gunsmithModelPlan = CloneModelResources(gunsmithDraft,
-                        gunsmithTemplateModelId, archivePaths, localArchivePath,
-                        localEntryIndex, used64, sharedTextureIds);
+                    var gunsmithModelPlan = CloneModelResources(gunsmithDraft, gunsmithTemplateModelId, archivePaths, localArchivePath, localEntryIndex, used64, sharedTextureIds);
                     gunsmithModelSelectorId = gunsmithModelPlan.SelectorId;
                     entryAdditions.AddRange(gunsmithModelPlan.EntryAdditions);
                     previewResources.AddRange(gunsmithModelPlan.Resources);
@@ -126,159 +116,116 @@ internal static class AttachmentAddPipeline
             }
         }
         else if (LoadModelFiles(archivePaths, new HashSet<ulong> { modelSelectorId }).Count == 0)
-            throw new InvalidOperationException(
-                $"{modelSource.Name} is not the first resource of a Forge entry. The game loads a model "
-                + "as the file that carries its id, so a row can only name a resource that is one.");
+            throw new InvalidOperationException($"{modelSource.Name} is not the first resource of a Forge entry.");
 
         if (!draft.ReplaceTemplate)
         {
             var componentReferences = table.Rows[templateRowIndex].References
-                .Where(reference => reference.Kind == BuildTableReferenceKind.FileReference
-                    && localResources.TryGetValue(reference.Value, out Resource? resource)
-                    && resource.ClassHash == Skeleton.ClassHash)
+                .Where(reference => reference.Kind == BuildTableReferenceKind.FileReference && localResources.TryGetValue(reference.Value, out Resource? resource) && resource.ClassHash == Skeleton.ClassHash)
                 .ToList();
             if (componentReferences.Count > 1)
-                throw new InvalidOperationException(
-                    "The attachment template names more than one local component Skeleton.");
+                throw new InvalidOperationException("The attachment template names more than one local component Skeleton.");
         }
 
         if (draft.ReplaceTemplate && modelSelectorId != templateModelSelectorId)
-            throw new InvalidOperationException(
-                "The replacement control must use the copied attachment's existing model asset.");
+            throw new InvalidOperationException("The replacement control must use the copied attachment's existing model asset.");
 
         byte[] tableData = draft.ReplaceTemplate
             ? table.Write()
-            : AddOption(table, templateRowIndex, buildTag,
-                templateModelSelectorId, modelSelectorId, 0, 0);
+            : AddOption(table, templateRowIndex, buildTag, templateModelSelectorId, modelSelectorId, 0, 0);
 
         var localChanges = draft.ReplaceTemplate || draft.ReuseTemplateCategory
             ? []
-            : BuildParentTagChanges(table.Id, templateMetadata.BuildTag, buildTag,
-                localResources, localResourceIndexes);
+            : BuildParentTagChanges(table.Id, templateMetadata.BuildTag, buildTag, localResources, localResourceIndexes);
 
         var recordSource = LoadIndexedResource(index, category.ExemplarRecordId);
-        byte[] recordData = CloneGameplayRecord(recordSource.Resource.Data,
-            category.ExemplarRecordId, recordId, buildTag, stringId);
+        byte[] recordData = CloneGameplayRecord(recordSource.Resource.Data, category.ExemplarRecordId, recordId, buildTag, stringId);
         string recordName = draft.InternalName;
         Resource newRecord = DataFile.CloneResource(recordSource.Resource, recordId, recordName, recordData);
         resourceAdditions.Add(ToAddition(recordSource.Location, newRecord));
 
-        var infoSource = index.DatabaseResources.LastOrDefault(resource =>
-                resource.ClassHash == StoreObjectInfoClass
-                && Names(resource.Data, category.ExemplarRecordId))
-            ?? throw new InvalidOperationException(
-                "The chosen attachment category has no StoreObjectInfo beside its record.");
+        var infoSource = index.DatabaseResources.LastOrDefault(resource => resource.ClassHash == StoreObjectInfoClass && Names(resource.Data, category.ExemplarRecordId))
+            ?? throw new InvalidOperationException("The chosen attachment category has no StoreObjectInfo beside its record.");
         ulong infoId = Allocate64("store-object-info:" + draft.InternalName, used64);
         var infoLoaded = LoadIndexedResource(index, infoSource.Id);
-        byte[] infoData = CloneRecordInfo(infoLoaded.Resource.Data, infoSource.Id, infoId,
-            category.ExemplarRecordId, recordId, draft.InternalName);
-        resourceAdditions.Add(ToAddition(infoLoaded.Location,
-            DataFile.CloneResource(infoLoaded.Resource, infoId, recordName, infoData)));
+        byte[] infoData = CloneRecordInfo(infoLoaded.Resource.Data, infoSource.Id, infoId, category.ExemplarRecordId, recordId, draft.InternalName);
+        resourceAdditions.Add(ToAddition(infoLoaded.Location, DataFile.CloneResource(infoLoaded.Resource, infoId, recordName, infoData)));
 
         var databaseChanges = new List<ArmoryDatabaseResourceChange>();
         var storeInsertions = new List<(GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>();
         var storeRegistries = GunsmithAvailability.FindStoreRegistries(index, infoSource.Id);
         if (storeRegistries.Count == 0)
-            throw new InvalidOperationException(
-                "The template StoreObjectInfo is not listed in a confirmed StoreDBEntry registry.");
+            throw new InvalidOperationException("The template StoreObjectInfo is not listed in a confirmed StoreDBEntry registry.");
         foreach (GunsmithAvailabilityList registry in storeRegistries)
             storeInsertions.Add((registry, infoSource.Id, infoId));
 
-        var wantedPackages = index.LanguagePackages.Where(package =>
-                string.Equals(package, "English(US)", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(package, languagePackage, StringComparison.OrdinalIgnoreCase))
+        var wantedPackages = index.LanguagePackages.Where(package => string.Equals(package, "English(US)", StringComparison.OrdinalIgnoreCase) || string.Equals(package, languagePackage, StringComparison.OrdinalIgnoreCase))
             .ToList();
-        var localizationTargets = FindLocalizationTargets(wantedPackages, archivePaths,
-            preparedResourceData);
+        var localizationTargets = FindLocalizationTargets(wantedPackages, archivePaths, preparedResourceData);
         if (localizationTargets.Count == 0)
             throw new InvalidOperationException("No writable installed localization package was found.");
         foreach (var target in localizationTargets)
         {
-            byte[] localizationData = LocalizationPackage.AddOrReplaceString(
-                target.Resource.Data, stringId, draft.DisplayName);
-            databaseChanges.Add(new ArmoryDatabaseResourceChange(target.Location.ArchivePath,
-                target.Location.EntryIndex, target.Location.EntryName, target.ResourceIndex,
-                target.Resource.Name, localizationData));
+            byte[] localizationData = LocalizationPackage.AddOrReplaceString(target.Resource.Data, stringId, draft.DisplayName);
+            databaseChanges.Add(new ArmoryDatabaseResourceChange(target.Location.ArchivePath, target.Location.EntryIndex, target.Location.EntryName, target.ResourceIndex, target.Resource.Name, localizationData));
         }
 
         var ownerNames = gunsmithLists.Select(list => list.OwnerName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var databaseContainerInsertions = new List<(
-            GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>();
-        var databaseContainerRegistries = GunsmithAvailability.FindDatabaseContainerRegistries(index,
-            category.ExemplarRecordId);
+        var databaseContainerInsertions = new List<(GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>();
+        var databaseContainerRegistries = GunsmithAvailability.FindDatabaseContainerRegistries(index, category.ExemplarRecordId);
         if (databaseContainerRegistries.Count == 0)
-            throw new InvalidOperationException(
-                "The selected template is not present in a confirmed gameplay database container.");
+            throw new InvalidOperationException("The selected template is not present in a confirmed gameplay database container.");
         foreach (GunsmithAvailabilityList registry in databaseContainerRegistries)
             databaseContainerInsertions.Add((registry, category.ExemplarRecordId, recordId));
 
-        var attachmentTypeRegistries = GunsmithAvailability.FindAttachmentTypeRegistries(index,
-            category.ExemplarRecordId, templateMetadata.RecordClassHash);
+        var attachmentTypeRegistries = GunsmithAvailability.FindAttachmentTypeRegistries(index, category.ExemplarRecordId, templateMetadata.RecordClassHash);
         if (attachmentTypeRegistries.Count == 0)
-            throw new InvalidOperationException(
-                "No unambiguous WPN_AT attachment registry was found for the selected template.");
+            throw new InvalidOperationException("No unambiguous WPN_AT attachment registry was found for the selected template.");
 
-        var unlockInsertions = new List<(
-            GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>();
-        var unlockRegistries = GunsmithAvailability.FindUnlockRegistries(index,
-            category.ExemplarRecordId);
+        var unlockInsertions = new List<(GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>();
+        var unlockRegistries = GunsmithAvailability.FindUnlockRegistries(index, category.ExemplarRecordId);
         if (unlockRegistries.Count == 0)
-            throw new InvalidOperationException(
-                "The selected template is not present in a confirmed DBUnlockables_default registry.");
+            throw new InvalidOperationException("The selected template is not present in a confirmed DBUnlockables_default registry.");
         foreach (GunsmithAvailabilityList registry in unlockRegistries)
             unlockInsertions.Add((registry, category.ExemplarRecordId, recordId));
 
         if (draft.CreateUniqueBuildTag)
         {
             if (attachmentTypeRegistries.Count != 1)
-                throw new InvalidOperationException(
-                    "The unique BuildTag experiment needs exactly one WPN_AT attachment-type template.");
+                throw new InvalidOperationException("The unique BuildTag experiment needs exactly one WPN_AT attachment-type template.");
 
             GunsmithAvailabilityList typeRegistry = attachmentTypeRegistries[0];
             var typeLoaded = LoadIndexedResource(index, typeRegistry.Owner.Id);
             ulong typeId = Allocate64("attachment-type:" + draft.InternalName, used64);
             string typeName = typeRegistry.Owner.Name + "_" + draft.InternalName;
-            byte[] typeData = CloneAttachmentTypeRegistry(typeRegistry, typeId,
-                category.Tag, buildTag, recordId);
-            resourceAdditions.Add(ToAddition(typeLoaded.Location,
-                DataFile.CloneResource(typeLoaded.Resource, typeId, typeName, typeData)));
+            byte[] typeData = CloneAttachmentTypeRegistry(typeRegistry, typeId, category.Tag, buildTag, recordId);
+            resourceAdditions.Add(ToAddition(typeLoaded.Location, DataFile.CloneResource(typeLoaded.Resource, typeId, typeName, typeData)));
 
-            var typeInfoSource = index.DatabaseResources.LastOrDefault(resource =>
-                    resource.ClassHash == StoreObjectInfoClass
-                    && Names(resource.Data, typeRegistry.Owner.Id))
-                ?? throw new InvalidOperationException(
-                    "The WPN_AT attachment-type template has no StoreObjectInfo beside it.");
+            var typeInfoSource = index.DatabaseResources.LastOrDefault(resource => resource.ClassHash == StoreObjectInfoClass && Names(resource.Data, typeRegistry.Owner.Id))
+                ?? throw new InvalidOperationException("The WPN_AT attachment-type template has no StoreObjectInfo beside it.");
             ulong typeInfoId = Allocate64("attachment-type-info:" + draft.InternalName, used64);
             var typeInfoLoaded = LoadIndexedResource(index, typeInfoSource.Id);
-            byte[] typeInfoData = CloneRecordInfo(typeInfoLoaded.Resource.Data,
-                typeInfoSource.Id, typeInfoId, typeRegistry.Owner.Id, typeId, typeName);
-            resourceAdditions.Add(ToAddition(typeInfoLoaded.Location,
-                DataFile.CloneResource(typeInfoLoaded.Resource, typeInfoId, typeName, typeInfoData)));
+            byte[] typeInfoData = CloneRecordInfo(typeInfoLoaded.Resource.Data, typeInfoSource.Id, typeInfoId, typeRegistry.Owner.Id, typeId, typeName);
+            resourceAdditions.Add(ToAddition(typeInfoLoaded.Location, DataFile.CloneResource(typeInfoLoaded.Resource, typeInfoId, typeName, typeInfoData)));
 
-            var typeStoreRegistries = GunsmithAvailability.FindStoreRegistries(index,
-                typeInfoSource.Id);
+            var typeStoreRegistries = GunsmithAvailability.FindStoreRegistries(index, typeInfoSource.Id);
             if (typeStoreRegistries.Count == 0)
-                throw new InvalidOperationException(
-                    "The WPN_AT StoreObjectInfo is not listed in a confirmed StoreDBEntry registry.");
+                throw new InvalidOperationException("The WPN_AT StoreObjectInfo is not listed in a confirmed StoreDBEntry registry.");
             foreach (GunsmithAvailabilityList registry in typeStoreRegistries)
                 storeInsertions.Add((registry, typeInfoSource.Id, typeInfoId));
 
-            var typeDatabaseContainers = GunsmithAvailability.FindDatabaseContainerRegistries(index,
-                typeRegistry.Owner.Id);
+            var typeDatabaseContainers = GunsmithAvailability.FindDatabaseContainerRegistries(index, typeRegistry.Owner.Id);
             if (typeDatabaseContainers.Count == 0)
-                throw new InvalidOperationException(
-                    "The WPN_AT template is not present in a confirmed gameplay database container.");
+                throw new InvalidOperationException("The WPN_AT template is not present in a confirmed gameplay database container.");
             foreach (GunsmithAvailabilityList registry in typeDatabaseContainers)
                 databaseContainerInsertions.Add((registry, typeRegistry.Owner.Id, typeId));
 
-            var typeUnlockRegistries = GunsmithAvailability.FindUnlockRegistries(index,
-                typeRegistry.Owner.Id);
+            var typeUnlockRegistries = GunsmithAvailability.FindUnlockRegistries(index, typeRegistry.Owner.Id);
             if (typeUnlockRegistries.Count == 0)
-                throw new InvalidOperationException(
-                    "The WPN_AT template is not present in DBUnlockables_default.");
+                throw new InvalidOperationException("The WPN_AT template is not present in DBUnlockables_default.");
             foreach (GunsmithAvailabilityList registry in typeUnlockRegistries)
                 unlockInsertions.Add((registry, typeRegistry.Owner.Id, typeId));
         }
@@ -288,10 +235,8 @@ internal static class AttachmentAddPipeline
             {
                 var registryOrder = registry.RecordIds.ToList();
                 int templatePosition = registryOrder.IndexOf(category.ExemplarRecordId);
-                registryOrder.Insert(templatePosition >= 0 ? templatePosition + 1 : registryOrder.Count,
-                    recordId);
-                databaseChanges.AddRange(GunsmithAvailability.Rewrite([registry],
-                    new HashSet<ulong>(), new HashSet<ulong> { recordId }, registryOrder));
+                registryOrder.Insert(templatePosition >= 0 ? templatePosition + 1 : registryOrder.Count, recordId);
+                databaseChanges.AddRange(GunsmithAvailability.Rewrite([registry], new HashSet<ulong>(), new HashSet<ulong> { recordId }, registryOrder));
             }
         }
 
@@ -300,76 +245,53 @@ internal static class AttachmentAddPipeline
         if (draft.CreateUniqueBuildTag)
             databaseChanges.AddRange(BuildTagColumnMapChanges(index, category.Tag, buildTag));
 
-        var lootRegistries = GunsmithAvailability.FindLootRegistries(index,
-            category.ExemplarRecordId);
+        var lootRegistries = GunsmithAvailability.FindLootRegistries(index, category.ExemplarRecordId);
         foreach (GunsmithAvailabilityList registry in lootRegistries)
         {
             var registryOrder = registry.RecordIds.ToList();
             int templatePosition = registryOrder.IndexOf(category.ExemplarRecordId);
-            registryOrder.Insert(templatePosition >= 0 ? templatePosition + 1 : registryOrder.Count,
-                recordId);
-            databaseChanges.AddRange(GunsmithAvailability.Rewrite([registry],
-                new HashSet<ulong>(), new HashSet<ulong> { recordId }, registryOrder));
+            registryOrder.Insert(templatePosition >= 0 ? templatePosition + 1 : registryOrder.Count, recordId);
+            databaseChanges.AddRange(GunsmithAvailability.Rewrite([registry], new HashSet<ulong>(), new HashSet<ulong> { recordId }, registryOrder));
         }
         databaseChanges.AddRange(GunsmithAvailability.InsertAfterTemplates(unlockInsertions));
 
         if (draft.AddToGunsmith)
         {
             if (gunsmithLists.Count == 0)
-                throw new InvalidOperationException(
-                    "No confirmed Gunsmith owner list was found for the selected slot.");
+                throw new InvalidOperationException("No confirmed Gunsmith owner list was found for the selected slot.");
             var canonical = canonicalRecordOrder.Distinct().ToList();
             int templatePosition = canonical.IndexOf(templateMetadata.RecordId);
             var removed = new HashSet<ulong>();
             if (draft.ReplaceTemplate)
             {
                 if (templatePosition < 0)
-                    throw new InvalidOperationException(
-                        "The copied attachment is not present in this weapon's Gunsmith list.");
+                    throw new InvalidOperationException("The copied attachment is not present in this weapon's Gunsmith list.");
                 canonical[templatePosition] = recordId;
                 removed.Add(templateMetadata.RecordId);
             }
             else
                 canonical.Insert(templatePosition >= 0 ? templatePosition + 1 : canonical.Count, recordId);
-            databaseChanges.AddRange(GunsmithAvailability.Rewrite(gunsmithLists,
-                removed, new HashSet<ulong> { recordId }, canonical));
+            databaseChanges.AddRange(GunsmithAvailability.Rewrite(gunsmithLists, removed, new HashSet<ulong> { recordId }, canonical));
         }
 
         if (!draft.ReplaceTemplate)
         {
-            var mirrored = MirrorContainerCopies(archivePaths, localArchivePath,
-                localEntryIndex, table.Id, templateMetadata.BuildTag, buildTag,
-                templateModelSelectorId, modelSelectorId, 0, 0, "",
-                draft.ReuseTemplateCategory, preparedResourceData);
+            var mirrored = MirrorContainerCopies(archivePaths, localArchivePath, localEntryIndex, table.Id, templateMetadata.BuildTag, buildTag, templateModelSelectorId, modelSelectorId, 0, 0, "", draft.ReuseTemplateCategory, preparedResourceData);
             databaseChanges.AddRange(mirrored.Changes);
             resourceAdditions.AddRange(mirrored.Additions);
             if (!draft.ReuseTemplateCategory)
             {
-                databaseChanges.AddRange(MirrorSiblingVariants(archivePaths, localEntryName,
-                    templateMetadata.BuildTag, buildTag, templateModelSelectorId, modelSelectorId,
-                    0, 0, preparedResourceData));
+                databaseChanges.AddRange(MirrorSiblingVariants(archivePaths, localEntryName, templateMetadata.BuildTag, buildTag, templateModelSelectorId, modelSelectorId, 0, 0, preparedResourceData));
                 if (localResources.TryGetValue(table.Id, out Resource? leafTableResource))
-                    databaseChanges.AddRange(MirrorGunsmithPreviewFamily(archivePaths,
-                        localEntryName, leafTableResource.Name, templateMetadata.BuildTag,
-                        buildTag, gunsmithModelSelectorId, preparedResourceData));
+                    databaseChanges.AddRange(MirrorGunsmithPreviewFamily(archivePaths, localEntryName, leafTableResource.Name, templateMetadata.BuildTag, buildTag, gunsmithModelSelectorId, preparedResourceData));
             }
         }
 
-        var metadata = new BuildTableOptionMetadata(buildTag, stringId, draft.DisplayName, null,
-            templateMetadata.DescriptionStringId, templateMetadata.Description, recordId,
-            recordName, templateMetadata.RecordClassHash);
-        return new AttachmentAddPlan(tableData, localChanges, metadata, draft.AddToGunsmith, ownerNames,
-            databaseChanges, resourceAdditions, entryAdditions, previewResources, modelSelectorId);
+        var metadata = new BuildTableOptionMetadata(buildTag, stringId, draft.DisplayName, null, templateMetadata.DescriptionStringId, templateMetadata.Description, recordId, recordName, templateMetadata.RecordClassHash);
+        return new AttachmentAddPlan(tableData, localChanges, metadata, draft.AddToGunsmith, ownerNames, databaseChanges, resourceAdditions, entryAdditions, previewResources, modelSelectorId);
     }
 
-    // A BuildTag is not the identity of one attachment, it is its category. Measured over all
-    // 181 barrel records the game ships: 69 carry the medium tag, 57 the long one, 54 the short
-    // one, and no fourth value occurs. A freshly invented tag creates a category no registry
-    // knows, which is why such an option appears in the list with name and stats but the weapon
-    // is never built with it. A new option therefore takes a category this table does not use
-    // yet, along with the registry and an existing record of that category.
-    static AttachmentCategory ResolveFreeCategory(ArmoryIndex index, BuildTableAsset table,
-        BuildTableOptionMetadata templateMetadata, IReadOnlyCollection<ulong> ownerRecordIds)
+    static AttachmentCategory ResolveFreeCategory(ArmoryIndex index, BuildTableAsset table, BuildTableOptionMetadata templateMetadata, IReadOnlyCollection<ulong> ownerRecordIds)
     {
         var effective = index.DatabaseResources
             .GroupBy(resource => resource.Id)
@@ -382,9 +304,7 @@ internal static class AttachmentAddPipeline
         var templateRegistries = GunsmithAvailability.FindAttachmentTypeRegistries(index,
             templateMetadata.RecordId, templateMetadata.RecordClassHash);
         if (templateRegistries.Count != 1)
-            throw new InvalidOperationException(
-                "The selected template does not belong to exactly one confirmed attachment registry, "
-                + "so the categories of this slot cannot be read.");
+            throw new InvalidOperationException("The selected template does not belong to exactly one confirmed attachment registry, so the categories of this slot cannot be read.");
         GunsmithAvailabilityList templateRegistry = templateRegistries[0];
         uint registryClass = templateRegistry.Owner.ClassHash;
 
@@ -392,8 +312,7 @@ internal static class AttachmentAddPipeline
             .Select(id => effective.TryGetValue(id, out var owner) ? owner.ClassHash : 0u)
             .FirstOrDefault(hash => hash != 0);
         if (ownerClass == 0)
-            throw new InvalidOperationException(
-                "The gameplay owners of this BuildTable are not resolved, so the weapon family is unknown.");
+            throw new InvalidOperationException("The gameplay owners of this BuildTable are not resolved, so the weapon family is unknown.");
 
         var owners = effective.Values
             .Where(resource => resource.ClassHash == ownerClass)
@@ -426,15 +345,12 @@ internal static class AttachmentAddPipeline
             if (tags.Count != 1 || tags[0] == 0 || usedTags.Contains(tags[0]))
                 continue;
 
-            int shared = owners.Count(owner => templateOwners.Contains(owner.Id)
-                && members.Any(owner.Referenced.Contains));
+            int shared = owners.Count(owner => templateOwners.Contains(owner.Id) && members.Any(owner.Referenced.Contains));
             if (shared == 0)
                 continue;
 
             var matchingExemplars = members
-                .Where(id => registryCount[id] == 1
-                    && CategoryNeutralName(effective[id].Name)
-                        == CategoryNeutralName(templateMetadata.RecordName))
+                .Where(id => registryCount[id] == 1 && CategoryNeutralName(effective[id].Name) == CategoryNeutralName(templateMetadata.RecordName))
                 .ToList();
             ulong exemplar = matchingExemplars.Count == 1 ? matchingExemplars[0] : 0;
             if (exemplar == 0)
@@ -443,17 +359,11 @@ internal static class AttachmentAddPipeline
         }
 
         if (candidates.Count == 0)
-            throw new InvalidOperationException(
-                $"{templateRegistry.OwnerName} offers no attachment category that this slot does not "
-                + "already use. The game knows a fixed set of categories per slot, and this weapon "
-                + "already fills every one of them.");
+            throw new InvalidOperationException($"{templateRegistry.OwnerName} offers no attachment category that this slot does not already use.");
 
         var ordered = candidates.OrderByDescending(candidate => candidate.SharedOwners).ToList();
         if (ordered.Count > 1 && ordered[0].SharedOwners == ordered[1].SharedOwners)
-            throw new InvalidOperationException(
-                "Two attachment categories fit this slot equally well ("
-                + string.Join(", ", ordered.Take(2).Select(candidate => candidate.RegistryName))
-                + "), so the choice is not unambiguous.");
+            throw new InvalidOperationException("Two attachment categories fit this slot equally well (" + string.Join(", ", ordered.Take(2).Select(candidate => candidate.RegistryName)) + "), so the choice is not unambiguous.");
         return ordered[0];
     }
 
@@ -463,8 +373,7 @@ internal static class AttachmentAddPipeline
             .Replace("Short", "", StringComparison.OrdinalIgnoreCase)
             .Replace("Medium", "", StringComparison.OrdinalIgnoreCase)
             .Replace("Long", "", StringComparison.OrdinalIgnoreCase);
-        return new string(neutral.Where(char.IsLetterOrDigit)
-            .Select(char.ToUpperInvariant).ToArray());
+        return new string(neutral.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     }
 
     static List<ulong> MemberRecords(byte[] registry, IReadOnlySet<ulong> recordIds)
@@ -480,9 +389,7 @@ internal static class AttachmentAddPipeline
         return members;
     }
 
-    static byte[] AddOption(BuildTableAsset table, int templateRowIndex, uint newTag,
-        ulong templateModelSelectorId, ulong modelSelectorId,
-        ulong templateComponentId, ulong componentId)
+    static byte[] AddOption(BuildTableAsset table, int templateRowIndex, uint newTag, ulong templateModelSelectorId, ulong modelSelectorId, ulong templateComponentId, ulong componentId)
     {
         byte[] duplicated = table.DuplicateRow(templateRowIndex);
         var editedTable = BuildTable.Read(duplicated);
@@ -495,24 +402,20 @@ internal static class AttachmentAddPipeline
             .Where(reference => IsModelReference(reference) && reference.Value != 0)
             .ToList();
         if (templateSelectors.Count == 0 || clonedSelectors.Count != templateSelectors.Count)
-            throw new InvalidOperationException(
-                "The template row has no stable model-selector handle that can be cloned safely.");
+            throw new InvalidOperationException("The template row has no stable model-selector handle that can be cloned safely.");
         int selectorIndex = templateSelectors.FindIndex(reference =>
             reference.Value == templateModelSelectorId);
         if (selectorIndex < 0)
-            throw new InvalidOperationException(
-                "The confirmed template model selector moved before the row could be cloned.");
+            throw new InvalidOperationException("The confirmed template model selector moved before the row could be cloned.");
         BuildTableReference clonedSelector = clonedSelectors[selectorIndex];
         clonedSelector.Value = modelSelectorId;
         if (templateComponentId != 0)
         {
             var clonedComponents = editedTable.Rows[newRowIndex].References
-                .Where(reference => reference.Kind == BuildTableReferenceKind.FileReference
-                    && reference.Value == templateComponentId)
+                .Where(reference => reference.Kind == BuildTableReferenceKind.FileReference && reference.Value == templateComponentId)
                 .ToList();
             if (clonedComponents.Count != 1 || componentId == 0)
-                throw new InvalidOperationException(
-                    "The cloned attachment row did not retain exactly one component Skeleton reference.");
+                throw new InvalidOperationException("The cloned attachment row did not retain exactly one component Skeleton reference.");
             clonedComponents[0].Value = componentId;
         }
         byte[] tableData = editedTable.Write();
@@ -520,22 +423,13 @@ internal static class AttachmentAddPipeline
         var checkedTable = BuildTable.Read(tableData);
         if (checkedTable.RowCount != table.RowCount + 1
             || checkedTable.Rows[newRowIndex].Tag != newTag
-            || checkedTable.Rows.Zip(checkedTable.Rows.Skip(1))
-                .Any(pair => pair.First.Id >= pair.Second.Id)
-            || checkedTable.Rows[newRowIndex].References
-                .FirstOrDefault(reference => reference.Kind == BuildTableReferenceKind.Handle
-                    && reference.ComponentIndex == clonedSelector.ComponentIndex)?.Value != modelSelectorId
-            || templateComponentId != 0 && checkedTable.Rows[newRowIndex].References
-                .Count(reference => reference.Kind == BuildTableReferenceKind.FileReference
-                    && reference.Value == componentId) != 1)
+            || checkedTable.Rows.Zip(checkedTable.Rows.Skip(1)).Any(pair => pair.First.Id >= pair.Second.Id)
+            || checkedTable.Rows[newRowIndex].References.FirstOrDefault(reference => reference.Kind == BuildTableReferenceKind.Handle && reference.ComponentIndex == clonedSelector.ComponentIndex)?.Value != modelSelectorId
+            || templateComponentId != 0 && checkedTable.Rows[newRowIndex].References.Count(reference => reference.Kind == BuildTableReferenceKind.FileReference && reference.Value == componentId) != 1)
             throw new InvalidDataException("The new BuildTable option did not read back exactly.");
         return tableData;
     }
 
-    // The weapon container ships in the base archive and again in the patch, and both are
-    // mounted. Writing only the container that was opened leaves the other copy without the
-    // option, and which one a given part of the game reads is not ours to decide - so every
-    // installed copy gets the same row and the same BuildTags, each built from its own bytes.
     static (List<ArmoryDatabaseResourceChange> Changes,
         List<ArmoryArchiveResourceAddition> Additions) MirrorContainerCopies(
         IReadOnlyList<string> archivePaths, string localArchivePath, int localEntryIndex,
@@ -543,14 +437,12 @@ internal static class AttachmentAddPipeline
         ulong templateModelSelectorId, ulong modelSelectorId,
         ulong templateComponentId, ulong componentId, string componentName,
         bool reuseTemplateCategory,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData)
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         ulong containerId;
         using (var opened = ForgeArchive.Open(localArchivePath))
             containerId = opened.Entries.FirstOrDefault(entry => entry.Index == localEntryIndex)?.Id
-                ?? throw new InvalidOperationException(
-                    "The opened weapon container moved inside its Forge archive.");
+                ?? throw new InvalidOperationException("The opened weapon container moved inside its Forge archive.");
 
         uint entityBuilderHash = ResourceTypes.Crc32("EntityBuilder");
         var changes = new List<ArmoryDatabaseResourceChange>();
@@ -570,8 +462,7 @@ internal static class AttachmentAddPipeline
             ApplyPreparedResourceData(file, path, entry.Index, preparedResourceData);
             int leafIndex = file.Resources.FindIndex(resource => resource.Id == leafTableId);
             if (leafIndex < 0)
-                throw new InvalidOperationException(
-                    $"The copy of {entry.Name} in {Path.GetFileName(path)} does not hold the table this option belongs to.");
+                throw new InvalidOperationException($"The copy of {entry.Name} in {Path.GetFileName(path)} does not hold the table this option belongs to.");
 
             var copy = BuildTable.Read(file.Resources[leafIndex].Data);
             if (!reuseTemplateCategory && copy.Rows.Any(row => row.Tag == newTag))
@@ -579,41 +470,27 @@ internal static class AttachmentAddPipeline
             var templateRows = copy.Rows
                 .Select((row, index) => (row, index))
                 .Where(item => reuseTemplateCategory
-                    ? item.row.References.Any(reference =>
-                        IsModelReference(reference)
-                        && reference.Value == templateModelSelectorId)
+                    ? item.row.References.Any(reference => IsModelReference(reference) && reference.Value == templateModelSelectorId)
                     : item.row.Tag == templateTag)
                 .ToList();
             if (templateRows.Count > 1)
-                throw new InvalidOperationException(
-                    $"The copy of {file.Resources[leafIndex].Name} in {Path.GetFileName(path)} has more than one matching template row.");
+                throw new InvalidOperationException($"The copy of {file.Resources[leafIndex].Name} in {Path.GetFileName(path)} has more than one matching template row.");
             int templateRow = templateRows.Count == 1 ? templateRows[0].index : -1;
             if (templateRow < 0)
-                throw new InvalidOperationException(
-                    $"The copy of {file.Resources[leafIndex].Name} in {Path.GetFileName(path)} has no row for the selected template.");
+                throw new InvalidOperationException($"The copy of {file.Resources[leafIndex].Name} in {Path.GetFileName(path)} has no row for the selected template.");
 
-            changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, leafIndex,
-                file.Resources[leafIndex].Name,
-                AddOption(copy, templateRow, newTag, templateModelSelectorId, modelSelectorId,
-                    templateComponentId, componentId)));
+            changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, leafIndex, file.Resources[leafIndex].Name, AddOption(copy, templateRow, newTag, templateModelSelectorId, modelSelectorId, templateComponentId, componentId)));
 
             if (templateComponentId != 0)
             {
-                Resource component = file.Resources.SingleOrDefault(resource =>
-                        resource.Id == templateComponentId && resource.ClassHash == Skeleton.ClassHash)
-                    ?? throw new InvalidOperationException(
-                        $"The copy of {entry.Name} in {Path.GetFileName(path)} has no component Skeleton "
-                        + $"0x{templateComponentId:X}.");
+                Resource component = file.Resources.SingleOrDefault(resource => resource.Id == templateComponentId && resource.ClassHash == Skeleton.ClassHash)
+                    ?? throw new InvalidOperationException($"The copy of {entry.Name} in {Path.GetFileName(path)} has no component Skeleton 0x{templateComponentId:X}.");
                 byte[] componentData = (byte[])component.Data.Clone();
-                if (componentData.Length < sizeof(ulong)
-                    || BinaryPrimitives.ReadUInt64LittleEndian(componentData) != templateComponentId)
-                    throw new InvalidDataException(
-                        $"{component.Name} does not start with its own resource ID.");
+                if (componentData.Length < sizeof(ulong) || BinaryPrimitives.ReadUInt64LittleEndian(componentData) != templateComponentId)
+                    throw new InvalidDataException($"{component.Name} does not start with its own resource ID.");
                 BinaryPrimitives.WriteUInt64LittleEndian(componentData, componentId);
-                Resource clone = DataFile.CloneResource(component, componentId,
-                    componentName, componentData);
-                additions.Add(ToAddition(
-                    new ResourceLocation(path, entry.Index, entry.Name), clone));
+                Resource clone = DataFile.CloneResource(component, componentId, componentName, componentData);
+                additions.Add(ToAddition(new ResourceLocation(path, entry.Index, entry.Name), clone));
             }
 
             if (reuseTemplateCategory)
@@ -623,18 +500,15 @@ internal static class AttachmentAddPipeline
             for (int i = 0; i < file.Resources.Count; i++)
             {
                 Resource resource = file.Resources[i];
-                if (i == leafIndex || resource.ClassHash != BuildTable.ClassHash
-                    && resource.ClassHash != entityBuilderHash)
+                if (i == leafIndex || resource.ClassHash != BuildTable.ClassHash && resource.ClassHash != entityBuilderHash)
                     continue;
                 if (!TryAddBuildTag(resource.Data, templateTag, newTag, out byte[] updated))
                     continue;
-                changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, i,
-                    resource.Name, updated));
+                changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, i, resource.Name, updated));
                 tagged++;
             }
             if (tagged == 0)
-                throw new InvalidOperationException(
-                    $"The copy of {entry.Name} in {Path.GetFileName(path)} carries no BuildTags list for the selected template.");
+                throw new InvalidOperationException($"The copy of {entry.Name} in {Path.GetFileName(path)} carries no BuildTags list for the selected template.");
         }
         return (changes, additions);
     }
@@ -643,15 +517,13 @@ internal static class AttachmentAddPipeline
         IReadOnlyList<string> archivePaths, string familyName,
         uint templateTag, uint newTag, ulong templateModelSelectorId, ulong modelSelectorId,
         ulong templateComponentId, ulong componentId,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData)
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         var changes = new List<ArmoryDatabaseResourceChange>();
         foreach (string path in archivePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             using var archive = ForgeArchive.Open(path);
-            foreach (ForgeEntry entry in archive.Entries.Where(entry =>
-                         entry.Name.StartsWith(familyName + "_", StringComparison.OrdinalIgnoreCase)))
+            foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.Name.StartsWith(familyName + "_", StringComparison.OrdinalIgnoreCase)))
             {
                 using var stream = new MemoryStream(archive.ReadEntry(entry));
                 DataFile file = DataFile.Read(stream);
@@ -672,41 +544,27 @@ internal static class AttachmentAddPipeline
                         continue;
                     var templateRows = table.Rows
                         .Select((row, index) => (row, index))
-                        .Where(item => item.row.References.Any(reference =>
-                            IsModelReference(reference)
-                            && reference.Value == templateModelSelectorId))
+                        .Where(item => item.row.References.Any(reference => IsModelReference(reference) && reference.Value == templateModelSelectorId))
                         .ToList();
                     if (templateRows.Count == 0)
                         continue;
                     if (templateRows.Count != 1)
-                        throw new InvalidOperationException(
-                            resource.Name + " contains the template selector in more than one row.");
+                        throw new InvalidOperationException(resource.Name + " contains the template selector in more than one row.");
 
-                    changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name,
-                        resourceIndex, resource.Name,
-                        AddOption(table, templateRows[0].index, newTag,
-                            templateModelSelectorId, modelSelectorId,
-                            templateComponentId, componentId)));
-                    foreach (BuildTableResourceChange parent in BuildParentTagChanges(resource.Id,
-                                 templateTag, newTag, resources, resourceIndexes))
-                        changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name,
-                            parent.ResourceIndex, parent.Name, parent.Data));
+                    changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, resourceIndex, resource.Name,
+                        AddOption(table, templateRows[0].index, newTag, templateModelSelectorId, modelSelectorId, templateComponentId, componentId)));
+                    foreach (BuildTableResourceChange parent in BuildParentTagChanges(resource.Id, templateTag, newTag, resources, resourceIndexes))
+                        changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, parent.ResourceIndex, parent.Name, parent.Data));
                 }
             }
         }
         return changes;
     }
 
-    // Wildlands keeps the normal weapon assembly in W_* containers and a second, high-detail
-    // assembly for the interactive Gunsmith in WG_* containers. The two families deliberately
-    // use different stock model and component ids, so matching them by the W_* selector cannot
-    // work. Their BuildTags and slot-table names do match, however. Clone the corresponding WG
-    // row by tag and then point only its model handle at the imported selector used by W_*.
     static IReadOnlyList<ArmoryDatabaseResourceChange> MirrorGunsmithPreviewFamily(
         IReadOnlyList<string> archivePaths, string weaponFamilyName, string leafTableName,
         uint templateTag, uint newTag, ulong modelSelectorId,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData)
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         if (modelSelectorId == 0)
             return [];
@@ -723,10 +581,8 @@ internal static class AttachmentAddPipeline
         foreach (string path in archivePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             using var archive = ForgeArchive.Open(path);
-            foreach (ForgeEntry entry in archive.Entries.Where(candidate =>
-                         candidate.Name.Equals(previewFamilyName, StringComparison.OrdinalIgnoreCase)
-                         || candidate.Name.StartsWith(previewFamilyName + "_",
-                             StringComparison.OrdinalIgnoreCase)))
+            foreach (ForgeEntry entry in archive.Entries.Where(candidate => candidate.Name.Equals(previewFamilyName, StringComparison.OrdinalIgnoreCase)
+                         || candidate.Name.StartsWith(previewFamilyName + "_", StringComparison.OrdinalIgnoreCase)))
             {
                 using var stream = new MemoryStream(archive.ReadEntry(entry));
                 DataFile file = DataFile.Read(stream);
@@ -737,17 +593,12 @@ internal static class AttachmentAddPipeline
                     .ToDictionary(item => item.Id, item => item.index);
                 var leaves = file.Resources
                     .Select((resource, index) => (resource, index))
-                    .Where(item => item.resource.ClassHash == BuildTable.ClassHash
-                        && (item.resource.Name.Equals(previewLeafPrefix,
-                                StringComparison.OrdinalIgnoreCase)
-                            || item.resource.Name.StartsWith(previewLeafPrefix + "_",
-                                StringComparison.OrdinalIgnoreCase)))
+                    .Where(item => item.resource.ClassHash == BuildTable.ClassHash && (item.resource.Name.Equals(previewLeafPrefix, StringComparison.OrdinalIgnoreCase) || item.resource.Name.StartsWith(previewLeafPrefix + "_", StringComparison.OrdinalIgnoreCase)))
                     .ToList();
                 if (leaves.Count == 0)
                     continue;
                 if (leaves.Count != 1)
-                    throw new InvalidOperationException(
-                        $"{entry.Name} contains more than one Gunsmith preview table for {slotSuffix}.");
+                    throw new InvalidOperationException($"{entry.Name} contains more than one Gunsmith preview table for {slotSuffix}.");
 
                 var leaf = leaves[0];
                 BuildTableAsset previewTable = BuildTable.Read(leaf.resource.Data);
@@ -757,43 +608,29 @@ internal static class AttachmentAddPipeline
                     .Select((row, index) => (row, index))
                     .Where(item => item.row.Tag == templateTag)
                     .ToList();
-                // WG weapon families also contain context-specific siblings such as
-                // *_GRNetwork. They need not support every attachment category that
-                // the main interactive Gunsmith table supports. A missing template
-                // row therefore means that this sibling has nothing to mirror; it is
-                // not evidence that the attachment itself is invalid.
+                
                 if (templateRows.Count == 0)
                     continue;
                 if (templateRows.Count > 1)
-                    throw new InvalidOperationException(
-                        $"{leaf.resource.Name} contains the copied BuildTag more than once.");
+                    throw new InvalidOperationException($"{leaf.resource.Name} contains the copied BuildTag more than once.");
 
                 BuildTableRow templateRow = templateRows[0].row;
                 var modelHandles = templateRow.References
-                    .Where(reference => reference.Kind == BuildTableReferenceKind.Handle
-                        && reference.ComponentIndex == 1 && reference.Value != 0)
+                    .Where(reference => reference.Kind == BuildTableReferenceKind.Handle && reference.ComponentIndex == 1 && reference.Value != 0)
                     .ToList();
                 if (modelHandles.Count != 1)
-                    throw new InvalidOperationException(
-                        $"{leaf.resource.Name} does not contain exactly one primary Gunsmith model handle.");
+                    throw new InvalidOperationException($"{leaf.resource.Name} does not contain exactly one primary Gunsmith model handle.");
 
-                changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name,
-                    leaf.index, leaf.resource.Name,
-                    AddOption(previewTable, templateRows[0].index, newTag,
-                        modelHandles[0].Value, modelSelectorId, 0, 0)));
-                foreach (BuildTableResourceChange parent in BuildParentTagChanges(
-                             leaf.resource.Id, templateTag, newTag, resources, resourceIndexes))
-                    changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name,
-                        parent.ResourceIndex, parent.Name, parent.Data));
+                changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, leaf.index, leaf.resource.Name, AddOption(previewTable, templateRows[0].index, newTag, modelHandles[0].Value, modelSelectorId, 0, 0)));
+                foreach (BuildTableResourceChange parent in BuildParentTagChanges(leaf.resource.Id, templateTag, newTag, resources, resourceIndexes))
+                    changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, parent.ResourceIndex, parent.Name, parent.Data));
             }
         }
         return changes;
     }
 
-    static ulong FindGunsmithPreviewTemplateModel(IReadOnlyList<string> archivePaths,
-        string weaponFamilyName, string leafTableName, uint templateTag,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData)
+    static ulong FindGunsmithPreviewTemplateModel(IReadOnlyList<string> archivePaths, string weaponFamilyName, string leafTableName, uint templateTag,
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         if (!weaponFamilyName.StartsWith("W_", StringComparison.OrdinalIgnoreCase)
             || weaponFamilyName.StartsWith("WG_", StringComparison.OrdinalIgnoreCase)
@@ -806,33 +643,24 @@ internal static class AttachmentAddPipeline
         foreach (string path in archivePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             using var archive = ForgeArchive.Open(path);
-            foreach (ForgeEntry entry in archive.Entries.Where(candidate =>
-                         candidate.Name.Equals(previewFamilyName, StringComparison.OrdinalIgnoreCase)
-                         || candidate.Name.StartsWith(previewFamilyName + "_",
-                             StringComparison.OrdinalIgnoreCase)))
+            foreach (ForgeEntry entry in archive.Entries.Where(candidate => candidate.Name.Equals(previewFamilyName, StringComparison.OrdinalIgnoreCase)
+                || candidate.Name.StartsWith(previewFamilyName + "_", StringComparison.OrdinalIgnoreCase)))
             {
                 using var stream = new MemoryStream(archive.ReadEntry(entry));
                 DataFile file = DataFile.Read(stream);
                 ApplyPreparedResourceData(file, path, entry.Index, preparedResourceData);
-                foreach (Resource resource in file.Resources.Where(resource =>
-                             resource.ClassHash == BuildTable.ClassHash
-                             && (resource.Name.Equals(previewLeafPrefix,
-                                     StringComparison.OrdinalIgnoreCase)
-                                 || resource.Name.StartsWith(previewLeafPrefix + "_",
-                                     StringComparison.OrdinalIgnoreCase))))
+                foreach (Resource resource in file.Resources.Where(resource => resource.ClassHash == BuildTable.ClassHash && (resource.Name.Equals(previewLeafPrefix, StringComparison.OrdinalIgnoreCase)
+                    || resource.Name.StartsWith(previewLeafPrefix + "_", StringComparison.OrdinalIgnoreCase))))
                 {
                     BuildTableAsset table = BuildTable.Read(resource.Data);
                     foreach (BuildTableRow row in table.Rows.Where(row => row.Tag == templateTag))
                     {
-                        var handles = row.References.Where(reference =>
-                                reference.Kind == BuildTableReferenceKind.Handle
-                                && reference.ComponentIndex == 1 && reference.Value != 0)
+                        var handles = row.References.Where(reference => reference.Kind == BuildTableReferenceKind.Handle && reference.ComponentIndex == 1 && reference.Value != 0)
                             .Select(reference => reference.Value)
                             .Distinct()
                             .ToList();
                         if (handles.Count != 1)
-                            throw new InvalidOperationException(
-                                $"{resource.Name} does not contain exactly one primary Gunsmith model handle.");
+                            throw new InvalidOperationException($"{resource.Name} does not contain exactly one primary Gunsmith model handle.");
                         modelIds.Add(handles[0]);
                     }
                 }
@@ -843,14 +671,12 @@ internal static class AttachmentAddPipeline
         {
             0 => 0,
             1 => modelIds.Single(),
-            _ => throw new InvalidOperationException(
-                $"The Gunsmith preview copies of {previewLeafPrefix} disagree on their template model.")
+            _ => throw new InvalidOperationException($"The Gunsmith preview copies of {previewLeafPrefix} disagree on their template model.")
         };
     }
 
-    static IReadOnlyList<BuildTableResourceChange> BuildParentTagChanges(ulong leafTableId,
-        uint templateTag, uint newTag, IReadOnlyDictionary<ulong, Resource> localResources,
-        IReadOnlyDictionary<ulong, int> localResourceIndexes)
+    static IReadOnlyList<BuildTableResourceChange> BuildParentTagChanges(ulong leafTableId, uint templateTag, uint newTag,
+        IReadOnlyDictionary<ulong, Resource> localResources, IReadOnlyDictionary<ulong, int> localResourceIndexes)
     {
         uint entityBuilderHash = ResourceTypes.Crc32("EntityBuilder");
         var changes = new List<BuildTableResourceChange>();
@@ -859,15 +685,12 @@ internal static class AttachmentAddPipeline
 
         foreach (Resource resource in localResources.Values)
         {
-            if (resource.Id == leafTableId
-                || resource.ClassHash != BuildTable.ClassHash
-                    && resource.ClassHash != entityBuilderHash)
+            if (resource.Id == leafTableId || resource.ClassHash != BuildTable.ClassHash && resource.ClassHash != entityBuilderHash)
                 continue;
             if (!TryAddBuildTag(resource.Data, templateTag, newTag, out byte[] updated))
                 continue;
             if (!localResourceIndexes.TryGetValue(resource.Id, out int resourceIndex))
-                throw new InvalidOperationException(
-                    $"{resource.Name} has no stable resource index in the opened weapon container.");
+                throw new InvalidOperationException($"{resource.Name} has no stable resource index in the opened weapon container.");
 
             changes.Add(new BuildTableResourceChange(resourceIndex, resource.Name, updated));
             if (resource.ClassHash == BuildTable.ClassHash)
@@ -877,18 +700,16 @@ internal static class AttachmentAddPipeline
         }
 
         if (parentTables != 1 || entityBuilders != 1)
-            throw new InvalidOperationException(
-                "The attachment template did not resolve to exactly one parent BuildTable and one EntityBuilder BuildTags list.");
+            throw new InvalidOperationException("The attachment template did not resolve to exactly one parent BuildTable and one EntityBuilder BuildTags list.");
         return changes;
     }
 
-    static bool TryAddBuildTag(byte[] source, uint templateTag, uint newTag, out byte[] updated)
+    internal static bool TryAddBuildTag(byte[] source, uint templateTag, uint newTag, out byte[] updated)
     {
         const uint buildTagsHash = 0x11BD5345;
         const uint buildTagHash = 0xB332698E;
         const int entrySize = 16;
-        var matches = new List<(int CountOffset, int EntriesOffset, int Count, int TemplateIndex,
-            IReadOnlyList<ulong> ObjectIds)>();
+        var matches = new List<(int CountOffset, int EntriesOffset, int Count, int TemplateIndex, IReadOnlyList<ulong> ObjectIds)>();
 
         for (int markerOffset = sizeof(ulong); markerOffset + 8 <= source.Length; markerOffset++)
         {
@@ -897,8 +718,7 @@ internal static class AttachmentAddPipeline
             int countOffset = markerOffset + sizeof(uint);
             int count = BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(countOffset));
             int entriesOffset = countOffset + sizeof(int);
-            if (count is < 1 or > 10_000
-                || entriesOffset + (long)count * entrySize > source.Length)
+            if (count is < 1 or > 10_000 || entriesOffset + (long)count * entrySize > source.Length)
                 continue;
 
             var ids = new ulong[count];
@@ -928,19 +748,14 @@ internal static class AttachmentAddPipeline
             return false;
         }
         if (matches.Count != 1)
-            throw new InvalidOperationException(
-                "A parent resource contains more than one matching BuildTags list.");
+            throw new InvalidOperationException("A parent resource contains more than one matching BuildTags list.");
 
         var match = matches[0];
-        if (Enumerable.Range(0, match.Count).Any(item =>
-                BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(
-                    match.EntriesOffset + item * entrySize + 12)) == newTag))
+        if (Enumerable.Range(0, match.Count).Any(item => BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(match.EntriesOffset + item * entrySize + 12)) == newTag))
             throw new InvalidOperationException("The new BuildTag already exists in a parent resource.");
 
-        if (match.ObjectIds.Zip(match.ObjectIds.Skip(1))
-            .Any(pair => pair.First >= pair.Second))
-            throw new InvalidOperationException(
-                "The parent BuildTags list does not have ordered local object ids.");
+        if (match.ObjectIds.Zip(match.ObjectIds.Skip(1)).Any(pair => pair.First >= pair.Second))
+            throw new InvalidOperationException("The parent BuildTags list does not have ordered local object ids.");
         ulong newObjectId = match.ObjectIds[match.TemplateIndex] + 1;
         if (newObjectId is < 0xF0000000UL or > uint.MaxValue)
             throw new InvalidOperationException("The parent resource has no free local BuildTag object ID.");
@@ -971,40 +786,31 @@ internal static class AttachmentAddPipeline
         uint writtenTag = BinaryPrimitives.ReadUInt32LittleEndian(updated.AsSpan(insertAt + 12));
         var writtenIds = new List<ulong>(writtenCount);
         for (int item = 0; item < writtenCount; item++)
-            writtenIds.Add(BinaryPrimitives.ReadUInt64LittleEndian(updated.AsSpan(
-                match.EntriesOffset + item * entrySize)));
-        if (writtenCount != match.Count + 1 || writtenTag != newTag
-            || writtenIds.Zip(writtenIds.Skip(1)).Any(pair => pair.First >= pair.Second))
+            writtenIds.Add(BinaryPrimitives.ReadUInt64LittleEndian(updated.AsSpan(match.EntriesOffset + item * entrySize)));
+        if (writtenCount != match.Count + 1 || writtenTag != newTag || writtenIds.Zip(writtenIds.Skip(1)).Any(pair => pair.First >= pair.Second))
             throw new InvalidDataException("The parent BuildTags list did not retain its new entry.");
         return true;
     }
 
-    static IReadOnlyList<ArmoryDatabaseResourceChange> BuildTagColumnMapChanges(
-        ArmoryIndex index, uint templateTag, uint newTag)
+    internal static IReadOnlyList<ArmoryDatabaseResourceChange> BuildTagColumnMapChanges(ArmoryIndex index, uint templateTag, uint newTag)
     {
         var changes = new List<ArmoryDatabaseResourceChange>();
         foreach (var resource in index.DatabaseResources
                      .Where(resource => resource.ClassHash == BuildTagColumnMapClass)
-                     .GroupBy(resource => (resource.ArchivePath, resource.EntryIndex,
-                         resource.ResourceIndex))
+                     .GroupBy(resource => (resource.ArchivePath, resource.EntryIndex, resource.ResourceIndex))
                      .Select(group => group.Last()))
         {
-            if (!TryAddBuildTagColumnMapEntry(resource.Data, templateTag, newTag,
-                    out byte[] updated))
+            if (!TryAddBuildTagColumnMapEntry(resource.Data, templateTag, newTag, out byte[] updated))
                 continue;
-            changes.Add(new ArmoryDatabaseResourceChange(resource.ArchivePath,
-                resource.EntryIndex, resource.EntryName, resource.ResourceIndex,
-                resource.Name, updated));
+            changes.Add(new ArmoryDatabaseResourceChange(resource.ArchivePath, resource.EntryIndex, resource.EntryName, resource.ResourceIndex, resource.Name, updated));
         }
 
         if (changes.Count == 0)
-            throw new InvalidOperationException(
-                "No global BuildTag-to-column-mask map contains the copied attachment tag.");
+            throw new InvalidOperationException("No global BuildTag-to-column-mask map contains the copied attachment tag.");
         return changes;
     }
 
-    static bool TryAddBuildTagColumnMapEntry(byte[] source, uint templateTag,
-        uint newTag, out byte[] updated)
+    static bool TryAddBuildTagColumnMapEntry(byte[] source, uint templateTag, uint newTag, out byte[] updated)
     {
         const int entryStride = 21;
         var templateItems = FindTagColumnMapItems(source, templateTag);
@@ -1014,11 +820,9 @@ internal static class AttachmentAddPipeline
             return false;
         }
         if (templateItems.Count != 1)
-            throw new InvalidOperationException(
-                "A global BuildTag-to-column-mask map contains the copied tag more than once.");
+            throw new InvalidOperationException("A global BuildTag-to-column-mask map contains the copied tag more than once.");
         if (FindTagColumnMapItems(source, newTag).Count != 0)
-            throw new InvalidOperationException(
-                "The new BuildTag already exists in a global BuildTag-to-column-mask map.");
+            throw new InvalidOperationException("The new BuildTag already exists in a global BuildTag-to-column-mask map.");
 
         int templateStart = templateItems[0];
         int runStart = templateStart;
@@ -1029,31 +833,24 @@ internal static class AttachmentAddPipeline
             runEnd += entryStride;
 
         int countOffset = runStart - 24;
-        if (countOffset < 1 || source[countOffset - 1] != 1
-            || countOffset + 16 > source.Length
-            || BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(countOffset + 12))
-                != BuildTagColumnEntryMarker)
-            throw new InvalidDataException(
-                "The global BuildTag-to-column-mask entry has no readable list header.");
+        if (countOffset < 1 || source[countOffset - 1] != 1 || countOffset + 16 > source.Length || BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(countOffset + 12)) != BuildTagColumnEntryMarker)
+            throw new InvalidDataException("The global BuildTag-to-column-mask entry has no readable list header.");
 
         int regularCount = (runEnd - runStart) / entryStride + 1;
         int count = BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(countOffset));
         if (count != regularCount + 1)
-            throw new InvalidDataException(
-                "The global BuildTag-to-column-mask list count does not match its entries.");
+            throw new InvalidDataException("The global BuildTag-to-column-mask list count does not match its entries.");
 
         ulong maximumLocalId = 0;
         for (int offset = 0; offset <= source.Length - sizeof(ulong); offset++)
         {
             ulong candidate = BinaryPrimitives.ReadUInt64LittleEndian(source.AsSpan(offset));
-            if (candidate is >= 0xF8000000UL and < 0xF9000000UL
-                && candidate > maximumLocalId)
+            if (candidate is >= 0xF8000000UL and < 0xF9000000UL && candidate > maximumLocalId)
                 maximumLocalId = candidate;
         }
         ulong newLocalId = maximumLocalId + 1;
         if (newLocalId is < 0xF8000000UL or >= 0xF9000000UL)
-            throw new InvalidOperationException(
-                "The global BuildTag-to-column-mask map has no free local object ID.");
+            throw new InvalidOperationException("The global BuildTag-to-column-mask map has no free local object ID.");
 
         int insertAt = runEnd + entryStride;
         updated = new byte[checked(source.Length + entryStride)];
@@ -1065,10 +862,8 @@ internal static class AttachmentAddPipeline
         BinaryPrimitives.WriteInt32LittleEndian(updated.AsSpan(countOffset), count + 1);
 
         if (BinaryPrimitives.ReadInt32LittleEndian(updated.AsSpan(countOffset)) != count + 1
-            || BinaryPrimitives.ReadUInt32LittleEndian(updated.AsSpan(insertAt + 13)) != newTag
-            || FindTagColumnMapItems(updated, newTag).Count != 1)
-            throw new InvalidDataException(
-                "The global BuildTag-to-column-mask map did not retain its new entry.");
+            || BinaryPrimitives.ReadUInt32LittleEndian(updated.AsSpan(insertAt + 13)) != newTag || FindTagColumnMapItems(updated, newTag).Count != 1)
+            throw new InvalidDataException("The global BuildTag-to-column-mask map did not retain its new entry.");
         return true;
     }
 
@@ -1092,13 +887,10 @@ internal static class AttachmentAddPipeline
         return results;
     }
 
-    static bool IsTagColumnMapEntry(ReadOnlySpan<byte> data, int offset) =>
-        offset >= 0 && offset + 21 <= data.Length
-        && data[offset] == 1
-        && BinaryPrimitives.ReadUInt32LittleEndian(data[(offset + 9)..])
-            == BuildTagColumnEntryMarker;
+    static bool IsTagColumnMapEntry(ReadOnlySpan<byte> data, int offset) => offset >= 0 && offset + 21 <= data.Length && data[offset] == 1
+        && BinaryPrimitives.ReadUInt32LittleEndian(data[(offset + 9)..]) == BuildTagColumnEntryMarker;
 
-    static (Resource Resource, ResourceLocation Location) LoadIndexedResource(ArmoryIndex index, ulong id)
+    internal static (Resource Resource, ResourceLocation Location) LoadIndexedResource(ArmoryIndex index, ulong id)
     {
         var indexed = index.DatabaseResources.LastOrDefault(resource => resource.Id == id)
             ?? throw new InvalidOperationException($"Gameplay record 0x{id:X} is not present in the Armory index.");
@@ -1116,34 +908,26 @@ internal static class AttachmentAddPipeline
         return (resource, new ResourceLocation(indexed.ArchivePath, indexed.EntryIndex, indexed.EntryName));
     }
 
-    static byte[] CloneAttachmentTypeRegistry(GunsmithAvailabilityList template,
-        ulong newId, uint oldTag, uint newTag, ulong memberId)
+    static byte[] CloneAttachmentTypeRegistry(GunsmithAvailabilityList template, ulong newId, uint oldTag, uint newTag, ulong memberId)
     {
         byte[] result = GunsmithAvailability.RewriteMembers(template, [memberId]);
-        if (result.Length < sizeof(ulong)
-            || BinaryPrimitives.ReadUInt64LittleEndian(result) != template.Owner.Id)
-            throw new InvalidDataException(
-                "The WPN_AT attachment-type template does not start with its resource ID.");
+        if (result.Length < sizeof(ulong) || BinaryPrimitives.ReadUInt64LittleEndian(result) != template.Owner.Id)
+            throw new InvalidDataException("The WPN_AT attachment-type template does not start with its resource ID.");
 
         int markerOffset = template.CountOffset - 12;
         int tagOffset = template.CountOffset - 8;
-        if (markerOffset < 12
-            || tagOffset + sizeof(uint) > result.Length
-            || BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(markerOffset)) != BuildTagMarker
+        if (markerOffset < 12 || tagOffset + sizeof(uint) > result.Length || BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(markerOffset)) != BuildTagMarker
             || BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(tagOffset)) != oldTag)
-            throw new InvalidDataException(
-                "The WPN_AT attachment-type template has no BuildTag immediately before its member list.");
+            throw new InvalidDataException("The WPN_AT attachment-type template has no BuildTag immediately before its member list.");
 
         BinaryPrimitives.WriteUInt64LittleEndian(result, newId);
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(tagOffset), newTag);
-        if (BinaryPrimitives.ReadUInt64LittleEndian(result) != newId
-            || BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(tagOffset)) != newTag)
+        if (BinaryPrimitives.ReadUInt64LittleEndian(result) != newId || BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(tagOffset)) != newTag)
             throw new InvalidDataException("The cloned WPN_AT attachment type did not retain its new identity.");
         return result;
     }
 
-    static byte[] CloneGameplayRecord(byte[] source, ulong oldId, ulong newId,
-        uint buildTag, uint stringId)
+    internal static byte[] CloneGameplayRecord(byte[] source, ulong oldId, ulong newId, uint buildTag, uint stringId)
     {
         byte[] result = (byte[])source.Clone();
         if (result.Length < 12 || BinaryPrimitives.ReadUInt64LittleEndian(result) != oldId)
@@ -1164,12 +948,7 @@ internal static class AttachmentAddPipeline
         return result;
     }
 
-    // Every one of the 180 attachment records the game ships carries a same-named
-    // StoreObjectInfo beside it (class 0x36C9CB38): the internal name as UTF-16 and, at its
-    // end, the id of the record it belongs to. 4028 of the 4033 in the container are listed in
-    // StoreDBEntry_default. The clone was the only record of the 181 without one.
-    static byte[] CloneRecordInfo(byte[] source, ulong oldInfoId, ulong newInfoId,
-        ulong oldRecordId, ulong newRecordId, string name)
+    internal static byte[] CloneRecordInfo(byte[] source, ulong oldInfoId, ulong newInfoId, ulong oldRecordId, ulong newRecordId, string name)
     {
         if (source.Length < 24 || BinaryPrimitives.ReadUInt64LittleEndian(source) != oldInfoId)
             throw new InvalidDataException("The template StoreObjectInfo does not start with its resource ID.");
@@ -1180,9 +959,6 @@ internal static class AttachmentAddPipeline
         int countOffset = marker + 8;
         int characters = BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(countOffset));
         int stringOffset = countOffset + sizeof(int);
-        // The name is counted in characters, stored as UTF-16 and closed by a *single* zero
-        // byte - not by a two-byte UTF-16 terminator. Reading one byte too many drops the
-        // object tag behind it, and the game then stops reading the whole StoreObjectInfo.
         if (characters < 0 || stringOffset + characters * 2 + 1 > source.Length)
             throw new InvalidDataException("The template StoreObjectInfo has an invalid name length.");
 
@@ -1206,20 +982,16 @@ internal static class AttachmentAddPipeline
         return result;
     }
 
-    static bool Names(byte[] data, ulong id)
+    internal static bool Names(byte[] data, ulong id)
     {
         Span<byte> needle = stackalloc byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64LittleEndian(needle, id);
         return data.AsSpan().IndexOf(needle) >= 0;
     }
 
-    static bool IsModelReference(BuildTableReference reference) =>
-        reference.Kind == BuildTableReferenceKind.Handle
-        || reference.Kind == BuildTableReferenceKind.ObjectPointer
-            && reference.ComponentIndex is not null;
+    static bool IsModelReference(BuildTableReference reference) => reference.Kind == BuildTableReferenceKind.Handle || reference.Kind == BuildTableReferenceKind.ObjectPointer && reference.ComponentIndex is not null;
 
-    static void SetModelReferenceStorage(byte[] tableData, int idOffset,
-        BuildTableReferenceKind kind)
+    static void SetModelReferenceStorage(byte[] tableData, int idOffset, BuildTableReferenceKind kind)
     {
         int typeOffset = idOffset - sizeof(ulong) - 1;
         int tagOffset = idOffset - 1;
@@ -1228,19 +1000,16 @@ internal static class AttachmentAddPipeline
 
         uint current = BinaryPrimitives.ReadUInt32LittleEndian(tableData.AsSpan(typeOffset));
         if (current is not (DynamicHandleType or DynamicObjectPointerType))
-            throw new InvalidDataException(
-                $"The cloned model reference uses unsupported storage type 0x{current:X8}.");
+            throw new InvalidDataException($"The cloned model reference uses unsupported storage type 0x{current:X8}.");
 
         switch (kind)
         {
             case BuildTableReferenceKind.ObjectPointer:
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    tableData.AsSpan(typeOffset), DynamicObjectPointerType);
+                BinaryPrimitives.WriteUInt32LittleEndian(tableData.AsSpan(typeOffset), DynamicObjectPointerType);
                 tableData[tagOffset] = 1;
                 break;
             case BuildTableReferenceKind.Handle:
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    tableData.AsSpan(typeOffset), DynamicHandleType);
+                BinaryPrimitives.WriteUInt32LittleEndian(tableData.AsSpan(typeOffset), DynamicHandleType);
                 tableData[tagOffset] = 0;
                 break;
             default:
@@ -1248,29 +1017,19 @@ internal static class AttachmentAddPipeline
         }
     }
 
-    // A model the game can reach is always the first resource of a Forge entry that carries
-    // its id, and a LODSelector keeps LOD0 in a second entry beside it. Measured over
-    // DataPC.forge: 29,637 of 29,637 containers start with the resource their entry is named
-    // after, and 2,487 of 2,487 model handles in the 843 weapon BuildTables name such an
-    // entry. A model resource added to another container is never resolved, so the clone is
-    // published as new Forge entries that copy the layout of the ones it came from.
-    static ModelClonePlan CloneModelResources(AddAttachmentDraft draft, ulong sourceId,
-        IReadOnlyList<string> archivePaths, string localArchivePath, int localEntryIndex,
-        HashSet<ulong> usedIds, IDictionary<string, ulong> sharedTextureIds)
+    internal static ModelClonePlan CloneModelResources(AddAttachmentDraft draft, ulong sourceId, IReadOnlyList<string> archivePaths,
+        string localArchivePath, int localEntryIndex, HashSet<ulong> usedIds, IDictionary<string, ulong> sharedTextureIds)
     {
         ModelFile source = LoadModelFiles(archivePaths, new HashSet<ulong> { sourceId }).FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                $"Model 0x{sourceId:X} is not the first resource of a Forge entry, so it cannot be cloned into one.");
+            ?? throw new InvalidOperationException($"Model 0x{sourceId:X} is not the first resource of a Forge entry, so it cannot be cloned into one.");
         Resource root = source.File.Resources[0];
         uint lodSelectorHash = ResourceTypes.Crc32("LODSelector");
         if (root.ClassHash != Mesh.ClassHash && root.ClassHash != lodSelectorHash)
-            throw new InvalidOperationException(
-                $"{root.Name} is {ResourceTypes.NameOf(root.ClassHash)}, not a Mesh or LODSelector.");
+            throw new InvalidOperationException($"{root.Name} is {ResourceTypes.NameOf(root.ClassHash)}, not a Mesh or LODSelector.");
 
         var files = new List<ModelFile> { source };
         if (root.ClassHash != Mesh.ClassHash)
-            files.AddRange(LoadModelFiles(archivePaths, ReferencedIds(root.Data, sourceId))
-                .Where(file => file.File.Resources[0].ClassHash == Mesh.ClassHash));
+            files.AddRange(LoadModelFiles(archivePaths, ReferencedIds(root.Data, sourceId)).Where(file => file.File.Resources[0].ClassHash == Mesh.ClassHash));
 
         var oldIds = files.SelectMany(file => file.File.Resources)
             .Where(resource => resource.ClassHash == Mesh.ClassHash || resource.Id == root.Id)
@@ -1285,8 +1044,7 @@ internal static class AttachmentAddPipeline
             usedIds.UnionWith(file.File.Resources.Select(resource => resource.Id));
         ReserveInstalledIds(archivePaths, range, usedIds);
 
-        var newIds = AllocateAssetIds(oldIds.Count, usedIds, draft.InternalName,
-            range.Minimum, range.MaximumExclusive);
+        var newIds = AllocateAssetIds(oldIds.Count, usedIds, draft.InternalName, range.Minimum, range.MaximumExclusive);
         var map = oldIds.Zip(newIds).ToDictionary(pair => pair.First, pair => pair.Second);
 
         ImportedGeometry geometry = Path.GetExtension(draft.ModelOrAsset)
@@ -1300,20 +1058,15 @@ internal static class AttachmentAddPipeline
         ulong customResourceOwner = 0;
         if (draft.Textures.Any)
         {
-            customResources = CloneSurfaceResources(draft, geometry, files, archivePaths,
-                localArchivePath, usedIds, sharedTextureIds, additions,
-                out customMaterialIds, out customResourceOwner);
+            customResources = CloneSurfaceResources(draft, geometry, files, archivePaths, localArchivePath, usedIds, sharedTextureIds, additions, out customMaterialIds, out customResourceOwner);
         }
 
-        // Every mesh is built before the first container is written, because the LODSelector
-        // has to be told how large the LOD it streams from a file of its own has become.
         var meshes = new Dictionary<ulong, ClonedMesh>();
         foreach (ModelFile file in files)
         {
             foreach (Resource resource in file.File.Resources)
             {
-                if (resource.ClassHash != Mesh.ClassHash
-                    || !map.TryGetValue(resource.Id, out ulong newMeshId))
+                if (resource.ClassHash != Mesh.ClassHash || !map.TryGetValue(resource.Id, out ulong newMeshId))
                     continue;
 
                 Mesh mesh = Mesh.Read(resource.Data);
@@ -1323,16 +1076,10 @@ internal static class AttachmentAddPipeline
                 if (customMaterialIds.Count > 0)
                 {
                     for (int i = 0; i < mesh.Materials.Count; i++)
-                        mesh.Materials[i].MaterialId = customMaterialIds[
-                            Math.Min(i, customMaterialIds.Count - 1)];
+                        mesh.Materials[i].MaterialId = customMaterialIds[Math.Min(i, customMaterialIds.Count - 1)];
                     for (int i = 0; i < mesh.Instancing.Count; i++)
-                        mesh.Instancing[i].MaterialId = customMaterialIds[
-                            Math.Min(i, customMaterialIds.Count - 1)];
+                        mesh.Instancing[i].MaterialId = customMaterialIds[Math.Min(i, customMaterialIds.Count - 1)];
                 }
-                // Resource-id remapping must never scan serialized GPU buffers: an eight-byte
-                // vertex or index pattern can coincidentally equal an old asset id. The Mesh
-                // resource owns no LOD-selector resource references; its resource id was set
-                // structurally above, while selector references are remapped in their own data.
                 byte[] meshData = mesh.Write();
                 BinaryPrimitives.WriteUInt64LittleEndian(meshData, newMeshId);
                 Mesh.Read(meshData);
@@ -1348,8 +1095,6 @@ internal static class AttachmentAddPipeline
             for (int i = 0; i < rebuilt.Resources.Count; i++)
             {
                 Resource resource = rebuilt.Resources[i];
-                // The material and the texture set stay at the id they have in the entry this
-                // clone came from, exactly as the game stores them twice itself.
                 if (!map.TryGetValue(resource.Id, out ulong newId))
                     continue;
 
@@ -1365,17 +1110,14 @@ internal static class AttachmentAddPipeline
                     UpdateStreamedLodSizes(data, meshes.Values);
                 }
 
-                Resource clone = DataFile.CloneResource(resource, newId,
-                    Rename(resource.Name, root.Name, draft.InternalName), data);
+                Resource clone = DataFile.CloneResource(resource, newId, Rename(resource.Name, root.Name, draft.InternalName), data);
                 rebuilt.Resources[i] = clone;
                 resources.Add(clone);
             }
 
             if (customResources.Count > 0)
             {
-                rebuilt.Resources.RemoveAll(resource =>
-                    resource.ClassHash == Material.ClassHash
-                    || resource.ClassHash == TextureSet.ClassHash);
+                rebuilt.Resources.RemoveAll(resource => resource.ClassHash == Material.ClassHash || resource.ClassHash == TextureSet.ClassHash);
                 if (file.EntryId == customResourceOwner)
                 {
                     rebuilt.Resources.AddRange(customResources.Select(resource => new Resource
@@ -1392,38 +1134,29 @@ internal static class AttachmentAddPipeline
 
             ulong newEntryId = map[file.EntryId];
             if (rebuilt.Resources[0].Id != newEntryId)
-                throw new InvalidDataException(
-                    $"The cloned container for {file.EntryName} does not start with its own resource.");
+                throw new InvalidDataException($"The cloned container for {file.EntryName} does not start with its own resource.");
 
             using var output = new MemoryStream();
             rebuilt.Write(output);
             byte[] info = (byte[])file.Info.Clone();
-            BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4),
-                Candidate64("forge-entry:" + draft.InternalName + ":" + file.EntryName, 0));
-            additions.Add(new ArmoryArchiveEntryAddition(file.ArchivePath, newEntryId,
-                Rename(file.EntryName, source.EntryName, draft.InternalName),
+            BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4), Candidate64("forge-entry:" + draft.InternalName + ":" + file.EntryName, 0));
+            additions.Add(new ArmoryArchiveEntryAddition(file.ArchivePath, newEntryId, Rename(file.EntryName, source.EntryName, draft.InternalName),
                 rebuilt.Resources[0].ClassHash, info, output.ToArray(), file.PrefetchBlock));
         }
 
         return new ModelClonePlan(map[root.Id], additions, resources);
     }
 
-    static List<Resource> CloneSurfaceResources(AddAttachmentDraft draft,
-        ImportedGeometry geometry, IReadOnlyList<ModelFile> files,
-        IReadOnlyList<string> archivePaths, string localArchivePath,
-        HashSet<ulong> usedIds, IDictionary<string, ulong> sharedTextureIds,
-        List<ArmoryArchiveEntryAddition> additions, out List<ulong> materialIds,
-        out ulong resourceOwner)
+    static List<Resource> CloneSurfaceResources(AddAttachmentDraft draft, ImportedGeometry geometry, IReadOnlyList<ModelFile> files,
+        IReadOnlyList<string> archivePaths, string localArchivePath, HashSet<ulong> usedIds, IDictionary<string, ulong> sharedTextureIds,
+        List<ArmoryArchiveEntryAddition> additions, out List<ulong> materialIds, out ulong resourceOwner)
     {
         var sourceResources = files.SelectMany(file => file.File.Resources).ToList();
-        ModelFile owner = files.FirstOrDefault(file => file.File.Resources.Any(resource =>
-                resource.ClassHash == Material.ClassHash))
-            ?? throw new InvalidOperationException(
-                "The selected model template carries no clonable Material resource.");
+        ModelFile owner = files.FirstOrDefault(file => file.File.Resources.Any(resource => resource.ClassHash == Material.ClassHash))
+            ?? throw new InvalidOperationException("The selected model template carries no clonable Material resource.");
         resourceOwner = owner.EntryId;
 
-        Resource sourceMeshResource = sourceResources.FirstOrDefault(resource =>
-                resource.ClassHash == Mesh.ClassHash)
+        Resource sourceMeshResource = sourceResources.FirstOrDefault(resource => resource.ClassHash == Mesh.ClassHash)
             ?? throw new InvalidOperationException("The model template carries no Mesh resource.");
         Mesh sourceMesh = Mesh.Read(sourceMeshResource.Data);
         if (sourceMesh.Materials.Count == 0)
@@ -1434,19 +1167,14 @@ internal static class AttachmentAddPipeline
         int ranges = Math.Max(1, geometry.Groups.Count);
         for (int range = 0; range < ranges; range++)
         {
-            ulong sourceMaterialId = sourceMesh.Materials[
-                Math.Min(range, sourceMesh.Materials.Count - 1)].MaterialId;
-            Resource sourceMaterial = sourceResources.FirstOrDefault(resource =>
-                    resource.Id == sourceMaterialId && resource.ClassHash == Material.ClassHash)
+            ulong sourceMaterialId = sourceMesh.Materials[Math.Min(range, sourceMesh.Materials.Count - 1)].MaterialId;
+            Resource sourceMaterial = sourceResources.FirstOrDefault(resource => resource.Id == sourceMaterialId && resource.ClassHash == Material.ClassHash)
                 ?? sourceResources.FirstOrDefault(resource => resource.ClassHash == Material.ClassHash)
-                ?? throw new InvalidOperationException(
-                    $"Material 0x{sourceMaterialId:X} is not present beside the model template.");
+                ?? throw new InvalidOperationException($"Material 0x{sourceMaterialId:X} is not present beside the model template.");
             Material material = Material.Read(sourceMaterial.Data);
-            Resource sourceSet = sourceResources.FirstOrDefault(resource =>
-                    resource.Id == material.TextureSetId && resource.ClassHash == TextureSet.ClassHash)
+            Resource sourceSet = sourceResources.FirstOrDefault(resource => resource.Id == material.TextureSetId && resource.ClassHash == TextureSet.ClassHash)
                 ?? sourceResources.FirstOrDefault(resource => resource.ClassHash == TextureSet.ClassHash)
-                ?? throw new InvalidOperationException(
-                    $"TextureSet 0x{material.TextureSetId:X} is not present beside the model template.");
+                ?? throw new InvalidOperationException($"TextureSet 0x{material.TextureSetId:X} is not present beside the model template.");
             TextureSet set = TextureSet.Read(sourceSet.Data);
 
             var textureMap = new Dictionary<ulong, ulong>();
@@ -1457,13 +1185,11 @@ internal static class AttachmentAddPipeline
                     continue;
                 ulong templateTextureId = set.Find(slot);
                 if (templateTextureId == 0)
-                    throw new InvalidOperationException(
-                        $"The selected gameplay template has no {slot} texture slot.");
+                    throw new InvalidOperationException($"The selected gameplay template has no {slot} texture slot.");
                 string key = slot + "|" + Path.GetFullPath(path);
                 if (!sharedTextureIds.TryGetValue(key, out ulong textureId))
                 {
-                    textureId = CloneTextureEntries(draft.InternalName, slot, path,
-                        templateTextureId, archivePaths, localArchivePath, usedIds, additions);
+                    textureId = CloneTextureEntries(draft.InternalName, slot, path, templateTextureId, archivePaths, localArchivePath, usedIds, additions);
                     sharedTextureIds[key] = textureId;
                 }
                 textureMap[templateTextureId] = textureId;
@@ -1472,8 +1198,7 @@ internal static class AttachmentAddPipeline
             ulong setId = Allocate64($"texture-set:{draft.InternalName}:{range}", usedIds);
             byte[] setData = RemapResourceIds(sourceSet.Data, textureMap);
             BinaryPrimitives.WriteUInt64LittleEndian(setData, setId);
-            Resource clonedSet = DataFile.CloneResource(sourceSet, setId,
-                $"{draft.InternalName}_Set_{range + 1}", setData);
+            Resource clonedSet = DataFile.CloneResource(sourceSet, setId, $"{draft.InternalName}_Set_{range + 1}", setData);
 
             ulong materialId = Allocate64($"material:{draft.InternalName}:{range}", usedIds);
             var materialMap = new Dictionary<ulong, ulong>(textureMap)
@@ -1482,8 +1207,7 @@ internal static class AttachmentAddPipeline
             };
             byte[] materialData = RemapResourceIds(sourceMaterial.Data, materialMap);
             BinaryPrimitives.WriteUInt64LittleEndian(materialData, materialId);
-            Resource clonedMaterial = DataFile.CloneResource(sourceMaterial, materialId,
-                $"{draft.InternalName}_Material_{range + 1}", materialData);
+            Resource clonedMaterial = DataFile.CloneResource(sourceMaterial, materialId, $"{draft.InternalName}_Material_{range + 1}", materialData);
 
             cloned.Add(clonedMaterial);
             cloned.Add(clonedSet);
@@ -1492,35 +1216,24 @@ internal static class AttachmentAddPipeline
         return cloned;
     }
 
-    static ulong CloneTextureEntries(string internalName, string slot, string imagePath,
-        ulong templateTextureId, IReadOnlyList<string> archivePaths, string targetArchivePath,
-        HashSet<ulong> usedIds, List<ArmoryArchiveEntryAddition> additions)
+    static ulong CloneTextureEntries(string internalName, string slot, string imagePath, ulong templateTextureId, IReadOnlyList<string> archivePaths,
+        string targetArchivePath, HashSet<ulong> usedIds, List<ArmoryArchiveEntryAddition> additions)
     {
-        ModelFile source = LoadModelFiles(archivePaths,
-                new HashSet<ulong> { templateTextureId }).FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                $"The template {slot} texture 0x{templateTextureId:X} has no Forge entry.");
-        Resource root = source.File.Resources.FirstOrDefault(resource =>
-                resource.Id == templateTextureId && resource.ClassHash == TextureMap.ClassHash)
-            ?? throw new InvalidOperationException(
-                $"The template {slot} entry does not contain a TextureMap.");
+        ModelFile source = LoadModelFiles(archivePaths, new HashSet<ulong> { templateTextureId }).FirstOrDefault()
+            ?? throw new InvalidOperationException($"The template {slot} texture 0x{templateTextureId:X} has no Forge entry.");
+        Resource root = source.File.Resources.FirstOrDefault(resource => resource.Id == templateTextureId && resource.ClassHash == TextureMap.ClassHash)
+            ?? throw new InvalidOperationException($"The template {slot} entry does not contain a TextureMap.");
         TextureMap texture = TextureMap.Read(root.Data);
-        List<byte[]> levels = TextureImporter.LevelsFor(imagePath, texture,
-            generateMips: false, out _, out int width, out int height);
+        List<byte[]> levels = TextureImporter.LevelsFor(imagePath, texture, generateMips: false, out _, out int width, out int height);
         if (levels.Count < texture.MipCount)
-            throw new InvalidDataException(
-                $"The {slot} image is {width} x {height} and produces {levels.Count} mip levels, "
-                + $"but the template needs {texture.MipCount}. Choose a larger image.");
+            throw new InvalidDataException($"The {slot} image is {width} x {height} and produces {levels.Count} mip levels, but the template needs {texture.MipCount}. Choose a larger image.");
 
         var oldIds = new List<ulong> { templateTextureId };
         oldIds.AddRange(texture.StreamedMips);
-        var map = oldIds.ToDictionary(id => id,
-            id => Allocate64($"texture:{internalName}:{slot}:{id:X}", usedIds));
+        var map = oldIds.ToDictionary(id => id, id => Allocate64($"texture:{internalName}:{slot}:{id:X}", usedIds));
         var files = LoadModelFiles(archivePaths, oldIds.ToHashSet());
-        if (files.SelectMany(file => file.File.Resources).Count(resource =>
-                map.ContainsKey(resource.Id)) != oldIds.Count)
-            throw new InvalidOperationException(
-                $"Not every streamed resource of the template {slot} texture was found.");
+        if (files.SelectMany(file => file.File.Resources).Count(resource => map.ContainsKey(resource.Id)) != oldIds.Count)
+            throw new InvalidOperationException($"Not every streamed resource of the template {slot} texture was found.");
 
         string newRootName = $"{internalName}_{slot}Map_PC";
         foreach (ModelFile file in files.OrderByDescending(file => file.EntryId == templateTextureId))
@@ -1542,33 +1255,26 @@ internal static class AttachmentAddPipeline
                 {
                     CompiledMip mip = CompiledMip.Read(resource.Data);
                     if (mip.Level >= levels.Count)
-                        throw new InvalidDataException(
-                            $"The {slot} image has no mip level {mip.Level}.");
-                    data = TextureImport.ReplacePixels(resource.Data, mip.PixelOffset,
-                        levels[(int)mip.Level]);
+                        throw new InvalidDataException($"The {slot} image has no mip level {mip.Level}.");
+                    data = TextureImport.ReplacePixels(resource.Data, mip.PixelOffset, levels[(int)mip.Level]);
                 }
                 else
                 {
-                    throw new InvalidDataException(
-                        $"Texture resource 0x{resource.Id:X} is {ResourceTypes.NameOf(resource.ClassHash)}.");
+                    throw new InvalidDataException($"Texture resource 0x{resource.Id:X} is {ResourceTypes.NameOf(resource.ClassHash)}.");
                 }
                 data = RemapResourceIds(data, map);
                 BinaryPrimitives.WriteUInt64LittleEndian(data, newId);
-                rebuilt.Resources[i] = DataFile.CloneResource(resource, newId,
-                    Rename(resource.Name, root.Name, newRootName), data);
+                rebuilt.Resources[i] = DataFile.CloneResource(resource, newId, Rename(resource.Name, root.Name, newRootName), data);
             }
 
             ulong newEntryId = map[file.EntryId];
             if (rebuilt.Resources[0].Id != newEntryId)
-                throw new InvalidDataException(
-                    $"The cloned {slot} texture container does not start with its own resource.");
+                throw new InvalidDataException($"The cloned {slot} texture container does not start with its own resource.");
             using var output = new MemoryStream();
             rebuilt.Write(output);
             byte[] info = (byte[])file.Info.Clone();
-            BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4),
-                Candidate64($"forge-entry:{internalName}:{slot}:{file.EntryName}", 0));
-            additions.Add(new ArmoryArchiveEntryAddition(targetArchivePath, newEntryId,
-                Rename(file.EntryName, source.EntryName, newRootName),
+            BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4), Candidate64($"forge-entry:{internalName}:{slot}:{file.EntryName}", 0));
+            additions.Add(new ArmoryArchiveEntryAddition(targetArchivePath, newEntryId, Rename(file.EntryName, source.EntryName, newRootName),
                 rebuilt.Resources[0].ClassHash, info, output.ToArray(), file.PrefetchBlock));
         }
         return map[templateTextureId];
@@ -1597,15 +1303,13 @@ internal static class AttachmentAddPipeline
                     DataFile file = DataFile.Read(stream);
                     if (file.Resources.Count == 0 || file.Resources[0].Id != entry.Id)
                         continue;
-                    found.Add(new ModelFile(path, entry.Name, entry.Id, file, data,
-                        archive.ReadEntryInfo(entry),
-                        PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
+                    found.Add(new ModelFile(path, entry.Name, entry.Id, file, data, archive.ReadEntryInfo(entry), PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
                     wanted.Remove(entry.Id);
                 }
             }
             catch (Exception exception) when (exception is not InvalidDataException)
             {
-                // Optional DLC archives may be absent or unreadable.
+                // Optional DLC archives may be absent or unreadable
             }
         }
         return found;
@@ -1623,10 +1327,7 @@ internal static class AttachmentAddPipeline
         return found;
     }
 
-    // A model imported earlier holds ids inside the same asset range without being a Forge
-    // entry for every LOD, so the containers that live in the range are read back as well.
-    static void ReserveInstalledIds(IReadOnlyList<string> archivePaths,
-        (ulong Minimum, ulong MaximumExclusive) range, HashSet<ulong> usedIds)
+    static void ReserveInstalledIds(IReadOnlyList<string> archivePaths, (ulong Minimum, ulong MaximumExclusive) range, HashSet<ulong> usedIds)
     {
         foreach (string path in archivePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -1634,9 +1335,7 @@ internal static class AttachmentAddPipeline
             {
                 using var archive = ForgeArchive.Open(path);
                 usedIds.UnionWith(archive.Entries.Select(entry => entry.Id));
-                foreach (ForgeEntry entry in archive.Entries.Where(entry =>
-                             entry.Id >= range.Minimum && entry.Id < range.MaximumExclusive
-                             && entry.FileExtension == ".data"))
+                foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.Id >= range.Minimum && entry.Id < range.MaximumExclusive && entry.FileExtension == ".data"))
                     usedIds.UnionWith(archive.ReadResourceIndex(entry).Select(resource => resource.Id));
             }
             catch (InvalidDataException)
@@ -1645,13 +1344,12 @@ internal static class AttachmentAddPipeline
             }
             catch
             {
-                // Optional DLC archives may be absent or unreadable.
+                // Optional DLC archives may be absent or unreadable
             }
         }
     }
 
-    static List<ulong> AllocateAssetIds(int count, HashSet<ulong> usedIds, string seed,
-        ulong minimum, ulong maximumExclusive)
+    static List<ulong> AllocateAssetIds(int count, HashSet<ulong> usedIds, string seed, ulong minimum, ulong maximumExclusive)
     {
         var result = new List<ulong>(count);
         for (ulong candidate = minimum; candidate < maximumExclusive && result.Count < count; candidate++)
@@ -1662,14 +1360,6 @@ internal static class AttachmentAddPipeline
         return result;
     }
 
-    // Four bytes behind the handle of a LOD that lives in a Forge entry of its own, a
-    // LODSelector carries how much GPU data that LOD is. Measured over every LODSelector in
-    // DataPC.forge, the number is the vertex buffer plus the index buffer, with the primitive
-    // descriptions counted in about two thirds of them and left out in the rest. Left at the
-    // value of the template mesh it promises far more data than the imported mesh holds, and
-    // nothing that needs the streamed LOD - the Gunsmith above all - ever loads. Which of the
-    // two forms an asset uses is read back from the number that is already there instead of
-    // being decided here.
     static int UpdateStreamedLodSizes(byte[] selector, IEnumerable<ClonedMesh> meshes)
     {
         int updated = 0;
@@ -1693,8 +1383,7 @@ internal static class AttachmentAddPipeline
                         : current == (uint)mesh.Before.Buffers ? mesh.After.Buffers : -1;
                     if (replacement >= 0)
                     {
-                        BinaryPrimitives.WriteUInt32LittleEndian(
-                            selector.AsSpan(at), (uint)replacement);
+                        BinaryPrimitives.WriteUInt32LittleEndian(selector.AsSpan(at), (uint)replacement);
                         updated++;
                     }
                 }
@@ -1712,13 +1401,11 @@ internal static class AttachmentAddPipeline
         return new GpuSize(buffers, buffers + mesh.Clustered.PrimitiveDescriptions.Length);
     }
 
-    static string Rename(string name, string oldPrefix, string newPrefix) =>
-        name.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase)
+    static string Rename(string name, string oldPrefix, string newPrefix) => name.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase)
             ? newPrefix + name[oldPrefix.Length..]
             : newPrefix + "_" + name;
 
-    static (ulong Minimum, ulong MaximumExclusive) ReadContainerIdRange(
-        string archivePath, int entryIndex)
+    static (ulong Minimum, ulong MaximumExclusive) ReadContainerIdRange(string archivePath, int entryIndex)
     {
         using var archive = ForgeArchive.Open(archivePath);
         ForgeEntry entry = archive.Entries.FirstOrDefault(candidate => candidate.Index == entryIndex)
@@ -1726,25 +1413,18 @@ internal static class AttachmentAddPipeline
         ForgeEntry? next = archive.Entries
             .Where(candidate => candidate.Id > entry.Id)
             .MinBy(candidate => candidate.Id);
-        // An empty range is not a failure: the caller then hands out ids from the generated
-        // namespace instead, which only has to be free, not to sit beside the weapon.
         return entry.Id == 0 || next is null ? (0, 0) : (entry.Id, next.Id);
     }
 
-    static void ApplyPreparedResourceData(DataFile file, string archivePath, int entryIndex,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData)
+    static void ApplyPreparedResourceData(DataFile file, string archivePath, int entryIndex, IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         for (int resourceIndex = 0; resourceIndex < file.Resources.Count; resourceIndex++)
-            if (preparedResourceData.TryGetValue((archivePath, entryIndex, resourceIndex),
-                    out byte[]? prepared))
+            if (preparedResourceData.TryGetValue((archivePath, entryIndex, resourceIndex), out byte[]? prepared))
                 file.Resources[resourceIndex].Data = (byte[])prepared.Clone();
     }
 
-    static List<LocalizationTarget> FindLocalizationTargets(IReadOnlyList<string> packages,
-        IReadOnlyList<string> archivePaths,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>
-            preparedResourceData)
+    internal static List<LocalizationTarget> FindLocalizationTargets(IReadOnlyList<string> packages, IReadOnlyList<string> archivePaths,
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         var wanted = packages.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var candidates = new List<LocalizationTarget>();
@@ -1760,35 +1440,27 @@ internal static class AttachmentAddPipeline
                         continue;
                     using var stream = new MemoryStream(archive.ReadEntry(entry));
                     var resources = DataFile.Read(stream).Resources;
-                    int resourceIndex = resources.FindIndex(candidate =>
-                        candidate.ClassHash == LocalizationPackage.ClassHash);
+                    int resourceIndex = resources.FindIndex(candidate => candidate.ClassHash == LocalizationPackage.ClassHash);
                     if (resourceIndex < 0)
                         continue;
                     Resource resource = resources[resourceIndex];
-                    if (preparedResourceData.TryGetValue((path, entry.Index, resourceIndex),
-                            out byte[]? prepared))
+                    if (preparedResourceData.TryGetValue((path, entry.Index, resourceIndex), out byte[]? prepared))
                         resource.Data = (byte[])prepared.Clone();
-                    candidates.Add(new LocalizationTarget(package, resource,
-                        resourceIndex, new ResourceLocation(path, entry.Index, entry.Name)));
+                    candidates.Add(new LocalizationTarget(package, resource, resourceIndex, new ResourceLocation(path, entry.Index, entry.Name)));
                 }
             }
             catch
             {
-                // Optional language archives may be absent.
+                // Optional language archives may be absent
             }
         }
-        // The patch package is the effective override and contains the base strings plus
-        // later additions. Selecting the largest intact package is stable even when the
-        // currently opened weapon archive was moved to the front of archivePaths.
         return candidates
             .GroupBy(target => target.Package, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(target => target.Resource.Data.Length).First())
             .ToList();
     }
 
-    static ArmoryArchiveResourceAddition ToAddition(ResourceLocation location, Resource resource) =>
-        new(location.ArchivePath, location.EntryIndex, location.EntryName, resource.Id,
-            resource.ClassHash, resource.Name, resource.Header, resource.Data);
+    internal static ArmoryArchiveResourceAddition ToAddition(ResourceLocation location, Resource resource) => new(location.ArchivePath, location.EntryIndex, location.EntryName, resource.Id, resource.ClassHash, resource.Name, resource.Header, resource.Data);
 
     static byte[] RemapResourceIds(byte[] source, IReadOnlyDictionary<ulong, ulong> map)
     {
@@ -1827,22 +1499,18 @@ internal static class AttachmentAddPipeline
         return relative < 0 ? -1 : start + relative;
     }
 
-    static uint Allocate32(string seed, HashSet<uint> used)
+    internal static uint Allocate32(string seed, HashSet<uint> used)
     {
         for (int attempt = 0; attempt < 10_000; attempt++)
         {
-            // Across 858,582 strings in 64 installed language packages, every shipped id is at
-            // most 0x7FFFFFFF. IDs with the high bit set are written and read back by the package
-            // codec, but Wildlands does not resolve the attachment record that names one.
-            uint id = ResourceTypes.Crc32(attempt == 0 ? seed : seed + ":" + attempt)
-                & 0x7FFFFFFF;
+            uint id = ResourceTypes.Crc32(attempt == 0 ? seed : seed + ":" + attempt) & 0x7FFFFFFF;
             if (id != 0 && used.Add(id))
                 return id;
         }
         throw new InvalidOperationException("Could not allocate a collision-free 32-bit game ID.");
     }
 
-    static ulong Allocate64(string seed, HashSet<ulong> used)
+    internal static ulong Allocate64(string seed, HashSet<ulong> used)
     {
         for (int attempt = 0; attempt < 10_000; attempt++)
         {
@@ -1859,24 +1527,14 @@ internal static class AttachmentAddPipeline
         ulong hash = 14695981039346656037UL;
         foreach (byte item in System.Text.Encoding.UTF8.GetBytes(value))
             hash = (hash ^ item) * 1099511628211UL;
-        // Normal Wildlands resource handles occupy the low 40 bits (for example
-        // 0x00000078FAD9939A). Full-width random UInt64 values are writable to a
-        // DataFile but are not resolved by the game as ordinary resource handles.
-        // Keep generated resources in an otherwise collision-checked E* namespace
-        // that has the same shape as installed game IDs.
         return 0x000000E000000000UL | (hash & 0x0000000FFFFFFFFFUL);
     }
 
-    readonly record struct ResourceLocation(string ArchivePath, int EntryIndex, string EntryName);
-    sealed record LocalizationTarget(string Package, Resource Resource, int ResourceIndex,
-        ResourceLocation Location);
-    sealed record ModelClonePlan(ulong SelectorId,
-        IReadOnlyList<ArmoryArchiveEntryAddition> EntryAdditions,
-        IReadOnlyList<Resource> Resources);
-    sealed record ModelFile(string ArchivePath, string EntryName, ulong EntryId, DataFile File,
-        byte[] Data, byte[] Info, byte[] PrefetchBlock);
-    sealed record AttachmentCategory(uint Tag, ulong ExemplarRecordId, string RegistryName,
-        int SharedOwners);
+    internal readonly record struct ResourceLocation(string ArchivePath, int EntryIndex, string EntryName);
+    internal sealed record LocalizationTarget(string Package, Resource Resource, int ResourceIndex, ResourceLocation Location);
+    internal sealed record ModelClonePlan(ulong SelectorId, IReadOnlyList<ArmoryArchiveEntryAddition> EntryAdditions, IReadOnlyList<Resource> Resources);
+    sealed record ModelFile(string ArchivePath, string EntryName, ulong EntryId, DataFile File, byte[] Data, byte[] Info, byte[] PrefetchBlock);
+    sealed record AttachmentCategory(uint Tag, ulong ExemplarRecordId, string RegistryName, int SharedOwners);
     readonly record struct GpuSize(int Buffers, int WithDescriptions);
     sealed record ClonedMesh(ulong Id, byte[] Data, GpuSize Before, GpuSize After);
 }

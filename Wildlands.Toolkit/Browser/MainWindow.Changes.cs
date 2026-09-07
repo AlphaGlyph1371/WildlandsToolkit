@@ -266,6 +266,11 @@ public partial class MainWindow
             .ToList();
         bool changedLocalization = _changes.Changes.Any(change => BuildTableGameMetadataResolver.TryGetLanguagePackage(change.EntryName) is not null);
         bool changedArmoryStructure = _changes.Changes.Any(change => (change.Removal is not null || change.EntryRemoval is not null) && BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName));
+        if (place is not null && _changes.Changes.Any(change =>
+                change.EntryRemoval is not null
+                && change.ArchivePath.Equals(place.ArchivePath,
+                    StringComparison.OrdinalIgnoreCase)))
+            place = place.Parent;
 
         bool written = false;
         try

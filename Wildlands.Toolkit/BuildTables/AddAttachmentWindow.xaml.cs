@@ -33,8 +33,7 @@ public sealed record AttachmentTextureDraft(
     string Specular,
     string Mask1)
 {
-    public bool Any => Diffuse.Length > 0 || Normal.Length > 0
-        || Specular.Length > 0 || Mask1.Length > 0;
+    public bool Any => Diffuse.Length > 0 || Normal.Length > 0 || Specular.Length > 0 || Mask1.Length > 0;
 
     public string PathFor(string slot) => slot switch
     {
@@ -54,11 +53,10 @@ public partial class AddAttachmentWindow : Window
     double _previewDistance = 10;
     double _previewYaw = -2.2;
     double _previewPitch = 0.45;
-    System.Windows.Point _dragStart;
+    Point _dragStart;
     bool _orbiting;
     bool _panning;
-    readonly DirectionalLight _previewLight = new(
-        Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
+    readonly DirectionalLight _previewLight = new(Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
 
     public AddAttachmentWindow(string slotName, IReadOnlyList<AddAttachmentTemplate> templates)
     {
@@ -73,11 +71,7 @@ public partial class AddAttachmentWindow : Window
 
     void ModelMode_Changed(object sender, RoutedEventArgs e)
     {
-        // ExistingAssetMode is checked while InitializeComponent is still creating
-        // the controls below it. WPF can therefore raise this event before the
-        // ImportModelMode field and the model inputs have been assigned.
-        if (ImportModelMode is null || ExistingAssetBox is null
-            || ModelPathBox is null || BrowseModelButton is null)
+        if (ImportModelMode is null || ExistingAssetBox is null || ModelPathBox is null || BrowseModelButton is null)
             return;
 
         bool importing = ImportModelMode.IsChecked == true;
@@ -109,8 +103,8 @@ public partial class AddAttachmentWindow : Window
             ModelImportInfo.Text = $"{vertices:N0} vertices, {triangles:N0} triangles, "
                 + $"{geometry.Groups.Count} draw range(s). "
                 + (geometry.HasSkinning
-                    ? $"The file contains {geometry.JointNames.Count} joint(s). Matching game bones will be preserved; a foreign rig is rebound automatically."
-                    : "No skeleton is required; the model will be bound automatically to the attachment.")
+                    ? $"The file contains {geometry.JointNames.Count} joint(s)."
+                    : "The model will be bound automatically to the attachment.")
                 + " The imported shape is used for every LOD level cloned from the gameplay template.";
         }
         catch (Exception ex)
@@ -118,8 +112,7 @@ public partial class AddAttachmentWindow : Window
             ModelPathBox.Clear();
             _geometry = null;
             ModelImportInfo.Text = $"Could not read this model: {ex.Message}";
-            MessageBox.Show(this, ex.Message, "Could not read model",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, "Could not read model", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -147,8 +140,7 @@ public partial class AddAttachmentWindow : Window
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "Could not read model",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, ex.Message, "Could not read model", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
         }
@@ -189,25 +181,16 @@ public partial class AddAttachmentWindow : Window
         string displayName = DisplayNameBox.Text.Trim();
         string internalName = InternalNameBox.Text.Trim();
         var template = (AddAttachmentTemplate)TemplateBox.SelectedItem;
-        var textures = new AttachmentTextureDraft(
-            DiffusePathBox.Text.Trim(), NormalPathBox.Text.Trim(),
-            SpecularPathBox.Text.Trim(), Mask1PathBox.Text.Trim());
+        var textures = new AttachmentTextureDraft(DiffusePathBox.Text.Trim(), NormalPathBox.Text.Trim(), SpecularPathBox.Text.Trim(), Mask1PathBox.Text.Trim());
         foreach (string path in new[] { textures.Diffuse, textures.Normal, textures.Specular, textures.Mask1 }
                      .Where(path => path.Length > 0))
             if (!File.Exists(path))
             {
-                MessageBox.Show(this, $"Texture file not found:\n{path}", "Add attachment",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, $"Texture file not found:\n{path}", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-        // The formerly experimental unique-BuildTag path is now the proven normal path.
-        // Replacement and shared-category modes remain represented in the pipeline only
-        // for old pending change sets; exposing them here made it too easy to create an
-        // attachment whose UI entry and runtime model alias another option.
-        Draft = new AddAttachmentDraft(displayName, internalName, template, importModel, modelOrAsset,
-            AddToGunsmith: true, ReplaceTemplate: false,
-            ReuseTemplateCategory: false, CreateUniqueBuildTag: true, textures);
+        Draft = new AddAttachmentDraft(displayName, internalName, template, importModel, modelOrAsset, AddToGunsmith: true, ReplaceTemplate: false, ReuseTemplateCategory: false, CreateUniqueBuildTag: true, textures);
         DialogResult = true;
     }
 
@@ -215,17 +198,14 @@ public partial class AddAttachmentWindow : Window
     {
         importing = ImportModelMode.IsChecked == true;
         modelOrAsset = (importing ? ModelPathBox.Text : ExistingAssetBox.Text).Trim();
-        if (DisplayNameBox.Text.Trim().Length == 0 || InternalNameBox.Text.Trim().Length == 0
-            || TemplateBox.SelectedItem is not AddAttachmentTemplate || modelOrAsset.Length == 0)
+        if (DisplayNameBox.Text.Trim().Length == 0 || InternalNameBox.Text.Trim().Length == 0 || TemplateBox.SelectedItem is not AddAttachmentTemplate || modelOrAsset.Length == 0)
         {
-            MessageBox.Show(this, "Fill in all required fields.", "Add attachment",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Fill in all required fields.", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
         if (importing && !File.Exists(modelOrAsset))
         {
-            MessageBox.Show(this, "Choose an existing model file.", "Add attachment",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Choose an existing model file.", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
         return true;
@@ -245,8 +225,7 @@ public partial class AddAttachmentWindow : Window
         try
         {
             var (pixels, width, height) = TextureImporter.LoadPreview(dialog.FileName);
-            BitmapSource image = BitmapSource.Create(width, height, 96, 96,
-                PixelFormats.Bgra32, null, pixels, width * 4);
+            BitmapSource image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
             PathBoxFor(slot).Text = dialog.FileName;
             ThumbnailFor(slot).Source = image;
             if (slot == "Diffuse")
@@ -254,8 +233,7 @@ public partial class AddAttachmentWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, $"Could not read {slot} texture",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, ex.Message, $"Could not read {slot} texture", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -330,8 +308,7 @@ public partial class AddAttachmentWindow : Window
         if (diffuse.Length > 0 && File.Exists(diffuse))
         {
             var (pixels, width, height) = TextureImporter.LoadPreview(diffuse);
-            var image = BitmapSource.Create(width, height, 96, 96,
-                PixelFormats.Bgra32, null, pixels, width * 4);
+            var image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
             brush = new ImageBrush(image)
             {
                 TileMode = TileMode.Tile,
@@ -356,9 +333,7 @@ public partial class AddAttachmentWindow : Window
 
         int triangles = _previewParts.Sum(part => part.TriangleCount);
         Rect3D bounds = MeshScene.Bounds(_previewParts);
-        PreviewStatus.Text = $"{_previewParts.Sum(part => part.VertexCount):N0} vertices   "
-            + $"{triangles:N0} triangles   {_previewParts.Count} material range(s)   "
-            + $"{bounds.SizeX:0.000} × {bounds.SizeY:0.000} × {bounds.SizeZ:0.000} m";
+        PreviewStatus.Text = $"{_previewParts.Sum(part => part.VertexCount):N0} vertices   {triangles:N0} triangles   {_previewParts.Count} material range(s)   {bounds.SizeX:0.000} × {bounds.SizeY:0.000} × {bounds.SizeZ:0.000} m";
     }
 
     void PreviewFit_Click(object sender, RoutedEventArgs e) => PreviewFit();
@@ -368,8 +343,7 @@ public partial class AddAttachmentWindow : Window
         Rect3D bounds = MeshScene.Bounds(_previewParts);
         if (bounds.IsEmpty)
             return;
-        _previewTarget = new Point3D(bounds.X + bounds.SizeX / 2,
-            bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
+        _previewTarget = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
         double radius = new Vector3D(bounds.SizeX, bounds.SizeY, bounds.SizeZ).Length / 2;
         double half = PreviewCamera.FieldOfView / 2 * Math.PI / 180;
         _previewDistance = Math.Max(radius / Math.Sin(half) * 1.1, 0.1);
@@ -378,8 +352,7 @@ public partial class AddAttachmentWindow : Window
 
     void UpdatePreviewCamera()
     {
-        var direction = new Vector3D(Math.Cos(_previewPitch) * Math.Cos(_previewYaw),
-            Math.Cos(_previewPitch) * Math.Sin(_previewYaw), Math.Sin(_previewPitch));
+        var direction = new Vector3D(Math.Cos(_previewPitch) * Math.Cos(_previewYaw), Math.Cos(_previewPitch) * Math.Sin(_previewYaw), Math.Sin(_previewPitch));
         PreviewCamera.Position = _previewTarget + direction * _previewDistance;
         PreviewCamera.LookDirection = -direction;
         PreviewCamera.NearPlaneDistance = _previewDistance / 100;
@@ -434,8 +407,7 @@ public partial class AddAttachmentWindow : Window
 
     void Preview_MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        _previewDistance = Math.Clamp(_previewDistance * (e.Delta > 0 ? 0.85 : 1 / 0.85),
-            0.001, 100000);
+        _previewDistance = Math.Clamp(_previewDistance * (e.Delta > 0 ? 0.85 : 1 / 0.85), 0.001, 100000);
         UpdatePreviewCamera();
     }
 

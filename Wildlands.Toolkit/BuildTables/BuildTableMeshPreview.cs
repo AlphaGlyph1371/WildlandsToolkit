@@ -12,8 +12,7 @@ sealed record BuildTableMeshPreview(
 {
     public Model3D AtFamilyScale(double familyLargestDimension)
     {
-        if (!double.IsFinite(familyLargestDimension) || familyLargestDimension <= 0
-            || Math.Abs(familyLargestDimension - LargestDimension) < 0.000001)
+        if (!double.IsFinite(familyLargestDimension) || familyLargestDimension <= 0 || Math.Abs(familyLargestDimension - LargestDimension) < 0.000001)
             return Scene;
 
         double relativeScale = LargestDimension / familyLargestDimension;
@@ -38,10 +37,8 @@ static class BuildTableMeshPreviewBuilder
 
         var scene = new Model3DGroup();
         scene.Children.Add(new AmbientLight(Color.FromRgb(0x62, 0x66, 0x70)));
-        scene.Children.Add(new DirectionalLight(Color.FromRgb(0xFF, 0xFC, 0xF2),
-            new Vector3D(-0.7, 1, -0.8)));
-        scene.Children.Add(new DirectionalLight(Color.FromRgb(0x69, 0x8D, 0xB8),
-            new Vector3D(0.8, -0.5, 0.25)));
+        scene.Children.Add(new DirectionalLight(Color.FromRgb(0xFF, 0xFC, 0xF2), new Vector3D(-0.7, 1, -0.8)));
+        scene.Children.Add(new DirectionalLight(Color.FromRgb(0x69, 0x8D, 0xB8), new Vector3D(0.8, -0.5, 0.25)));
 
         var frontBrush = new SolidColorBrush(Color.FromRgb(0xA9, 0xB8, 0xCA));
         var backBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x61, 0x70));

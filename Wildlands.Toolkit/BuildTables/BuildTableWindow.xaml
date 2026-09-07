@@ -284,7 +284,7 @@
                             Margin="0,0,0,17" ToolTip="Change whether this option appears in Gunsmith."/>
 
                     <WrapPanel Margin="0,0,0,18">
-                        <Button x:Name="DuplicateRowButton" Content="Duplicate exact row (technical)"
+                        <Button x:Name="DuplicateRowButton" Content="[DEV] Duplicate exact row"
                                 Click="DuplicateRow_Click" IsEnabled="False"/>
                         <Button x:Name="RemoveRowButton" Content="Remove technical row"
                                 Click="RemoveRow_Click" IsEnabled="False" Visibility="Collapsed" Margin="8,0,0,0"/>

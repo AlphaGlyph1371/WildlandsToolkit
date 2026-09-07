@@ -73,8 +73,9 @@ public sealed partial class ModProject
             project.AssetFolder = "assets";
             project.FilePath = projectPath;
             project.LastDeployedHash = null;
-            foreach (ModOperation operation in project.Operations)
-                operation.DeployedSha256 = null;
+            // A package may deliberately accept the payload deployed by its previous
+            // version so an update can replace it without requiring a vanilla restore.
+            // MarkDeployed replaces this with the newly installed payload hash.
             project.PendingUndo = project.Operations.Select(operation => new ModOperationUndo
             {
                 Key = operation.Key,

@@ -40,34 +40,28 @@
                            Text="Copies the attachment's slot behavior, stats and base materials. It does not restrict which geometry you can import."/>
 
                 <TextBlock Text="Model source *" Foreground="{StaticResource Text}"/>
-                <StackPanel Margin="0,5,0,0">
-                    <RadioButton x:Name="ExistingAssetMode" Content="Use an existing game asset" IsChecked="True"
+                    <StackPanel Margin="0,5,0,0">
+                        <RadioButton x:Name="ExistingAssetMode" Content="Use an existing game asset" IsChecked="True"
                                  Checked="ModelMode_Changed"/>
-                    <TextBox x:Name="ExistingAssetBox" Margin="22,5,0,8"
+                        <TextBox x:Name="ExistingAssetBox" Margin="22,5,0,8"
                              ToolTip="Enter the existing game asset name or ID"/>
 
-                    <RadioButton x:Name="ImportModelMode" Content="Import a model file"
+                        <RadioButton x:Name="ImportModelMode" Content="Import a model file"
                                  Checked="ModelMode_Changed"/>
-                    <Grid Margin="22,5,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBox x:Name="ModelPathBox" IsEnabled="False" IsReadOnly="True"/>
-                        <Button x:Name="BrowseModelButton" Grid.Column="1" Content="Browse…" Click="BrowseModel_Click"
+                        <Grid Margin="22,5,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="ModelPathBox" IsEnabled="False" IsReadOnly="True"/>
+                            <Button x:Name="BrowseModelButton" Grid.Column="1" Content="Browse…" Click="BrowseModel_Click"
                                 IsEnabled="False" Margin="8,0,0,0"/>
-                    </Grid>
-                    <TextBlock x:Name="ModelImportInfo" Margin="22,4,0,16"
+                        </Grid>
+                        <TextBlock x:Name="ModelImportInfo" Margin="22,4,0,16"
                                Foreground="{StaticResource TextDim}" FontSize="10" TextWrapping="Wrap"
                                Text="Supported: glTF (.glb, .gltf) and OBJ (.obj). Foreign or missing skeletons are rebound automatically to the attachment."/>
+                    </StackPanel>
                 </StackPanel>
-
-                <Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}" BorderThickness="1"
-                        CornerRadius="3" Padding="11,9" Margin="0,18,0,0">
-                    <TextBlock Foreground="{StaticResource TextDim}" TextWrapping="Wrap"
-                               Text="The attachment receives its own gameplay record, BuildTag and Gunsmith resources. It is prepared as one change set; the game files are not written until you use Apply changes in the main window."/>
-                </Border>
-            </StackPanel>
         </ScrollViewer>
 
         <Grid x:Name="MaterialsPage" Visibility="Collapsed" Margin="18">

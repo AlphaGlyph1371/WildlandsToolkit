@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
 using System.Windows;
 using System.Windows.Media.Media3D;
 using Wildlands.Formats.Models;
@@ -77,8 +74,7 @@ sealed class BuildTableOptionItem : INotifyPropertyChanged
         ? Visibility.Visible
         : Visibility.Collapsed;
 
-    public void ShowPreview(BuildTableMeshPreview preview, double familyLargestDimension,
-        bool sharedBySeveralOptions)
+    public void ShowPreview(BuildTableMeshPreview preview, double familyLargestDimension, bool sharedBySeveralOptions)
     {
         _previewModel = preview.AtFamilyScale(familyLargestDimension);
         _previewStatus = "";
@@ -133,8 +129,7 @@ static class BuildTableFamily
         [BuildTableSlot.Character] = 220,
     };
 
-    public static IReadOnlyList<BuildTableFamilyItem> Find(
-        IReadOnlyList<BuildTableDocument> documents, BuildTableDocument opened)
+    public static IReadOnlyList<BuildTableFamilyItem> Find(IReadOnlyList<BuildTableDocument> documents, BuildTableDocument opened)
     {
         var byId = documents.ToDictionary(document => document.Id);
         var links = documents.ToDictionary(document => document.Id, _ => new HashSet<ulong>());

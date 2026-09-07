@@ -1,4 +1,3 @@
-using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -8,23 +7,50 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
         base.OnStartup(e);
-        DispatcherUnhandledException += ShowCrash;
     }
 
-    static void ShowCrash(object sender, DispatcherUnhandledExceptionEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
-        var text = new StringBuilder();
-        text.AppendLine("Something went wrong that the toolkit did not expect.");
-        text.AppendLine();
-        text.AppendLine(e.Exception.Message);
-        text.AppendLine();
-        text.AppendLine("Your archives are untouched unless a write was already running.");
-        text.AppendLine("Please report this on the Discord server with the text below.");
-        text.AppendLine();
-        text.AppendLine(e.Exception.ToString());
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+        base.OnExit(e);
+    }
 
-        MessageBox.Show(text.ToString(), "Wildlands Toolkit", MessageBoxButton.OK, MessageBoxImage.Error);
-        e.Handled = true;
+    static void OnDispatcherUnhandledException(object sender,
+        DispatcherUnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            CrashReporter.Report(e.Exception, "UI thread", terminating: false);
+        }
+        finally
+        {
+            e.Handled = true;
+        }
+    }
+
+    static void OnUnobservedTaskException(object? sender,
+        UnobservedTaskExceptionEventArgs e)
+    {
+        try
+        {
+            CrashReporter.Report(e.Exception.Flatten(), "background task", terminating: false);
+        }
+        finally
+        {
+            e.SetObserved();
+        }
+    }
+
+    static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        Exception exception = e.ExceptionObject as Exception
+            ?? new Exception(e.ExceptionObject?.ToString() ?? "Unknown process error");
+        CrashReporter.Report(exception, "process", e.IsTerminating);
     }
 }

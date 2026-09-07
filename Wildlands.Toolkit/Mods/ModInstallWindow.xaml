@@ -78,7 +78,7 @@
                 <StackPanel>
                     <TextBlock x:Name="WorkspaceNotice" Foreground="#FFFFC857"
                                TextWrapping="Wrap" Margin="0,0,0,5"/>
-                    <TextBlock Text="Install prepares the package and then shows one final archive-write confirmation with backup and disk-space details. Confirming that step writes the mod into the game archives."
+                    <TextBlock Text="IMPORTANT: This mod does NOT have any sort of automatic uninstallation."
                                Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
                 </StackPanel>
             </Border>

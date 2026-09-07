@@ -365,9 +365,7 @@ public partial class MainWindow : Window
     void UpdateSkeletonIndexButton()
     {
         SkeletonIndexButton.IsEnabled = !_buildingSkeletonIndex;
-        SkeletonIndexButton.Content = _buildingSkeletonIndex ? "Scanning…"
-            : _skeletonIndex is null ? "Find skeletons"
-            : "Scan again";
+        SkeletonIndexButton.Content = _buildingSkeletonIndex ? "Building…" : _skeletonIndex is null ? "Build SK index" : "Rebuild SK index";
     }
 
     void LoadArchiveList()
@@ -462,7 +460,22 @@ public partial class MainWindow : Window
             }
             else
             {
-                var entry = _archive.Entries.First(x => x.Index == location.EntryIndex);
+                ForgeEntry? entry = _archive.Entries.FirstOrDefault(candidate =>
+                    candidate.Index == location.EntryIndex
+                    && (location.EntryName.Length == 0 || candidate.Name == location.EntryName));
+                if (entry is null && location.EntryName.Length > 0)
+                {
+                    List<ForgeEntry> named = _archive.Entries
+                        .Where(candidate => candidate.Name == location.EntryName)
+                        .Take(2)
+                        .ToList();
+                    if (named.Count == 1)
+                        entry = named[0];
+                }
+                if (entry is null)
+                    throw new InvalidDataException($"{location.EntryName} is no longer present in the archive.");
+
+                location = new Location(location.ArchivePath, entry.Index, entry.Name);
                 _shown = await Task.Run(() =>
                 {
                     using var stream = new MemoryStream(_archive.ReadEntry(entry));
@@ -501,7 +514,7 @@ public partial class MainWindow : Window
     void UpdateArmoryIndexButton()
     {
         ArmoryIndexButton.IsEnabled = !_buildingArmoryIndex;
-        ArmoryIndexButton.Content = _buildingArmoryIndex ? "Preparing…" : _armoryIndex is null ? "Armory index" : "Refresh armory";
+        ArmoryIndexButton.Content = _buildingArmoryIndex ? "Building…" : _armoryIndex is null ? "Build BT index" : "Rebuild BT index";
     }
 
     static string Elapsed(Stopwatch watch) => watch.Elapsed.TotalSeconds >= 1
