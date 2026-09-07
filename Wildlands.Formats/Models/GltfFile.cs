@@ -63,8 +63,7 @@ public static class GltfFile
             for (int set = 0; set < layout.UvCount; set++)
             {
                 int which = set;
-                attributes["TEXCOORD_" + set] = Pairs(binary, views, accessors, used, vertices,
-                    v => which < v.Uv.Length ? new Vector2(v.Uv[which].X, 1 - v.Uv[which].Y) : Vector2.Zero);
+                attributes["TEXCOORD_" + set] = Pairs(binary, views, accessors, used, vertices, v => which < v.Uv.Length ? new Vector2(v.Uv[which].X, 1 - v.Uv[which].Y) : Vector2.Zero);
             }
 
             if (layout.HasColor)
@@ -126,7 +125,8 @@ public static class GltfFile
 
                 var children = new JsonArray();
                 for (int child = 0; child < mesh.Bones.Count; child++)
-                    if (parents[child] == i) children.Add(child + 1);
+                    if (parents[child] == i)
+                        children.Add(child + 1);
 
                 if (children.Count > 0)
                     node["children"] = children;
@@ -178,16 +178,17 @@ public static class GltfFile
         writer.Write((uint)(json.Length + jsonPadding));
         writer.Write(JsonChunk);
         writer.Write(json);
-        for (int i = 0; i < jsonPadding; i++) writer.Write((byte)0x20);
+        for (int i = 0; i < jsonPadding; i++)
+            writer.Write((byte)0x20);
 
         writer.Write((uint)(binary.Length + binaryPadding));
         writer.Write(BinaryChunk);
         writer.Write(binary);
-        for (int i = 0; i < binaryPadding; i++) writer.Write((byte)0);
+        for (int i = 0; i < binaryPadding; i++)
+            writer.Write((byte)0);
     }
 
-    static int Vectors(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used,
-        MeshVertex[] vertices, Func<MeshVertex, Vector3> pick, bool withBounds)
+    static int Vectors(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices, Func<MeshVertex, Vector3> pick, bool withBounds)
     {
         int start = Align(binary);
         var low = new Vector3(float.MaxValue);
@@ -243,8 +244,7 @@ public static class GltfFile
         return accessors.Count - 1;
     }
 
-    static int Pairs(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used,
-        MeshVertex[] vertices, Func<MeshVertex, Vector2> pick)
+    static int Pairs(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices, Func<MeshVertex, Vector2> pick)
     {
         int start = Align(binary);
 

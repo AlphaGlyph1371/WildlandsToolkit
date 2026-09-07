@@ -38,8 +38,7 @@ public partial class MainWindow
 
         try
         {
-            ModProject project = ModProject.CreateInFolder(dialog.FolderName, details.ProjectName,
-                details.Author, details.ProjectVersion);
+            ModProject project = ModProject.CreateInFolder(dialog.FolderName, details.ProjectName, details.Author, details.ProjectVersion);
             await ActivateProjectAsync(project);
             SetStatus($"Created mod project {project.Name}");
         }
@@ -98,10 +97,7 @@ public partial class MainWindow
     {
         if (_project is null)
             return;
-        if (_changes.Count > 0 && MessageBox.Show(this,
-                "Replace the current pending changes with the changes saved in this project?",
-                "Reload project changes", MessageBoxButton.YesNo,
-                MessageBoxImage.Question) != MessageBoxResult.Yes)
+        if (_changes.Count > 0 && MessageBox.Show(this, "Replace the current pending changes with the changes saved in this project?", "Reload project changes", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
         try
@@ -120,8 +116,7 @@ public partial class MainWindow
             return;
         if (_project.Operations.Count == 0)
         {
-            MessageBox.Show(this, "This project does not contain any changes yet.",
-                "Nothing to build", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "This project does not contain any changes yet.", "Nothing to build", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -140,8 +135,7 @@ public partial class MainWindow
         {
             MessageBoxResult answer = MessageBox.Show(this,
                 "This exact project revision has not been applied to the game yet. You can build it, but the package may not match what you tested in the game.\n\nBuild it anyway?",
-                "Project changes are not tested yet", MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
+                "Project changes are not tested yet", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (answer != MessageBoxResult.Yes)
                 return;
         }
@@ -151,8 +145,7 @@ public partial class MainWindow
             Title = "Build mod package",
             Filter = "Wildlands Toolkit mod (*.wlmod)|*.wlmod",
             FileName = SafeFileName(_project.Name) + "-" + SafeFileName(_project.Version) + ".wlmod",
-            InitialDirectory = Directory.Exists(_settings.ExportFolder)
-                ? _settings.ExportFolder : Path.GetDirectoryName(_project.FilePath),
+            InitialDirectory = Directory.Exists(_settings.ExportFolder) ? _settings.ExportFolder : Path.GetDirectoryName(_project.FilePath),
             AddExtension = true,
             DefaultExt = ".wlmod",
         };
@@ -163,9 +156,7 @@ public partial class MainWindow
         {
             _project.ExportPackage(dialog.FileName);
             SetStatus($"Built {Path.GetFileName(dialog.FileName)}");
-            MessageBox.Show(this,
-                $"Built {Path.GetFileName(dialog.FileName)}\n\nProject revision: {currentHash[..12]}",
-                "Mod package ready", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, $"Built {Path.GetFileName(dialog.FileName)}\n\nProject revision: {currentHash[..12]}", "Mod package ready", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -181,8 +172,7 @@ public partial class MainWindow
                 $"Leave {_project.Name} and return to Free Mode?\n\n"
                 + "All project changes remain saved in the project folder. "
                 + "They will not be copied into Free Mode.",
-                "Leave mod project", MessageBoxButton.YesNo, MessageBoxImage.Question)
-            != MessageBoxResult.Yes)
+                "Leave mod project", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
         _changes.Clear();

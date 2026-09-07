@@ -107,8 +107,7 @@ public static class DdsReader
         };
     }
 
-    static PixelFormat ReadFormat(BinaryReader reader, uint pixelFlags, uint fourCc, uint bitCount,
-        uint redMask, uint blueMask, uint alphaMask)
+    static PixelFormat ReadFormat(BinaryReader reader, uint pixelFlags, uint fourCc, uint bitCount, uint redMask, uint blueMask, uint alphaMask)
     {
         if ((pixelFlags & HasFourCc) != 0)
         {

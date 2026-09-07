@@ -35,8 +35,7 @@ public static class MeshGeometry
         int stride = layout.Stride;
 
         if (buffer.Length % stride != 0)
-            throw new InvalidDataException(
-                $"The vertex buffer holds {buffer.Length} bytes, which is not a multiple of stride {stride}.");
+            throw new InvalidDataException($"The vertex buffer holds {buffer.Length} bytes, which is not a multiple of stride {stride}.");
 
         var vertices = new MeshVertex[buffer.Length / stride];
 
@@ -158,8 +157,7 @@ public static class MeshGeometry
         float rounded = MathF.Round(value);
 
         if (float.IsNaN(rounded) || rounded < short.MinValue || rounded > short.MaxValue)
-            throw new InvalidDataException(
-                $"Vertex {index} has a {field} of {value:0.###} after quantization, which does not fit the mesh.");
+            throw new InvalidDataException($"Vertex {index} has a {field} of {value:0.###} after quantization, which does not fit the mesh.");
 
         return (short)rounded;
     }
@@ -192,15 +190,13 @@ public static class MeshGeometry
         ArgumentNullException.ThrowIfNull(range);
 
         if (range.StartIndex < 0 || range.TriangleCount < 0)
-            throw new InvalidDataException(
-                $"The mesh primitive has an invalid index range (start {range.StartIndex}, triangles {range.TriangleCount}).");
+            throw new InvalidDataException($"The mesh primitive has an invalid index range (start {range.StartIndex}, triangles {range.TriangleCount}).");
 
         int indexSize = mesh.Data.Indices32Bit ? 4 : 2;
         long requiredBytes = ((long)range.StartIndex + (long)range.TriangleCount * 3) * indexSize;
 
         if (requiredBytes > mesh.IndexBuffer.Length)
-            throw new InvalidDataException(
-                $"The mesh primitive needs {requiredBytes} index-buffer bytes, but only {mesh.IndexBuffer.Length} are available.");
+            throw new InvalidDataException($"The mesh primitive needs {requiredBytes} index-buffer bytes, but only {mesh.IndexBuffer.Length} are available.");
 
         int offset = mesh.Geometry == GeometryKind.Clustered ? range.MinIndex : 0;
         var indices = new int[range.TriangleCount * 3];
@@ -211,7 +207,5 @@ public static class MeshGeometry
         return indices;
     }
 
-    static int ReadIndex(Mesh mesh, int position) => mesh.Data.Indices32Bit
-        ? BitConverter.ToInt32(mesh.IndexBuffer, position * 4)
-        : BitConverter.ToUInt16(mesh.IndexBuffer, position * 2);
+    static int ReadIndex(Mesh mesh, int position) => mesh.Data.Indices32Bit ? BitConverter.ToInt32(mesh.IndexBuffer, position * 4) : BitConverter.ToUInt16(mesh.IndexBuffer, position * 2);
 }

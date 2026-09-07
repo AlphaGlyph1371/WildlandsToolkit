@@ -282,7 +282,33 @@
                 </DockPanel>
             </Border>
 
-            <ListView Grid.Column="2" x:Name="ItemList" MouseDoubleClick="ItemList_DoubleClick"
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="{StaticResource Surface}"
+                        BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1"
+                        Padding="8,6">
+                    <DockPanel>
+                        <TextBlock x:Name="AssetActionHint" DockPanel.Dock="Right"
+                                   VerticalAlignment="Center" Margin="12,0,4,0"
+                                   Foreground="{StaticResource TextDim}"
+                                   Text="Open an archive to add or delete assets"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="AddAssetButton" Content="Add…"
+                                    Click="MenuAdd_Click" IsEnabled="False"
+                                    ToolTip="Add a new asset at the current level"/>
+                            <Button x:Name="DeleteAssetButton" Content="Delete"
+                                    Click="DeleteAsset_Click" IsEnabled="False"
+                                    Foreground="{StaticResource Warning}"
+                                    ToolTip="Delete the selected assets"/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+            <ListView Grid.Row="1" x:Name="ItemList" MouseDoubleClick="ItemList_DoubleClick"
                   SelectionChanged="ItemList_SelectionChanged" BorderThickness="0"
                   PreviewMouseRightButtonDown="ItemList_RightButtonDown">
                 <ListView.ContextMenu>
@@ -290,6 +316,9 @@
                         <MenuItem x:Name="MenuOpen" Header="Open" Click="MenuOpen_Click"/>
                         <MenuItem x:Name="MenuExtract" Header="Extract..." Click="Extract_Click"/>
                         <MenuItem x:Name="MenuExport" Header="Export as..." Click="MenuExport_Click"/>
+                        <MenuItem x:Name="MenuAdd" Header="Add..." Click="MenuAdd_Click"/>
+                        <MenuItem x:Name="MenuDelete" Header="Delete" Click="DeleteAsset_Click"/>
+                        <Separator/>
                         <MenuItem x:Name="MenuReplace" Header="Replace..." Click="MenuReplace_Click"/>
                         <MenuItem x:Name="MenuReplaceRaw" Header="Replace with raw resource file..." Click="MenuReplaceRaw_Click"/>
                         <Separator/>
@@ -318,6 +347,7 @@
                     </GridView>
                 </ListView.View>
             </ListView>
+            </Grid>
 
             <Border x:Name="ArchiveLoadingOverlay" Grid.ColumnSpan="5" Panel.ZIndex="100"
                     Visibility="Collapsed" Background="#B8141416" Cursor="Wait" Focusable="True">

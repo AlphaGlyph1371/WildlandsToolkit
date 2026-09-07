@@ -30,7 +30,6 @@ public static class PixelFormats
         PixelFormat.Unknown,
         PixelFormat.Bc7,
 
-        // In Wildlands every texture stores exactly 8 bits per pixel: masks, noise and index maps
         PixelFormat.R8,
         PixelFormat.R8,
 
@@ -42,7 +41,6 @@ public static class PixelFormats
         PixelFormat.Unknown,
         PixelFormat.Unknown,
 
-        // Cube maps in the env map sets store 8 bytes per pixel
         PixelFormat.R16G16B16A16Float,
     ];
 
@@ -72,7 +70,6 @@ public static class PixelFormats
         _ => 0,
     };
 
-    // Size in bytes of one mip level
     public static int LevelSize(this PixelFormat format, int width, int height)
     {
         if (format.IsBlockCompressed())

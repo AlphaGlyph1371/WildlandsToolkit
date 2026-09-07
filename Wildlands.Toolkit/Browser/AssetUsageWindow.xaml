@@ -11,13 +11,10 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="16,13">
+        <Border Grid.Row="0" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="16,13">
             <StackPanel>
-                <TextBlock x:Name="TitleText" FontSize="18" FontWeight="SemiBold"
-                           Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
-                <TextBlock x:Name="IdText" Margin="0,4,0,0" FontFamily="Consolas" FontSize="11"
-                           Foreground="{StaticResource TextDim}"/>
+                <TextBlock x:Name="TitleText" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="IdText" Margin="0,4,0,0" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextDim}"/>
             </StackPanel>
         </Border>
 
@@ -38,24 +35,17 @@
                        MaxWidth="420" Margin="32" Visibility="Collapsed"/>
         </Grid>
 
-        <Border Grid.Row="2" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="12,7">
+        <Border Grid.Row="2" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="12,7">
             <TextBlock x:Name="StatusText" Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"/>
         </Border>
 
-        <Border x:Name="LoadingOverlay" Grid.RowSpan="3" Panel.ZIndex="10" Visibility="Collapsed"
-                Background="#B8141416" Cursor="Wait" Focusable="True">
-            <Border HorizontalAlignment="Center" VerticalAlignment="Center" MinWidth="360"
-                    Padding="28,22" CornerRadius="6" Background="{StaticResource Surface}"
+        <Border x:Name="LoadingOverlay" Grid.RowSpan="3" Panel.ZIndex="10" Visibility="Collapsed" Background="#B8141416" Cursor="Wait" Focusable="True">
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center" MinWidth="360" Padding="28,22" CornerRadius="6" Background="{StaticResource Surface}"
                     BorderBrush="{StaticResource Border}" BorderThickness="1">
                 <StackPanel>
-                    <TextBlock Text="Finding asset copies" FontSize="16" FontWeight="SemiBold"
-                               Foreground="{StaticResource Text}" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="LoadingText" Margin="0,7,0,14" MaxWidth="480"
-                               Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"
-                               HorizontalAlignment="Center" TextAlignment="Center"/>
-                    <ProgressBar Height="8" IsIndeterminate="True" Foreground="{StaticResource Accent}"
-                                 Background="{StaticResource Background}"/>
+                    <TextBlock Text="Finding asset copies" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Text}" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="LoadingText" Margin="0,7,0,14" MaxWidth="480" Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" TextAlignment="Center"/>
+                    <ProgressBar Height="8" IsIndeterminate="True" Foreground="{StaticResource Accent}" Background="{StaticResource Background}"/>
                 </StackPanel>
             </Border>
         </Border>

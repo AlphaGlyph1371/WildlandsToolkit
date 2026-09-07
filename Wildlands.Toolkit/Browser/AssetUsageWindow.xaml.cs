@@ -115,14 +115,12 @@ public static class AssetUsageScanner
 {
     sealed record ResourceLocation(string ArchivePath, string Archive, int EntryIndex, string Container);
 
-    sealed record CachedSearch(string Fingerprint, IReadOnlyList<ResourceLocation> Locations,
-        int ArchiveCount, int ContainerCount);
+    sealed record CachedSearch(string Fingerprint, IReadOnlyList<ResourceLocation> Locations, int ArchiveCount, int ContainerCount);
 
     static readonly object IndexLock = new();
     static readonly Dictionary<ulong, CachedSearch> CachedSearches = new();
 
-    public static IReadOnlyList<AssetUsage> Find(string archivePath, ulong id,
-        IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    public static IReadOnlyList<AssetUsage> Find(string archivePath, ulong id, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         var archivePaths = GetArchivePaths(archivePath);
         var fingerprint = GetFingerprint(archivePaths);
@@ -140,8 +138,7 @@ public static class AssetUsageScanner
             return results;
         }
 
-        foreach (var archiveGroup in search.Locations.GroupBy(location => location.ArchivePath,
-                     StringComparer.OrdinalIgnoreCase))
+        foreach (var archiveGroup in search.Locations.GroupBy(location => location.ArchivePath, StringComparer.OrdinalIgnoreCase))
         {
             if (cancellationToken.IsCancellationRequested)
                 return [];
@@ -160,8 +157,7 @@ public static class AssetUsageScanner
                     DataFile file = DataFile.Read(stream);
                     foreach (var resource in file.Resources.Where(resource => resource.Id == id))
                     {
-                        results.Add(new AssetUsage(location.Archive, entry.Name,
-                            resource.Name, ResourceTypes.NameOf(resource.ClassHash), resource.Data.Length));
+                        results.Add(new AssetUsage(location.Archive, entry.Name, resource.Name, ResourceTypes.NameOf(resource.ClassHash), resource.Data.Length));
                     }
                 }
                 catch (OperationCanceledException)
@@ -170,7 +166,7 @@ public static class AssetUsageScanner
                 }
                 catch
                 {
-                    // A corrupted full payload is excluded rather than reported as a match.
+                    // A corrupted full payload is excluded
                 }
             }
         }
@@ -183,8 +179,7 @@ public static class AssetUsageScanner
             .ToList();
     }
 
-    static CachedSearch? GetOrScan(IReadOnlyList<string> archivePaths, string fingerprint, ulong id,
-        IProgress<string>? progress, CancellationToken cancellationToken)
+    static CachedSearch? GetOrScan(IReadOnlyList<string> archivePaths, string fingerprint, ulong id, IProgress<string>? progress, CancellationToken cancellationToken)
     {
         lock (IndexLock)
         {
@@ -194,8 +189,6 @@ public static class AssetUsageScanner
                 return cached;
             }
 
-            // Keep only locations for the requested ID. A full index of every asset can consume
-            // hundreds of megabytes on a complete installation, which is the opposite of a safe scan.
             var locations = new List<ResourceLocation>();
             int containers = 0;
             for (var archiveNumber = 0; archiveNumber < archivePaths.Count; archiveNumber++)
@@ -222,7 +215,7 @@ public static class AssetUsageScanner
                     }
                     catch
                     {
-                        // An unreadable container is not indexed: it can never be reported as a confirmed match.
+                        // An unreadable container is not indexed
                     }
                 }
             }

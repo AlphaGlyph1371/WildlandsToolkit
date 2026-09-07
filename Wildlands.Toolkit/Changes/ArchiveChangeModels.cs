@@ -11,6 +11,8 @@ public sealed record PendingChange(
     byte[] Data,
     PendingResourceAddition? Addition = null,
     PendingForgeEntryAddition? EntryAddition = null,
+    PendingResourceRemoval? Removal = null,
+    PendingForgeEntryRemoval? EntryRemoval = null,
     string? ProjectOperationKey = null,
     string? OperationGroupId = null,
     string? OperationLabel = null,
@@ -28,14 +30,23 @@ public sealed record PendingForgeEntryAddition(
     byte[] InfoTemplate,
     byte[] PrefetchBlock);
 
+public sealed record PendingResourceRemoval(
+    ulong Id,
+    uint ClassHash);
+
+public sealed record PendingForgeEntryRemoval(
+    ulong Id);
+
 public sealed class ArchiveWork
 {
     public string Path { get; init; } = "";
     public long Size { get; init; }
     public long OutputSize { get; set; }
+    public long IntermediateSize { get; set; }
     public Dictionary<int, byte[]> Entries { get; } = [];
     public List<string> EntryNames { get; } = [];
     public List<ForgeEntryAddition> EntryAdditions { get; } = [];
+    public HashSet<int> EntryRemovals { get; } = [];
     public bool NeedsRebuild { get; set; }
 
     public string Name => System.IO.Path.GetFileName(Path);

@@ -170,7 +170,7 @@ static class BuildTableFamily
         return component
             .Select(document =>
             {
-                var slot = BuildTableSlot.Unknown;
+                var slot = BuildTableCompatibility.DetectSlot(document.Name);
                 bool isOverview = document == overview && component.Count > 1;
                 int order = isOverview ? 0 : SlotOrder.GetValueOrDefault(slot, 900);
                 return new BuildTableFamilyItem

@@ -40,8 +40,7 @@ public sealed class VertexLayout
         var layout = For(format);
 
         if (layout.Stride != stride)
-            throw new InvalidDataException(
-                $"Vertex format {format} always has stride {layout.Stride}, but this mesh states {stride}.");
+            throw new InvalidDataException($"Vertex format {format} always has stride {layout.Stride}, but this mesh states {stride}.");
 
         return layout;
     }

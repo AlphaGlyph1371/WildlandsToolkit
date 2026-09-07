@@ -7,7 +7,6 @@ using System.Text.Json.Nodes;
 
 namespace Wildlands.Formats.Models;
 
-/// <summary>Strict glTF 2.0 geometry reader used by the mesh replacement pipeline.</summary>
 static class GltfImport
 {
     const uint Magic = 0x46546C67;
@@ -32,8 +31,7 @@ static class GltfImport
         public required int Stride { get; init; }
         public required bool Normalized { get; init; }
 
-        public ReadOnlySpan<byte> Element(int index) =>
-            Buffer.AsSpan(checked(Offset + index * Stride), ElementSize);
+        public ReadOnlySpan<byte> Element(int index) => Buffer.AsSpan(checked(Offset + index * Stride), ElementSize);
     }
 
     readonly record struct MeshInstance(int Mesh, int? Skin, Matrix4x4 World, string Name);
@@ -42,8 +40,7 @@ static class GltfImport
     {
         var (root, buffers) = Open(path);
         ValidateExtensions(root);
-        var meshes = root["meshes"]?.AsArray()
-            ?? throw new InvalidDataException("The file holds no meshes.");
+        var meshes = root["meshes"]?.AsArray() ?? throw new InvalidDataException("The file holds no meshes.");
         if (meshes.Count == 0)
             throw new InvalidDataException("The file holds no meshes.");
 
@@ -55,31 +52,23 @@ static class GltfImport
 
         foreach (var instance in Instances(root, meshes.Count))
         {
-            var mesh = meshes[instance.Mesh]?.AsObject()
-                ?? throw new InvalidDataException($"Mesh {instance.Mesh} is missing.");
-            var primitives = mesh["primitives"]?.AsArray()
-                ?? throw new InvalidDataException($"Mesh {instance.Mesh} has no primitives.");
+            var mesh = meshes[instance.Mesh]?.AsObject() ?? throw new InvalidDataException($"Mesh {instance.Mesh} is missing.");
+            var primitives = mesh["primitives"]?.AsArray() ?? throw new InvalidDataException($"Mesh {instance.Mesh} has no primitives.");
 
             foreach (var primitiveNode in primitives)
             {
-                var primitive = primitiveNode?.AsObject()
-                    ?? throw new InvalidDataException($"Mesh {instance.Mesh} contains an empty primitive.");
+                var primitive = primitiveNode?.AsObject() ?? throw new InvalidDataException($"Mesh {instance.Mesh} contains an empty primitive.");
                 int mode = primitive["mode"]?.GetValue<int>() ?? 4;
                 if (mode != 4)
-                    throw new NotSupportedException(
-                        $"{instance.Name} uses primitive mode {mode}. Replace mesh supports triangle-list primitives only; triangulate the model before export.");
+                    throw new NotSupportedException($"{instance.Name} uses primitive mode {mode}. Replace mesh supports triangle-list primitives only; triangulate the model before export.");
                 if ((primitive["targets"]?.AsArray().Count ?? 0) > 0)
-                    throw new NotSupportedException(
-                        $"{instance.Name} uses morph targets. Apply the desired shape before exporting the replacement mesh.");
+                    throw new NotSupportedException($"{instance.Name} uses morph targets. Apply the desired shape before exporting the replacement mesh.");
 
-                var attributes = primitive["attributes"]?.AsObject()
-                    ?? throw new InvalidDataException($"A primitive in {instance.Name} carries no attributes.");
+                var attributes = primitive["attributes"]?.AsObject() ?? throw new InvalidDataException($"A primitive in {instance.Name} carries no attributes.");
                 int material = primitive["material"]?.GetValue<int>() ?? -1;
                 if (material >= (materials?.Count ?? 0))
                     throw new InvalidDataException($"A primitive refers to material {material}, which does not exist.");
-                string label = material >= 0
-                    ? materials![material]?["name"]?.GetValue<string>() ?? $"material_{material}"
-                    : "default";
+                string label = material >= 0 ? materials![material]?["name"]?.GetValue<string>() ?? $"material_{material}" : "default";
 
                 var positions = ReadVec3(accessors, views, buffers, attributes, "POSITION", required: true)!;
                 var normals = ReadVec3(accessors, views, buffers, attributes, "NORMAL", required: false);
@@ -123,8 +112,7 @@ static class GltfImport
                 if (jointBlocks.Count > 0)
                 {
                     if (instance.Skin is null)
-                        throw new InvalidDataException(
-                            $"{instance.Name} contains skin weights, but its scene node does not select a skin.");
+                        throw new InvalidDataException($"{instance.Name} contains skin weights, but its scene node does not select a skin.");
                     skinJoints = SkinJoints(root, instance.Skin.Value);
                     skinSlots = new byte[skinJoints.Count];
                     for (int joint = 0; joint < skinJoints.Count; joint++)
@@ -154,8 +142,7 @@ static class GltfImport
                     {
                         Vector3 sourceTangent = new(tangents[i].X, tangents[i].Y, tangents[i].Z);
                         sourceTangent = Unit(sourceTangent, "tangent");
-                        Vector3 sourceBinormal = Vector3.Cross(Unit(normals![i], "normal"), sourceTangent)
-                            * (tangents[i].W < 0 ? -1f : 1f);
+                        Vector3 sourceBinormal = Vector3.Cross(Unit(normals![i], "normal"), sourceTangent) * (tangents[i].W < 0 ? -1f : 1f);
                         Vector3 tangent = Vector3.TransformNormal(sourceTangent, instance.World);
                         tangent -= normal * Vector3.Dot(normal, tangent);
                         tangent = Unit(tangent, "transformed tangent");
@@ -180,8 +167,7 @@ static class GltfImport
 
                                 ushort sourceJoint = jointBlocks[block][i][slot];
                                 if (sourceJoint >= skinJoints!.Count)
-                                    throw new InvalidDataException(
-                                        $"Vertex {i} refers to joint {sourceJoint}, but the selected skin has only {skinJoints.Count} joints.");
+                                    throw new InvalidDataException($"Vertex {i} refers to joint {sourceJoint}, but the selected skin has only {skinJoints.Count} joints.");
                                 joints[destination] = skinSlots![sourceJoint];
                                 weights[destination] = (byte)Math.Clamp(MathF.Round(weight * 255f), 0, 255);
                             }
@@ -222,8 +208,7 @@ static class GltfImport
         foreach (var entry in required)
             names.Add(entry?.GetValue<string>() ?? "<empty>");
         throw new NotSupportedException(
-            "This glTF requires extension(s) the mesh importer does not decode: " + string.Join(", ", names)
-            + ". Export an uncompressed glTF 2.0 mesh with modifiers applied.");
+            "This glTF requires extension(s) the mesh importer does not decode: " + string.Join(", ", names) + ". Export an uncompressed glTF 2.0 mesh with modifiers applied.");
     }
 
     static byte JointSlot(uint name, ImportedGeometry geometry, Dictionary<uint, byte> slots)
@@ -246,14 +231,12 @@ static class GltfImport
             int a = group.Indices[i], b = group.Indices[i + 1], c = group.Indices[i + 2];
             if ((uint)a >= group.Vertices.Count || (uint)b >= group.Vertices.Count || (uint)c >= group.Vertices.Count)
                 throw new InvalidDataException($"Group {group.Name} contains an index outside its vertex array.");
-            Vector3 face = Vector3.Cross(group.Vertices[b].Position - group.Vertices[a].Position,
-                group.Vertices[c].Position - group.Vertices[a].Position);
+            Vector3 face = Vector3.Cross(group.Vertices[b].Position - group.Vertices[a].Position, group.Vertices[c].Position - group.Vertices[a].Position);
             accumulated[a] += face; accumulated[b] += face; accumulated[c] += face;
         }
 
         for (int i = 0; i < group.Vertices.Count; i++)
-            group.Vertices[i].Normal = accumulated[i].LengthSquared() > 1e-20f
-                ? Vector3.Normalize(accumulated[i]) : Vector3.UnitZ;
+            group.Vertices[i].Normal = accumulated[i].LengthSquared() > 1e-20f ? Vector3.Normalize(accumulated[i]) : Vector3.UnitZ;
     }
 
     static List<MeshInstance> Instances(JsonObject root, int meshCount)
@@ -296,8 +279,7 @@ static class GltfImport
         return result;
     }
 
-    static void Visit(int index, Matrix4x4 parent, JsonArray nodes, int meshCount,
-        HashSet<int> visited, HashSet<int> path, List<MeshInstance> result)
+    static void Visit(int index, Matrix4x4 parent, JsonArray nodes, int meshCount, HashSet<int> visited, HashSet<int> path, List<MeshInstance> result)
     {
         if ((uint)index >= nodes.Count)
             throw new InvalidDataException($"Node {index} does not exist.");
@@ -319,8 +301,7 @@ static class GltfImport
         }
 
         foreach (var child in node["children"]?.AsArray() ?? [])
-            Visit(child?.GetValue<int>() ?? throw new InvalidDataException($"{name} contains an empty child reference."),
-                world, nodes, meshCount, visited, path, result);
+            Visit(child?.GetValue<int>() ?? throw new InvalidDataException($"{name} contains an empty child reference."), world, nodes, meshCount, visited, path, result);
         path.Remove(index);
     }
 
@@ -333,8 +314,7 @@ static class GltfImport
         if (matrix)
         {
             float[] m = Floats(node["matrix"], 16, $"node {index} matrix");
-            return new Matrix4x4(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7],
-                m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
+            return new Matrix4x4(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
         }
 
         float[] t = node["translation"] is null ? [0, 0, 0] : Floats(node["translation"], 3, $"node {index} translation");
@@ -344,8 +324,7 @@ static class GltfImport
         if (rotation.LengthSquared() < 1e-20f)
             throw new InvalidDataException($"Node {index} has a zero-length rotation quaternion.");
         rotation = Quaternion.Normalize(rotation);
-        return Matrix4x4.CreateScale(s[0], s[1], s[2]) * Matrix4x4.CreateFromQuaternion(rotation)
-            * Matrix4x4.CreateTranslation(t[0], t[1], t[2]);
+        return Matrix4x4.CreateScale(s[0], s[1], s[2]) * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(t[0], t[1], t[2]);
     }
 
     static float[] Floats(JsonNode? node, int expected, string label)
@@ -357,7 +336,8 @@ static class GltfImport
         for (int i = 0; i < expected; i++)
         {
             result[i] = array[i]?.GetValue<float>() ?? throw new InvalidDataException($"The {label} contains an empty value.");
-            if (!float.IsFinite(result[i])) throw new InvalidDataException($"The {label} contains a non-finite value.");
+            if (!float.IsFinite(result[i]))
+                throw new InvalidDataException($"The {label} contains a non-finite value.");
         }
         return result;
     }
@@ -382,8 +362,7 @@ static class GltfImport
     }
 
     static uint HashOf(string name) => name.StartsWith("Bone_", StringComparison.OrdinalIgnoreCase)
-        && uint.TryParse(name[5..], System.Globalization.NumberStyles.HexNumber, null, out uint hash)
-        ? hash : ResourceTypes.Crc32(name);
+        && uint.TryParse(name[5..], System.Globalization.NumberStyles.HexNumber, null, out uint hash) ? hash : ResourceTypes.Crc32(name);
 
     static (JsonObject Root, List<byte[]> Buffers) Open(string path)
     {
@@ -421,8 +400,7 @@ static class GltfImport
         }
         else
         {
-            root = JsonNode.Parse(Encoding.UTF8.GetString(bytes))?.AsObject()
-                ?? throw new InvalidDataException("The file is neither glb nor readable glTF JSON.");
+            root = JsonNode.Parse(Encoding.UTF8.GetString(bytes))?.AsObject() ?? throw new InvalidDataException("The file is neither glb nor readable glTF JSON.");
         }
 
         string version = root["asset"]?["version"]?.GetValue<string>() ?? "";
@@ -470,8 +448,7 @@ static class GltfImport
         if (count < 0) throw new InvalidDataException($"Accessor {accessorIndex} has an invalid count.");
         int componentSize = ComponentSize(component);
         int elementSize = checked(componentSize * Lanes(type));
-        int viewIndex = accessor["bufferView"]?.GetValue<int>()
-            ?? throw new NotSupportedException($"Accessor {accessorIndex} has no buffer view.");
+        int viewIndex = accessor["bufferView"]?.GetValue<int>() ?? throw new NotSupportedException($"Accessor {accessorIndex} has no buffer view.");
         if ((uint)viewIndex >= views.Count) throw new InvalidDataException($"Buffer view {viewIndex} does not exist.");
         var view = views[viewIndex]?.AsObject() ?? throw new InvalidDataException($"Buffer view {viewIndex} is missing.");
         int bufferIndex = view["buffer"]?.GetValue<int>() ?? 0;
@@ -509,8 +486,7 @@ static class GltfImport
         _ => throw new InvalidDataException($"Unknown glTF accessor type '{type}'."),
     };
 
-    static Vector3[]? ReadVec3(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers,
-        JsonObject attributes, string key, bool required)
+    static Vector3[]? ReadVec3(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes, string key, bool required)
     {
         if (attributes[key] is not { } node)
             return required ? throw new InvalidDataException($"A primitive carries no {key} attribute.") : null;
@@ -525,8 +501,7 @@ static class GltfImport
         return result;
     }
 
-    static Vector4[]? ReadVec4(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers,
-        JsonObject attributes, string key)
+    static Vector4[]? ReadVec4(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes, string key)
     {
         if (attributes[key] is not { } node) return null;
         var data = Accessor(accessors, views, buffers, node.GetValue<int>());
@@ -541,8 +516,7 @@ static class GltfImport
         return result;
     }
 
-    static Vector2[]? ReadVec2(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers,
-        JsonObject attributes, string key)
+    static Vector2[]? ReadVec2(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes, string key)
     {
         if (attributes[key] is not { } node) return null;
         var data = Accessor(accessors, views, buffers, node.GetValue<int>());
@@ -582,8 +556,7 @@ static class GltfImport
         return result;
     }
 
-    static ushort[][] ReadJoints(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers,
-        JsonObject attributes, string key)
+    static ushort[][] ReadJoints(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes, string key)
     {
         var data = Accessor(accessors, views, buffers, attributes[key]!.GetValue<int>());
         if (data.Type != "VEC4" || data.ComponentType is not (UnsignedByte or UnsignedShort) || data.Normalized)
@@ -599,8 +572,7 @@ static class GltfImport
         return result;
     }
 
-    static float[][] ReadWeights(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers,
-        JsonObject attributes, string key)
+    static float[][] ReadWeights(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes, string key)
     {
         if (attributes[key] is not { } node) throw new InvalidDataException($"{key} is missing while matching joints are present.");
         var data = Accessor(accessors, views, buffers, node.GetValue<int>());
@@ -624,8 +596,7 @@ static class GltfImport
         return result;
     }
 
-    static List<int> ReadIndices(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers,
-        JsonObject primitive, int vertexCount)
+    static List<int> ReadIndices(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject primitive, int vertexCount)
     {
         var result = new List<int>();
         if (primitive["indices"] is not { } node)
@@ -711,6 +682,5 @@ static class GltfImport
         return value;
     }
 
-    static bool Finite(Vector4 value) => float.IsFinite(value.X) && float.IsFinite(value.Y)
-        && float.IsFinite(value.Z) && float.IsFinite(value.W);
+    static bool Finite(Vector4 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z) && float.IsFinite(value.W);
 }

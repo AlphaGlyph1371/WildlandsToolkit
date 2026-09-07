@@ -77,8 +77,7 @@ public sealed class ObjFile
         return group;
     }
 
-    static void AddFace(ObjFile obj, ObjGroup group, string[] parts, List<Vector3> positions, List<Vector3> normals,
-        List<Vector2> textures, Dictionary<(int, int, int), int> byTriplet, int line)
+    static void AddFace(ObjFile obj, ObjGroup group, string[] parts, List<Vector3> positions, List<Vector3> normals, List<Vector2> textures, Dictionary<(int, int, int), int> byTriplet, int line)
     {
         if (parts.Length < 4)
             throw new InvalidDataException($"Line {line} has a face with {parts.Length - 1} corner(s).");
@@ -98,8 +97,6 @@ public sealed class ObjFile
             return;
         }
 
-        // Ear clipping preserves concave OBJ polygons. A triangle fan silently folds those
-        // polygons across empty space and used to create invalid replacement geometry.
         var normal = Vector3.Zero;
         for (int i = 0; i < corners.Length; i++)
         {
@@ -112,8 +109,7 @@ public sealed class ObjFile
         if (normal.LengthSquared() < 1e-20f)
             throw new InvalidDataException($"Line {line} contains a degenerate polygon that cannot be triangulated.");
 
-        int drop = MathF.Abs(normal.X) >= MathF.Abs(normal.Y) && MathF.Abs(normal.X) >= MathF.Abs(normal.Z) ? 0
-            : MathF.Abs(normal.Y) >= MathF.Abs(normal.Z) ? 1 : 2;
+        int drop = MathF.Abs(normal.X) >= MathF.Abs(normal.Y) && MathF.Abs(normal.X) >= MathF.Abs(normal.Z) ? 0 : MathF.Abs(normal.Y) >= MathF.Abs(normal.Z) ? 1 : 2;
         var projected = new Vector2[corners.Length];
         for (int i = 0; i < corners.Length; i++)
         {
@@ -147,8 +143,7 @@ public sealed class ObjFile
 
                 bool contains = false;
                 foreach (int candidate in remaining)
-                    if (candidate != previous && candidate != current && candidate != next
-                        && Inside(projected[candidate], projected[previous], projected[current], projected[next], orientation))
+                    if (candidate != previous && candidate != current && candidate != next && Inside(projected[candidate], projected[previous], projected[current], projected[next], orientation))
                     {
                         contains = true;
                         break;
@@ -173,16 +168,14 @@ public sealed class ObjFile
         group.Indices.Add(corners[remaining[2]]);
     }
 
-    static float Cross(Vector2 a, Vector2 b, Vector2 c) =>
-        (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+    static float Cross(Vector2 a, Vector2 b, Vector2 c) => (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
 
     static bool Inside(Vector2 p, Vector2 a, Vector2 b, Vector2 c, float orientation) =>
         orientation * Cross(a, b, p) >= -1e-8f
         && orientation * Cross(b, c, p) >= -1e-8f
         && orientation * Cross(c, a, p) >= -1e-8f;
 
-    static int Corner(ObjFile obj, string text, List<Vector3> positions, List<Vector3> normals,
-        List<Vector2> textures, Dictionary<(int, int, int), int> byTriplet, int line)
+    static int Corner(ObjFile obj, string text, List<Vector3> positions, List<Vector3> normals, List<Vector2> textures, Dictionary<(int, int, int), int> byTriplet, int line)
     {
         var fields = text.Split('/');
         int position = Reference(fields, 0, positions.Count, line);
@@ -215,8 +208,7 @@ public sealed class ObjFile
         return index;
     }
 
-    static Vector3 Vector(string[] parts, int line) =>
-        new(Number(parts, 1, line), Number(parts, 2, line), Number(parts, 3, line));
+    static Vector3 Vector(string[] parts, int line) => new(Number(parts, 1, line), Number(parts, 2, line), Number(parts, 3, line));
 
     static float Number(string[] parts, int slot, int line)
     {

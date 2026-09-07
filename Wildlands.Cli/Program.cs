@@ -99,10 +99,12 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     return 1;
 }
 
-switch (args[0])
+try
 {
-    case "blobs":
-        return ReadBlobs(args[1], null);
+    switch (args[0])
+    {
+        case "blobs":
+            return ReadBlobs(args[1], null);
     case "dump" when args.Length >= 3:
         return ReadBlobs(args[1], args[2]);
     case "list":
@@ -268,9 +270,15 @@ switch (args[0])
         return ProcessMemoryTrace.Run(args[1], args[2..]);
     case "memtraceprobe":
         return ProcessMemoryTrace.Probe();
-    default:
-        Console.WriteLine($"unknown command: {args[0]}");
-        return 1;
+        default:
+            Console.WriteLine($"unknown command: {args[0]}");
+            return 1;
+    }
+}
+catch (Exception exception)
+{
+    Console.Error.WriteLine($"{exception.GetType().Name}: {exception.Message}");
+    return 1;
 }
 
 // A model a BuildTable row names is always the first resource of a Forge entry that carries

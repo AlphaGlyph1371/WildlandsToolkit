@@ -121,8 +121,7 @@ public sealed class MeshData
 
     static void EnsureRemaining(BinaryReader reader, long length, string label)
     {
-        if (length < 0 || reader.BaseStream.CanSeek
-            && length > reader.BaseStream.Length - reader.BaseStream.Position)
+        if (length < 0 || reader.BaseStream.CanSeek && length > reader.BaseStream.Length - reader.BaseStream.Position)
             throw new EndOfStreamException($"The {label} runs past the end of the Mesh resource.");
     }
 

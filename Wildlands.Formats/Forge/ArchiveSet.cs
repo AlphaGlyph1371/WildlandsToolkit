@@ -98,15 +98,12 @@ public sealed class ArchiveSet : IDisposable
 
     public IEnumerable<ForgeArchive> All()
     {
-        return _siblings.Result
-            .Append(_archive)
-            .OrderByDescending(x => Path.GetFileName(x.FilePath), StringComparer.OrdinalIgnoreCase);
+        return _siblings.Result.Append(_archive).OrderByDescending(x => Path.GetFileName(x.FilePath), StringComparer.OrdinalIgnoreCase);
     }
 
     static SourceFile Describe(ForgeArchive archive, ForgeEntry entry)
     {
-        return new SourceFile(archive.ReadEntry(entry), entry.Name + entry.FileExtension,
-            Path.GetFileName(archive.FilePath), archive.FilePath, entry.Index);
+        return new SourceFile(archive.ReadEntry(entry), entry.Name + entry.FileExtension, Path.GetFileName(archive.FilePath), archive.FilePath, entry.Index);
     }
 
     List<ForgeArchive> OpenSiblings()

@@ -21,10 +21,6 @@ public sealed class MeshInstancing
     public ushort SubMeshIndex { get; set; }
     public short Padding { get; set; }
     public ushort MaterialType { get; set; }
-    // This UInt16 sits in the instancing draw record. Comparing shipped meshes
-    // shows that it is the vertex count for SubMeshIndex (not a rendering mask).
-    // Leaving the template's old value after replacing geometry makes Anvil read
-    // beyond the new vertex buffer and eventually destabilises the renderer.
     public int VertexCount { get; set; }
     public byte MaterialPointerTag { get; set; }
     public ulong MaterialId { get; set; }
@@ -99,9 +95,7 @@ public sealed class Mesh
     public int DynamicMeshIndexCount { get; set; }
     public int UserCategory { get; set; }
 
-    public GeometryKind Geometry => Clustered is not null ? GeometryKind.Clustered
-        : Data.VertexBuffer.Length > 0 ? GeometryKind.Plain
-        : GeometryKind.None;
+    public GeometryKind Geometry => Clustered is not null ? GeometryKind.Clustered : Data.VertexBuffer.Length > 0 ? GeometryKind.Plain : GeometryKind.None;
 
     public byte[] VertexBuffer => Clustered is not null ? Clustered.VertexBuffer : Data.VertexBuffer;
     public byte[] IndexBuffer => Clustered is not null ? Clustered.IndexBuffer : Data.IndexBuffer;
@@ -166,8 +160,7 @@ public sealed class Mesh
         mesh.UserCategory = ReadInt32(reader, "user category");
 
         if (stream.Position != stream.Length)
-            throw new InvalidDataException(
-                $"The Mesh has {stream.Length - stream.Position} unexplained byte(s) at 0x{stream.Position:X}.");
+            throw new InvalidDataException($"The Mesh has {stream.Length - stream.Position} unexplained byte(s) at 0x{stream.Position:X}.");
 
         return mesh;
     }
@@ -293,11 +286,9 @@ public sealed class Mesh
         foreach (var entry in Instancing)
         {
             if (entry.BoneTable.Length != MeshInstancing.BoneTableSize)
-                throw new InvalidDataException(
-                    $"An instancing entry has a {entry.BoneTable.Length}-byte bone table; {MeshInstancing.BoneTableSize} are required.");
+                throw new InvalidDataException($"An instancing entry has a {entry.BoneTable.Length}-byte bone table; {MeshInstancing.BoneTableSize} are required.");
             if (entry.VertexCount < 0 || entry.VertexCount > ushort.MaxValue)
-                throw new InvalidDataException(
-                    $"An instancing entry has vertex count {entry.VertexCount}; only 0..{ushort.MaxValue} fit this mesh format.");
+                throw new InvalidDataException($"An instancing entry has vertex count {entry.VertexCount}; only 0..{ushort.MaxValue} fit this mesh format.");
 
             writer.Write(entry.Id);
             writer.Write(MeshInstancing.ClassHash);
@@ -427,7 +418,6 @@ public sealed class Mesh
     static void Ensure(BinaryReader reader, int count, string field)
     {
         if (count < 0 || reader.BaseStream.Position > reader.BaseStream.Length - count)
-            throw new EndOfStreamException(
-                $"Unexpected end of Mesh while reading {field} at 0x{reader.BaseStream.Position:X}.");
+            throw new EndOfStreamException($"Unexpected end of Mesh while reading {field} at 0x{reader.BaseStream.Position:X}.");
     }
 }

@@ -1,17 +1,8 @@
-using System;
 using System.Buffers.Binary;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using Wildlands.Formats.Compression;
 
 namespace Wildlands.Formats.Forge;
 
-/// <summary>
-/// Reads and extends the Forge 27 PrefetchingFileInfos registry. A Forge entry
-/// which is not represented here may be visible to table lookups while its
-/// render dependencies are never scheduled by the engine.
-/// </summary>
 public static class PrefetchingFileInfos
 {
     const ulong Magic = 0x1004FA9957FBAA33;
@@ -21,14 +12,11 @@ public static class PrefetchingFileInfos
     {
         ArgumentNullException.ThrowIfNull(data);
         PrefetchFile file = Read(data);
-        PrefetchObject item = file.Objects.SingleOrDefault(item => item.Id == id)
-            ?? throw new InvalidDataException(
-                $"PrefetchingFileInfos has no object for Forge entry 0x{id:X16}.");
+        PrefetchObject item = file.Objects.SingleOrDefault(item => item.Id == id) ?? throw new InvalidDataException($"PrefetchingFileInfos has no object for Forge entry 0x{id:X16}.");
         return file.BlockData.AsSpan(item.Offset, item.Size).ToArray();
     }
 
-    public static byte[] AddObjects(byte[] data,
-        IReadOnlyList<(ulong Id, byte[] Block)> additions)
+    public static byte[] AddObjects(byte[] data, IReadOnlyList<(ulong Id, byte[] Block)> additions)
     {
         ArgumentNullException.ThrowIfNull(data);
         ArgumentNullException.ThrowIfNull(additions);
@@ -42,12 +30,10 @@ public static class PrefetchingFileInfos
             if (id == 0 || block is null || block.Length == 0)
                 throw new InvalidDataException("A PrefetchingFileInfos addition is incomplete.");
             if (!ids.Add(id))
-                throw new InvalidDataException(
-                    $"PrefetchingFileInfos already contains object 0x{id:X16}.");
+                throw new InvalidDataException($"PrefetchingFileInfos already contains object 0x{id:X16}.");
         }
 
-        using var blockData = new MemoryStream(file.BlockData.Length
-            + additions.Sum(item => item.Block.Length));
+        using var blockData = new MemoryStream(file.BlockData.Length + additions.Sum(item => item.Block.Length));
         blockData.Write(file.BlockData);
         var objects = new List<PrefetchObject>(file.Objects);
         foreach ((ulong id, byte[] block) in additions)
@@ -76,6 +62,47 @@ public static class PrefetchingFileInfos
         return Write(file.Version, file.Algorithm, file.BlockSize, decompressed.ToArray());
     }
 
+    public static byte[] RemoveObjects(byte[] data, IReadOnlyCollection<ulong> ids)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+            return (byte[])data.Clone();
+
+        PrefetchFile file = Read(data);
+        HashSet<ulong> removed = ids.ToHashSet();
+        List<PrefetchObject> kept = file.Objects.Where(item => !removed.Contains(item.Id)).ToList();
+        if (kept.Count == file.Objects.Count)
+            return (byte[])data.Clone();
+
+        using var blocks = new MemoryStream();
+        var rewritten = new List<PrefetchObject>(kept.Count);
+        foreach (PrefetchObject item in kept)
+        {
+            int offset = checked((int)blocks.Position);
+            blocks.Write(file.BlockData, item.Offset, item.Size);
+            rewritten.Add(new PrefetchObject(item.Id, item.Size, offset));
+        }
+
+        using var decompressed = new MemoryStream();
+        using (var writer = new BinaryWriter(decompressed, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(rewritten.Count);
+            foreach (PrefetchObject item in rewritten)
+            {
+                writer.Write(item.Id);
+                writer.Write(item.Size);
+                writer.Write(item.Offset);
+            }
+
+            byte[] blockData = blocks.ToArray();
+            writer.Write(blockData.Length);
+            writer.Write(blockData);
+        }
+
+        return Write(file.Version, file.Algorithm, file.BlockSize, decompressed.ToArray());
+    }
+
     static PrefetchFile Read(ReadOnlySpan<byte> data)
     {
         if (data.Length < 15)
@@ -87,8 +114,7 @@ public static class PrefetchingFileInfos
         byte algorithm = data[10];
         int blockSize = BinaryPrimitives.ReadInt32LittleEndian(data[11..]);
         if (blockSize <= 0 || blockSize > 16 * 1024 * 1024)
-            throw new InvalidDataException(
-                $"PrefetchingFileInfos has invalid block size {blockSize}.");
+            throw new InvalidDataException($"PrefetchingFileInfos has invalid block size {blockSize}.");
 
         using var decoded = new MemoryStream();
         int position = 15;
@@ -102,7 +128,7 @@ public static class PrefetchingFileInfos
             if (compressed)
             {
                 int unpackedSize = ReadInt32(data, ref position);
-                ReadUInt32(data, ref position); // CRC32; decompression validates the payload itself.
+                ReadUInt32(data, ref position);
                 if (storedSize > data.Length - position || unpackedSize < 0 || unpackedSize > blockSize)
                     throw new InvalidDataException("A compressed PrefetchingFileInfos block is invalid.");
                 byte[] unpacked = Lzo.Decompress(data.Slice(position, storedSize), unpackedSize);
@@ -129,8 +155,7 @@ public static class PrefetchingFileInfos
             int size = ReadInt32(body, ref bodyPosition);
             int offset = ReadInt32(body, ref bodyPosition);
             if (!ids.Add(id))
-                throw new InvalidDataException(
-                    $"PrefetchingFileInfos contains duplicate object 0x{id:X16}.");
+                throw new InvalidDataException($"PrefetchingFileInfos contains duplicate object 0x{id:X16}.");
             objects.Add(new PrefetchObject(id, size, offset));
         }
 
@@ -141,8 +166,7 @@ public static class PrefetchingFileInfos
         foreach (PrefetchObject item in objects)
         {
             if (item.Size < 0 || item.Offset < 0 || item.Offset > blockData.Length - item.Size)
-                throw new InvalidDataException(
-                    $"Prefetch object 0x{item.Id:X16} points outside the block-data area.");
+                throw new InvalidDataException($"Prefetch object 0x{item.Id:X16} points outside the block-data area.");
         }
 
         return new PrefetchFile(version, algorithm, blockSize, objects, blockData);
@@ -228,7 +252,6 @@ public static class PrefetchingFileInfos
             throw new InvalidDataException("PrefetchingFileInfos is truncated.");
     }
 
-    sealed record PrefetchFile(short Version, byte Algorithm, int BlockSize,
-        List<PrefetchObject> Objects, byte[] BlockData);
+    sealed record PrefetchFile(short Version, byte Algorithm, int BlockSize, List<PrefetchObject> Objects, byte[] BlockData);
     sealed record PrefetchObject(ulong Id, int Size, int Offset);
 }

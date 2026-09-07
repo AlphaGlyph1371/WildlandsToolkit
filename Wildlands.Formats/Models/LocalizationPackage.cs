@@ -30,8 +30,6 @@ public static class LocalizationPackage
         };
         Expect(ReadUInt32(reader, "LocalizationPackage class"), ClassHash, "LocalizationPackage class");
 
-        // Wildlands uses the same package layout as the later GRB reader: one
-        // leading flag, followed by type/language and twelve reserved bytes.
         _ = ReadByte(reader, "LocalizationPackage flag");
         result.Type = ReadInt32(reader, "LocalizationPackage type");
         result.Language = ReadUInt32(reader, "LocalizationPackage language");
@@ -41,15 +39,13 @@ public static class LocalizationPackage
         byte[] indexedBytes = ReadBytes(reader, dataLength, "indexed data");
 
         if (reader.BaseStream.Position != reader.BaseStream.Length)
-            throw new InvalidDataException(
-                $"LocalizationPackage has {reader.BaseStream.Length - reader.BaseStream.Position} unexplained byte(s)." );
+            throw new InvalidDataException($"LocalizationPackage has {reader.BaseStream.Length - reader.BaseStream.Position} unexplained byte(s)." );
 
         ReadIndexedData(indexedBytes, result);
         return result;
     }
 
-    public static byte[] CreateSingleString(byte[] templateResource, ulong resourceId,
-        uint stringId, string value)
+    public static byte[] CreateSingleString(byte[] templateResource, ulong resourceId, uint stringId, string value)
     {
         ArgumentNullException.ThrowIfNull(templateResource);
         ArgumentNullException.ThrowIfNull(value);
@@ -64,9 +60,6 @@ public static class LocalizationPackage
         if (characters.Count > 254)
             throw new InvalidDataException("The localized name contains too many distinct characters.");
 
-        // Fragment zero is the package's empty sentinel. Each following fragment is
-        // one UTF-16 character, so the resulting single-string package stays simple
-        // and can be validated by the normal reader before it is staged.
         int fragmentCount = characters.Count + 1;
         int tableOffset = checked(4 + fragmentCount * 4);
         int entriesOffset = checked(tableOffset + 2 + 12);
@@ -104,8 +97,7 @@ public static class LocalizationPackage
         indexed.CopyTo(result.AsSpan(41));
 
         var checkedPackage = Read(result);
-        if (!checkedPackage.Strings.TryGetValue(stringId, out string? checkedValue)
-            || !string.Equals(checkedValue, value, StringComparison.Ordinal))
+        if (!checkedPackage.Strings.TryGetValue(stringId, out string? checkedValue) || !string.Equals(checkedValue, value, StringComparison.Ordinal))
             throw new InvalidDataException("The generated localization package did not read back exactly.");
         return result;
     }
@@ -131,12 +123,8 @@ public static class LocalizationPackage
         indexed.CopyTo(result.AsSpan(41));
 
         LocalizationPackageAsset checkedPackage = Read(result);
-        if (checkedPackage.Id != package.Id
-            || checkedPackage.Type != package.Type
-            || checkedPackage.Language != package.Language
-            || checkedPackage.Strings.Count != strings.Count
-            || strings.Any(pair => !checkedPackage.Strings.TryGetValue(pair.Key, out string? checkedValue)
-                || !string.Equals(checkedValue, pair.Value, StringComparison.Ordinal)))
+        if (checkedPackage.Id != package.Id || checkedPackage.Type != package.Type || checkedPackage.Language != package.Language || checkedPackage.Strings.Count != strings.Count
+            || strings.Any(pair => !checkedPackage.Strings.TryGetValue(pair.Key, out string? checkedValue) || !string.Equals(checkedValue, pair.Value, StringComparison.Ordinal)))
             throw new InvalidDataException("The extended localization package did not read back exactly.");
         return result;
     }
@@ -150,8 +138,7 @@ public static class LocalizationPackage
         foreach (string value in strings.Values)
         {
             if (value.Contains('\0') || value.Any(char.IsSurrogate))
-                throw new InvalidDataException(
-                    "The localization package contains text that cannot be rebuilt safely.");
+                throw new InvalidDataException("The localization package contains text that cannot be rebuilt safely.");
             foreach (char character in value)
                 frequency[character] = frequency.GetValueOrDefault(character) + 1;
         }
@@ -169,8 +156,7 @@ public static class LocalizationPackage
             .ToDictionary(item => item.character, item => item.index);
         var encodedStrings = strings
             .OrderBy(pair => pair.Key)
-            .Select(pair => new EncodedString(pair.Key,
-                EncodeText(pair.Value, characterIndexes, directFragmentCount, twoByteBias)))
+            .Select(pair => new EncodedString(pair.Key, EncodeText(pair.Value, characterIndexes, directFragmentCount, twoByteBias)))
             .ToList();
 
         var tables = new List<EncodedTable>();
@@ -210,7 +196,7 @@ public static class LocalizationPackage
         WriteUInt16BigEndian(data, 0, directFragmentCount);
         WriteUInt16BigEndian(data, 2, checked((ushort)fragmentCount));
         int at = 4;
-        at += 4; // Empty fragment sentinel.
+        at += 4; // Empty fragment sentinel
         foreach (char character in characters)
         {
             WriteUInt16BigEndian(data, at, character);
@@ -251,8 +237,7 @@ public static class LocalizationPackage
         return data;
     }
 
-    static byte[] EncodeText(string value, IReadOnlyDictionary<char, int> characterIndexes,
-        int directFragmentCount, int twoByteBias)
+    static byte[] EncodeText(string value, IReadOnlyDictionary<char, int> characterIndexes, int directFragmentCount, int twoByteBias)
     {
         using var output = new MemoryStream(value.Length);
         foreach (char character in value)
@@ -312,8 +297,7 @@ public static class LocalizationPackage
             ReadTable(reader, table, maxIndexSize, indexMask, decoded, result.Strings);
     }
 
-    static void ReadTable(BigEndianReader reader, Table table, ushort maxIndexSize,
-        int indexMask, IReadOnlyList<string?> fragments, Dictionary<ulong, string> output)
+    static void ReadTable(BigEndianReader reader, Table table, ushort maxIndexSize, int indexMask, IReadOnlyList<string?> fragments, Dictionary<ulong, string> output)
     {
         reader.Position = table.EntriesOffset;
         int additionalCount = reader.ReadUInt16("additional string entry count");
@@ -321,9 +305,7 @@ public static class LocalizationPackage
         var entries = new Entry[additionalCount + 1];
         entries[0] = new Entry(table.FirstId, reader.ReadUInt16("first string end offset"));
         for (int i = 1; i < entries.Length; i++)
-            entries[i] = new Entry(
-                table.FirstId + reader.ReadUInt16($"string {i} id delta"),
-                reader.ReadUInt16($"string {i} end offset"));
+            entries[i] = new Entry(table.FirstId + reader.ReadUInt16($"string {i} id delta"), reader.ReadUInt16($"string {i} end offset"));
 
         reader.Position = table.TextOffset;
         int consumedCodes = 0;
@@ -362,8 +344,7 @@ public static class LocalizationPackage
         }
     }
 
-    static string DecodeFragment(int index, IReadOnlyList<Fragment> fragments,
-        string?[] decoded, bool[] visiting)
+    static string DecodeFragment(int index, IReadOnlyList<Fragment> fragments, string?[] decoded, bool[] visiting)
     {
         if (decoded[index] is not null)
             return decoded[index]!;
@@ -381,8 +362,7 @@ public static class LocalizationPackage
         {
             if (fragment.Left >= fragments.Count || fragment.Right >= fragments.Count)
                 throw new InvalidDataException($"Localization fragment {index} points outside the fragment table.");
-            value = DecodeFragment(fragment.Left, fragments, decoded, visiting)
-                + DecodeFragment(fragment.Right, fragments, decoded, visiting);
+            value = DecodeFragment(fragment.Left, fragments, decoded, visiting) + DecodeFragment(fragment.Right, fragments, decoded, visiting);
         }
 
         visiting[index] = false;

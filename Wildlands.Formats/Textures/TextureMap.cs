@@ -20,7 +20,6 @@ public sealed class TextureMap
     public int GammaSettings { get; private set; }
     public int MapType { get; private set; }
 
-    // Mip levels thta are in diffreent resources instead of inside this one (CompiledMap's)
     public ulong[] StreamedMips { get; private set; } = [];
 
     public byte[] Pixels { get; private set; } = [];
@@ -57,7 +56,6 @@ public sealed class TextureMap
         texture.Format = PixelFormats.FromIndex(reader.ReadInt32());
         texture.TextureFormat = reader.ReadInt32();
         texture.GammaSettings = reader.ReadInt32();
-        // Some textures leave the count at zero although they carry a top level
         texture.MipCount = Math.Max(1, reader.ReadUInt32());
         texture.MapType = reader.ReadInt32();
 
@@ -133,7 +131,6 @@ public sealed class TextureMap
 
         return -1;
     }
-    // A cube map stores six faces one after another
     public int Faces => TextureFormat == CubeMapFormat ? 6 : 1;
 
 

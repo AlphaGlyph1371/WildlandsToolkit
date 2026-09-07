@@ -46,9 +46,24 @@ public partial class MainWindow
     {
         if (changes.Count == 0)
             return true;
+        var parentDeletes = _changes.Changes
+            .Where(change => change.EntryRemoval is not null)
+            .Select(change => (change.ArchivePath, change.EntryIndex))
+            .Concat(changes.Where(change => change.EntryRemoval is not null)
+                .Select(change => (change.ArchivePath, change.EntryIndex)))
+            .ToList();
+        List<PendingChange> effective = changes.Where(change => change.EntryRemoval is not null || !parentDeletes.Any(parent =>
+                    parent.EntryIndex == change.EntryIndex && parent.ArchivePath.Equals(change.ArchivePath, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        if (effective.Count == 0)
+        {
+            SetStatus("No change added: the whole container is already queued for deletion");
+            return false;
+        }
+
         string groupId = Guid.NewGuid().ToString("N");
-        string label = operationLabel ?? DescribeOperation(changes);
-        var grouped = changes.Select(change => change with
+        string label = operationLabel ?? DescribeOperation(effective);
+        var grouped = effective.Select(change => change with
         {
             OperationGroupId = groupId,
             OperationLabel = label,
@@ -67,9 +82,7 @@ public partial class MainWindow
 
         for (int index = 0; index < grouped.Count; index++)
         {
-            PendingChange change = projectKeys is null
-                ? grouped[index]
-                : grouped[index] with { ProjectOperationKey = projectKeys[index] };
+            PendingChange change = projectKeys is null ? grouped[index] : grouped[index] with { ProjectOperationKey = projectKeys[index] };
             _changes.Set(change);
         }
         UpdateChangeButtons();
@@ -83,8 +96,12 @@ public partial class MainWindow
             PendingChange change = changes[0];
             if (change.EntryAddition is not null)
                 return $"Add asset container {change.EntryName}";
+            if (change.EntryRemoval is not null)
+                return $"Delete asset container {change.EntryName}";
             if (change.Addition is not null)
                 return $"Add resource {change.ResourceName}";
+            if (change.Removal is not null)
+                return $"Delete resource {change.ResourceName}";
             return $"Replace {change.ResourceName}";
         }
         return $"Edit {changes.Select(change => change.EntryName).Distinct().Count()} asset container(s)";
@@ -99,9 +116,7 @@ public partial class MainWindow
         if (data is null)
             return;
 
-        if (!QueueChanges([new PendingChange(_showing.ArchivePath, _showing.EntryIndex,
-                _showing.EntryName, item.Index, item.Name, data,
-                ResourceClassHash: item.Resource.ClassHash)]))
+        if (!QueueChanges([new PendingChange(_showing.ArchivePath, _showing.EntryIndex, _showing.EntryName, item.Index, item.Name, data, ResourceClassHash: item.Resource.ClassHash)]))
             return;
 
         SetStatus($"{item.Name}: replacement queued");
@@ -117,9 +132,7 @@ public partial class MainWindow
         if (rebuilt is null)
             return;
 
-        if (!QueueChanges([new PendingChange(_showing.ArchivePath, _showing.EntryIndex,
-                _showing.EntryName, item.Index, item.Name, rebuilt,
-                ResourceClassHash: Mesh.ClassHash)]))
+        if (!QueueChanges([new PendingChange(_showing.ArchivePath, _showing.EntryIndex, _showing.EntryName, item.Index, item.Name, rebuilt, ResourceClassHash: Mesh.ClassHash)]))
             return;
 
         SetStatus($"{item.Name}: replacement queued");
@@ -150,6 +163,7 @@ public partial class MainWindow
 
         var fresh = plans.Where(x => !ArchiveBackup.Exists(x.Path)).ToList();
         var rebuilds = plans.Where(x => x.NeedsRebuild).ToList();
+        int deletions = _changes.Changes.Count(change => change.Removal is not null || change.EntryRemoval is not null);
         IReadOnlyList<DriveSpaceRequirement> spaceRequirements;
         try
         {
@@ -167,11 +181,10 @@ public partial class MainWindow
         if (insufficientSpace.Count > 0)
         {
             string details = string.Join(Environment.NewLine, insufficientSpace.Select(requirement =>
-                $"{requirement.DriveName}: {DiskSpacePreflight.FormatBytes(requirement.RequiredBytes)} required, "
+                $"Drive {requirement.DriveName.Replace("\\", "")}: {DiskSpacePreflight.FormatBytes(requirement.RequiredBytes)} required and "
                 + $"{DiskSpacePreflight.FormatBytes(requirement.AvailableBytes)} available"));
             MessageBox.Show(dialogOwner,
-                "There is not enough free disk space to apply these changes safely.\n\n"
-                + details
+                "There is not enough free disk space to apply these changes.\n\n" + details
                 + "\n\nThis includes the required backups, temporary rebuild files, archive growth, "
                 + "and a 1 GB safety margin.",
                 "Not enough disk space", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -209,6 +222,12 @@ public partial class MainWindow
             question.AppendLine($"{Amount(rebuilds.Count, "archive")} will be written again completely. This can take a few minutes.");
         }
 
+        if (deletions > 0)
+        {
+            question.AppendLine();
+            question.AppendLine($"{Amount(deletions, "deletion")} will permanently remove game data from the rebuilt archive.");
+        }
+
         if (fresh.Count > 0)
         {
             question.AppendLine();
@@ -218,21 +237,17 @@ public partial class MainWindow
         if (spaceRequirements.Count > 0)
         {
             question.AppendLine();
-            question.AppendLine("Required free disk space (including a 1 GB safety margin):");
+            question.AppendLine("Required free disk space:");
             foreach (DriveSpaceRequirement requirement in spaceRequirements)
-                question.AppendLine($"{requirement.DriveName}   "
-                    + $"{DiskSpacePreflight.FormatBytes(requirement.RequiredBytes)} required, "
+                question.AppendLine($"Drive {requirement.DriveName.Replace("\\", "")} "
+                    + $"{DiskSpacePreflight.FormatBytes(requirement.RequiredBytes)} required and "
                     + $"{DiskSpacePreflight.FormatBytes(requirement.AvailableBytes)} available");
         }
 
-        string confirmationTitle = installingPackage is null
-            ? "Apply changes" : $"Install {installingPackage}";
-        if (MessageBox.Show(dialogOwner, question.ToString(), confirmationTitle,
-                MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+        string confirmationTitle = installingPackage is null ? "Apply changes" : $"Install {installingPackage}";
+        if (MessageBox.Show(dialogOwner, question.ToString(), confirmationTitle, MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
         {
-            SetStatus(installingPackage is null
-                ? "Nothing written"
-                : $"Installation of {installingPackage} cancelled; nothing was written");
+            SetStatus(installingPackage is null ? "Nothing written" : $"Installation of {installingPackage} cancelled; nothing was written");
             return ApplyResult.Cancelled;
         }
 
@@ -246,12 +261,11 @@ public partial class MainWindow
         var writingProgress = new Progress<string>(SetApplyProgress);
         var watch = Stopwatch.StartNew();
         var appliedArmoryChanges = _changes.Changes
-            .Where(change => BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName))
-            .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex,
-                change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
+            .Where(change => change.Removal is null && change.EntryRemoval is null && BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName))
+            .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex, change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
             .ToList();
-        bool changedLocalization = _changes.Changes.Any(change =>
-            BuildTableGameMetadataResolver.TryGetLanguagePackage(change.EntryName) is not null);
+        bool changedLocalization = _changes.Changes.Any(change => BuildTableGameMetadataResolver.TryGetLanguagePackage(change.EntryName) is not null);
+        bool changedArmoryStructure = _changes.Changes.Any(change => (change.Removal is not null || change.EntryRemoval is not null) && BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName));
 
         bool written = false;
         try
@@ -267,18 +281,14 @@ public partial class MainWindow
             string? cacheWarning = null;
             if (_armoryIndex is not null)
             {
-                if (changedLocalization)
+                if (changedLocalization || changedArmoryStructure)
                 {
-                    // A newly added attachment brings new gameplay and localization
-                    // resources which cannot be mirrored by replacing old cache rows.
-                    // Rebuild now so the next Armory window immediately resolves it.
                     try
                     {
                         string gameFolder = _settings.GamePath;
                         var refreshProgress = new Progress<string>(SetApplyProgress);
                         SetApplyProgress("Refreshing the Armory index from the changed game files…");
-                        var refreshed = await Task.Run(() => ArmoryIndex.Build(
-                            ArchiveLocator.Find(gameFolder), refreshProgress));
+                        var refreshed = await Task.Run(() => ArmoryIndex.Build(ArchiveLocator.Find(gameFolder), refreshProgress));
                         refreshed.Save(AppSettings.ArmoryCachePath);
                         _armoryIndex = refreshed;
                         UpdateArmoryIndexButton();
@@ -334,9 +344,6 @@ public partial class MainWindow
     void SetApplying(bool applying, string status = "")
     {
         _applying = applying;
-        // Disabling the content makes WPF apply disabled control styles, which
-        // replaces parts of the dark theme with washed-out system colors. The
-        // overlay already owns the foreground, so only block pointer input.
         MainContent.IsHitTestVisible = !applying;
         ApplyLoadingOverlay.Visibility = applying ? Visibility.Visible : Visibility.Collapsed;
         Mouse.OverrideCursor = applying || _loading ? Cursors.Wait : null;
@@ -348,6 +355,7 @@ public partial class MainWindow
             ApplyLoadingOverlay.Focus();
             SetStatus(status);
         }
+        UpdateAssetActions();
     }
 
     void SetApplyProgress(string status)
@@ -363,12 +371,10 @@ public partial class MainWindow
             e.Cancel = true;
             return;
         }
-        if (_project is null && _changes.Count > 0
-            && MessageBox.Show(this,
+        if (_project is null && _changes.Count > 0 && MessageBox.Show(this,
                 $"Exit and discard {Amount(OperationCount(pendingOnly: true), "pending Free Mode change")}?\n\n" +
                 "Changes that were already applied to the game are not affected.",
-                "Discard Free Mode changes", MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                "Discard Free Mode changes", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
             e.Cancel = true;
             return;
@@ -377,11 +383,8 @@ public partial class MainWindow
         base.OnClosing(e);
     }
 
-    static string Amount(int count, string one, string? many = null) =>
-        count == 1 ? $"1 {one}" : $"{count} {many ?? one + "s"}";
+    static string Amount(int count, string one, string? many = null) => count == 1 ? $"1 {one}" : $"{count} {many ?? one + "s"}";
 
-    // Nothing was written, so both the preview and any open texture window have to go back
-    // to what the archive holds.
     void ShowArchiveAgain()
     {
         ShowPreview(ItemList.SelectedItem as BrowserItem);
@@ -414,15 +417,11 @@ public partial class MainWindow
     int OperationCount(bool pendingOnly = false)
     {
         if (!pendingOnly && _project is not null)
-            return _project.Operations.Select(operation =>
-                    string.IsNullOrWhiteSpace(operation.OperationGroupId)
-                        ? operation.Id : operation.OperationGroupId)
+            return _project.Operations.Select(operation => string.IsNullOrWhiteSpace(operation.OperationGroupId) ? operation.Id : operation.OperationGroupId)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
 
-        return _changes.Changes.Select(change =>
-                change.OperationGroupId ?? change.ProjectOperationKey
-                ?? $"{change.ArchivePath}|{change.EntryIndex}|{change.ResourceIndex}")
+        return _changes.Changes.Select(change => change.OperationGroupId ?? change.ProjectOperationKey ?? $"{change.ArchivePath}|{change.EntryIndex}|{change.ResourceIndex}")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
     }
@@ -435,11 +434,7 @@ public partial class MainWindow
             return;
         }
 
-        _changeListWindow = new ChangeListWindow(
-            () => new ChangeListState(_changes.Changes.ToList(),
-                _project?.Operations.ToList() ?? [], _project?.Name),
-            RemoveQueuedChanges, RevealChangeOperation,
-            async () => await ApplyChanges((Window?)_changeListWindow ?? this));
+        _changeListWindow = new ChangeListWindow(() => new ChangeListState(_changes.Changes.ToList(), _project?.Operations.ToList() ?? [], _project?.Name), RemoveQueuedChanges, RevealChangeOperation, async () => await ApplyChanges((Window?)_changeListWindow ?? this));
         _changeListWindow.Closed += (_, _) => _changeListWindow = null;
         _changeListWindow.Show();
     }
@@ -453,9 +448,7 @@ public partial class MainWindow
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var expanded = _changes.Changes.Where(change =>
-                selected.Contains(change)
-                || change.OperationGroupId is { } id && groupIds.Contains(id))
+        var expanded = _changes.Changes.Where(change => selected.Contains(change) || change.OperationGroupId is { } id && groupIds.Contains(id))
             .ToList();
 
         try
@@ -468,8 +461,7 @@ public partial class MainWindow
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 if (keys.Count == 0)
-                    throw new InvalidOperationException(
-                        "The selected project change could not be matched to the project file.");
+                    throw new InvalidOperationException("The selected project change could not be matched to the project file.");
                 _project.RevertPending(keys);
                 try
                 {
@@ -477,8 +469,6 @@ public partial class MainWindow
                 }
                 catch
                 {
-                    // The project on disk is already rolled back. Do not leave the old,
-                    // now-invalid pending changes visible if reloading fails.
                     _changes.Clear();
                     UpdateChangeButtons();
                     throw;
@@ -504,21 +494,15 @@ public partial class MainWindow
     {
         if (item.Resource is null)
             return [];
-        return _showing is null
-            ? item.Resource.Data
-            : EffectiveData(_showing, item.Index, item.Resource);
+        return _showing is null ? item.Resource.Data : EffectiveData(_showing, item.Index, item.Resource);
     }
 
-    byte[] EffectiveData(Location location, int resourceIndex, Resource resource) =>
-        _changes.Find(location.ArchivePath, location.EntryIndex, resourceIndex)?.Data
-        ?? resource.Data;
+    byte[] EffectiveData(Location location, int resourceIndex, Resource resource) => _changes.Find(location.ArchivePath, location.EntryIndex, resourceIndex)?.Data ?? resource.Data;
 
     Dictionary<ulong, byte[]> PendingCompiledMips()
     {
         var result = new Dictionary<ulong, byte[]>();
-        foreach (PendingChange change in _changes.Changes.Where(change =>
-                     change.ResourceClassHash == CompiledMip.ClassHash
-                     && change.Data.Length >= sizeof(ulong)))
+        foreach (PendingChange change in _changes.Changes.Where(change => change.ResourceClassHash == CompiledMip.ClassHash && change.Data.Length >= sizeof(ulong)))
             result[BitConverter.ToUInt64(change.Data, 0)] = change.Data;
         return result;
     }
@@ -532,8 +516,7 @@ public partial class MainWindow
         await Navigate(new Location(change.ArchivePath, change.EntryIndex, change.EntryName));
         if (_showing?.ArchivePath != change.ArchivePath || _showing.EntryIndex != change.EntryIndex)
             return;
-        if (change.ResourceIndex >= 0 && ItemList.Items.OfType<BrowserItem>()
-                .FirstOrDefault(item => item.Index == change.ResourceIndex) is { } item)
+        if (change.ResourceIndex >= 0 && ItemList.Items.OfType<BrowserItem>().FirstOrDefault(item => item.Index == change.ResourceIndex) is { } item)
         {
             ItemList.SelectedItem = item;
             ItemList.ScrollIntoView(item);
@@ -553,29 +536,22 @@ public partial class MainWindow
                 return;
 
             string gameRoot = Path.GetFullPath(_settings.GamePath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            string archivePath = Path.GetFullPath(Path.Combine(gameRoot,
-                operation.Archive.Replace('/', Path.DirectorySeparatorChar)));
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string archivePath = Path.GetFullPath(Path.Combine(gameRoot, operation.Archive.Replace('/', Path.DirectorySeparatorChar)));
             if (!archivePath.StartsWith(gameRoot, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("The project archive path is outside the game folder.");
 
             string entryName;
             using (var archive = ForgeArchive.Open(archivePath))
             {
-                ForgeEntry entry = archive.Entries.FirstOrDefault(candidate =>
-                    candidate.Id == operation.EntryId)
-                    ?? throw new InvalidDataException(
-                        $"{operation.EntryName} is not present in the game archive.");
+                ForgeEntry entry = archive.Entries.FirstOrDefault(candidate => candidate.Id == operation.EntryId) ?? throw new InvalidDataException($"{operation.EntryName} is not present in the game archive.");
                 entryName = entry.Name;
                 await Navigate(new Location(archivePath, entry.Index, entryName));
             }
 
             Activate();
-            if (operation.Kind != ModOperationKind.AddForgeEntry
-                && ItemList.Items.OfType<BrowserItem>().FirstOrDefault(item =>
-                    item.Id == operation.ResourceId
-                    && item.Resource?.ClassHash == operation.ResourceClassHash) is { } resource)
+            if (operation.Kind != ModOperationKind.AddForgeEntry && ItemList.Items.OfType<BrowserItem>().FirstOrDefault(item => item.Id == operation.ResourceId
+                && item.Resource?.ClassHash == operation.ResourceClassHash) is { } resource)
             {
                 ItemList.SelectedItem = resource;
                 ItemList.ScrollIntoView(resource);
@@ -583,8 +559,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            ShowError("Could not open the affected project resource", ex,
-                _changeListWindow);
+            ShowError("Could not open the affected project resource", ex, _changeListWindow);
         }
     }
 }

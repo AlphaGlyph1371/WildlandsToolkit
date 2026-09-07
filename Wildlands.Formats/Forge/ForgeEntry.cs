@@ -69,7 +69,7 @@ public sealed class ForgeEntry
     static string ReadPaddedName(BinaryReader reader)
     {
         var bytes = reader.ReadBytes(128);
-        int end = System.Array.IndexOf(bytes, (byte)0);
+        int end = Array.IndexOf(bytes, (byte)0);
         if (end < 0)
             end = bytes.Length;
 
@@ -89,10 +89,4 @@ public sealed class ForgeEntry
     }
 }
 
-public sealed record ForgeEntryAddition(
-    ulong Id,
-    string Name,
-    uint Extension,
-    byte[] InfoTemplate,
-    byte[] Data,
-    byte[] PrefetchBlock);
+public sealed record ForgeEntryAddition(ulong Id, string Name, uint Extension, byte[] InfoTemplate, byte[] Data, byte[] PrefetchBlock);

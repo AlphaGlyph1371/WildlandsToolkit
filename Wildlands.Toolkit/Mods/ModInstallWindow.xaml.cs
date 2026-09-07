@@ -81,6 +81,8 @@ public sealed class ModPackageChangeRow
         ModOperationKind.ReplaceResource => "Replace",
         ModOperationKind.AddResource => "Add resource",
         ModOperationKind.AddForgeEntry => "Add container",
+        ModOperationKind.RemoveResource => "Delete resource",
+        ModOperationKind.RemoveForgeEntry => "Delete container",
         _ => "Change",
     };
 

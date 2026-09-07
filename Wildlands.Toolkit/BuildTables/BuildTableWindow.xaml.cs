@@ -144,11 +144,19 @@ public partial class BuildTableWindow : Window
         RebuildRows();
 
         string familyTitle = _family.FirstOrDefault(item => item.IsOverview)?.Document.Name ?? name;
-        Title = $"{familyTitle} - Armory editor";
+        bool weaponFamily = _family.Any(item => IsWeaponSlot(item.Slot));
+        Title = $"{familyTitle} - {(weaponFamily ? "Armory" : "BuildTable")} editor";
         FamilyTitleText.Text = familyTitle;
         FamilySubtitleText.Text = _family.Count > 1
-            ? $"{_family.Count - 1} linked tables"
+            ? $"{_family.Count - 1} linked BuildTables"
             : "One table";
+        OverviewTitleText.Text = weaponFamily ? "Armory connection table" : "BuildTable connections";
+        OverviewSummaryText.Text = weaponFamily
+            ? "This table is the map of this weapon's armory."
+            : "This table connects a character asset to its related option groups.";
+        OverviewDetailsText.Text = weaponFamily
+            ? "It connects the weapon to its attachment categories. It does not contain individual barrels, sights or magazines itself."
+            : "Character equipment may span model, gender, loadout, color and compatibility tables. Choose a linked table to inspect its actual options.";
         FamilyList.ItemsSource = _family;
         KindBox.ItemsSource = new[]
         {
@@ -232,7 +240,11 @@ public partial class BuildTableWindow : Window
         familyItem ??= FamilyList.SelectedItem as BuildTableFamilyItem
             ?? _family.FirstOrDefault(item => item.Document == _currentDocument);
 
-        string slotTitle = familyItem?.Document.Name ?? _name;
+        BuildTableSlot slot = familyItem?.Slot ?? BuildTableSlot.Unknown;
+        string internalTableName = familyItem?.Document.Name ?? _name;
+        string slotTitle = slot == BuildTableSlot.Unknown
+            ? internalTableName
+            : BuildTableNames.SlotTitle(slot);
         SlotTitleText.Text = slotTitle;
 
         if (familyItem?.IsOverview == true)
@@ -250,8 +262,12 @@ public partial class BuildTableWindow : Window
         OverviewPane.Visibility = Visibility.Collapsed;
         OptionHeaderPanel.Visibility = Visibility.Visible;
         OptionList.Visibility = Visibility.Visible;
-        SlotSubtitleText.Text = $"{_table.RowCount} options";
-        var gunsmithLists = FindGunsmithLists();
+        SlotSubtitleText.Text = slot == BuildTableSlot.Unknown
+            ? $"{_table.RowCount} options"
+            : $"{_table.RowCount} options from {internalTableName}";
+        bool weaponSlot = IsWeaponSlot(slot);
+        AddAttachmentButton.Visibility = weaponSlot ? Visibility.Visible : Visibility.Collapsed;
+        var gunsmithLists = weaponSlot ? FindGunsmithLists() : [];
         var options = new List<BuildTableOptionItem>();
         for (int rowIndex = 0; rowIndex < _table.RowCount; rowIndex++)
         {
@@ -286,7 +302,9 @@ public partial class BuildTableWindow : Window
             var linkedAssets = NamesOf(visibleParts);
             BuildTableOptionMetadata? metadata = MetadataForTag(_table.Rows[rowIndex].Tag);
             string display = metadata?.DisplayName
-                ?? $"Unresolved game label · BuildTag 0x{_table.Rows[rowIndex].Tag:X8}";
+                ?? modelSelectors.FirstOrDefault()
+                ?? linkedAssets.FirstOrDefault()
+                ?? $"BuildTable option · BuildTag 0x{_table.Rows[rowIndex].Tag:X8}";
             BuildTableReferenceRow? primary = visibleParts.FirstOrDefault(part => part.Reference.Value != 0)
                 ?? selectorParts.FirstOrDefault(part => part.Reference.Value != 0)
                 ?? allParts.FirstOrDefault();
@@ -329,6 +347,11 @@ public partial class BuildTableWindow : Window
         int wanted = preferredRow ?? Math.Min(OptionList.SelectedIndex, options.Count - 1);
         OptionList.SelectedIndex = wanted >= 0 ? wanted : options.Count > 0 ? 0 : -1;
     }
+
+    static bool IsWeaponSlot(BuildTableSlot slot) => slot is
+        BuildTableSlot.Barrel or BuildTableSlot.Magazine or BuildTableSlot.Optic
+        or BuildTableSlot.Underbarrel or BuildTableSlot.Muzzle or BuildTableSlot.Stock
+        or BuildTableSlot.SideRail or BuildTableSlot.Attachment;
 
     void Option_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -887,29 +910,32 @@ public partial class BuildTableWindow : Window
         });
 
         SetMetadataLoading(true, "Reading confirmed labels from the installed game files…");
+        CancellationToken token = _stopResolving.Token;
         try
         {
             _ownerEntityIds = FindSameContainerEntityBuilderIds();
-            var targetTask = Task.Run(() => BuildTableTargetResolver.Build(
-                _archivePaths, _localTargets, wanted, progress, _stopResolving.Token));
-            var languageTask = _armoryIndex is null
-                ? Task.Run(() => BuildTableGameMetadataResolver.FindAvailableLanguagePackages(
-                    _archivePaths, _stopResolving.Token))
-                : Task.FromResult(_armoryIndex.LanguagePackages);
-            var metadataTask = Task.Run(() => _armoryIndex is null
+            var targetTask = RunIndexing(() => BuildTableTargetResolver.Build(
+                _archivePaths, _localTargets, wanted, progress, token), token);
+            Task<IReadOnlyList<string>?> languageTask = _armoryIndex is null
+                ? RunIndexing(() => BuildTableGameMetadataResolver.FindAvailableLanguagePackages(
+                    _archivePaths, token), token)
+                : Task.FromResult<IReadOnlyList<string>?>(_armoryIndex.LanguagePackages);
+            var metadataTask = RunIndexing(() => _armoryIndex is null
                 ? BuildTableGameMetadataResolver.Build(
-                    _archivePaths, _ownerEntityIds, progress, _stopResolving.Token,
+                    _archivePaths, _ownerEntityIds, progress, token,
                     buildTags: FamilyBuildTags())
                 : BuildTableGameMetadataResolver.Build(_armoryIndex, _ownerEntityIds,
-                    cancellationToken: _stopResolving.Token, buildTags: FamilyBuildTags()));
+                    cancellationToken: token, buildTags: FamilyBuildTags()), token);
             await Task.WhenAll(targetTask, metadataTask, languageTask);
-            if (_closed)
+            if (_closed
+                || targetTask.Result is not { } result
+                || metadataTask.Result is not { } metadata
+                || languageTask.Result is not { } languages)
                 return;
 
-            var result = targetTask.Result;
-            _gameMetadata = metadataTask.Result;
+            _gameMetadata = metadata;
             _targetsResolved = true;
-            SetAvailableLanguages(languageTask.Result, _gameMetadata.LanguagePackage);
+            SetAvailableLanguages(languages, _gameMetadata.LanguagePackage);
 
             foreach (var target in result.ById.Values)
                 _targets[target.Id] = target;
@@ -923,10 +949,6 @@ public partial class BuildTableWindow : Window
                 : $"Gameplay owner: {string.Join(", ", _gameMetadata.OwnerRecords)} · labels: {_gameMetadata.LanguagePackage}.";
             SetStatus($"Resolved {resolved} of {wanted.Count} referenced assets and "
                 + $"{_gameMetadata.ByBuildTag.Count} labels linked by the game database. {ownerStatus}");
-        }
-        catch (OperationCanceledException)
-        {
-            // Closing the editor cancels the background catalog cleanly.
         }
         catch (Exception ex)
         {
@@ -943,6 +965,21 @@ public partial class BuildTableWindow : Window
                 SetMetadataLoading(false);
         }
     }
+
+    static Task<T?> RunIndexing<T>(Func<T> work, CancellationToken cancellationToken)
+        where T : class => Task.Run(() =>
+    {
+        try
+        {
+            return work();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation is the normal result of closing the editor. Handle it in
+            // the worker so it cannot surface as a faulted fire-and-forget UI event.
+            return null;
+        }
+    });
 
     void SetAvailableLanguages(IReadOnlyList<string> packages, string selectedPackage)
     {

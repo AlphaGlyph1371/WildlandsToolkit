@@ -48,6 +48,9 @@ public sealed partial class ModProject
         var addedEntries = Operations.Where(operation => operation.Kind == ModOperationKind.AddForgeEntry)
             .Select(operation => $"{operation.Archive}|{operation.EntryId:X16}")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removedEntries = Operations.Where(operation => operation.Kind == ModOperationKind.RemoveForgeEntry)
+            .Select(operation => $"{operation.Archive}|{operation.EntryId:X16}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (ModOperation operation in Operations)
         {
             if (!Guid.TryParseExact(operation.Id, "N", out _))
@@ -62,8 +65,10 @@ public sealed partial class ModProject
                 throw new InvalidDataException("A project operation has an unsafe archive path.");
             if (operation.DeployedSha256 is not null && !IsHash(operation.DeployedSha256))
                 throw new InvalidDataException("A project operation has an invalid deployment hash.");
-            if (operation.Kind == ModOperationKind.ReplaceResource && !IsHash(operation.BaseSha256))
-                throw new InvalidDataException("A replacement operation has no valid baseline hash.");
+            if (operation.Kind is ModOperationKind.ReplaceResource
+                    or ModOperationKind.RemoveResource or ModOperationKind.RemoveForgeEntry
+                && !IsHash(operation.BaseSha256))
+                throw new InvalidDataException("A replace or delete operation has no valid baseline hash.");
             ValidatePayloadName(operation.Payload, "data");
 
             if (operation.Kind == ModOperationKind.AddResource)
@@ -78,6 +83,10 @@ public sealed partial class ModProject
                 throw new InvalidDataException(
                     "A newly added entry also has separate resource operations. Rebuild the project with this Toolkit version.");
             }
+            if (operation.Kind != ModOperationKind.RemoveForgeEntry
+                && removedEntries.Contains($"{operation.Archive}|{operation.EntryId:X16}"))
+                throw new InvalidDataException(
+                    "A deleted entry also has separate resource operations. Remove the resource changes before deleting the container.");
         }
 
         var currentKeys = Operations.Select(operation => operation.Key)

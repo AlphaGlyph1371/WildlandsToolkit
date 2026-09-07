@@ -78,8 +78,7 @@ public static class BlockDecoder
 
     delegate void BlockWriter(ReadOnlySpan<byte> block, Span<byte> pixels);
 
-    static void DecodeBlocks(ReadOnlySpan<byte> data, byte[] output, int width, int height,
-        int blockSize, BlockWriter writer)
+    static void DecodeBlocks(ReadOnlySpan<byte> data, byte[] output, int width, int height, int blockSize, BlockWriter writer)
     {
         int blocksX = Math.Max(1, (width + 3) / 4);
         int blocksY = Math.Max(1, (height + 3) / 4);

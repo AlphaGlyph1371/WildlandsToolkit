@@ -36,12 +36,7 @@ public sealed record BuildTableObject(int Offset, ulong Id, uint ClassHash, stri
 
 public sealed class BuildTableRow
 {
-    internal BuildTableRow(int index, int offset, int length, ulong id,
-        IReadOnlyList<BuildTableReference> references,
-        IReadOnlyList<BuildTableObject> objects,
-        int tagOffset,
-        uint tag,
-        IReadOnlyList<uint> possibleTags)
+    internal BuildTableRow(int index, int offset, int length, ulong id, IReadOnlyList<BuildTableReference> references, IReadOnlyList<BuildTableObject> objects, int tagOffset, uint tag, IReadOnlyList<uint> possibleTags)
     {
         Index = index;
         Offset = offset;
@@ -124,8 +119,7 @@ public sealed class BuildTableAsset
         int insertAt = row.Offset + row.Length;
         var localObjects = Objects.Where(obj => IsLocalId(obj.Id)).OrderBy(obj => obj.Offset).ToList();
         if (localObjects.Zip(localObjects.Skip(1)).Any(pair => pair.First.Id >= pair.Second.Id))
-            throw new InvalidOperationException(
-                "The BuildTable local object ids are not ordered, so a row cannot be inserted safely.");
+            throw new InvalidOperationException("The BuildTable local object ids are not ordered, so a row cannot be inserted safely.");
 
         var rowIds = row.Objects.Where(obj => IsLocalId(obj.Id))
             .OrderBy(obj => obj.Offset).Select(obj => obj.Id).Distinct().ToList();
@@ -150,13 +144,11 @@ public sealed class BuildTableAsset
 
         foreach (var obj in row.Objects)
             if (remapped.TryGetValue(obj.Id, out ulong newId))
-                BinaryPrimitives.WriteUInt64LittleEndian(
-                    clone.AsSpan(obj.Offset - row.Offset, sizeof(ulong)), newId);
+                BinaryPrimitives.WriteUInt64LittleEndian(clone.AsSpan(obj.Offset - row.Offset, sizeof(ulong)), newId);
 
         foreach (var reference in row.References)
             if (remapped.TryGetValue(reference.Value, out ulong newId))
-                BinaryPrimitives.WriteUInt64LittleEndian(
-                    clone.AsSpan(reference.Offset - row.Offset, sizeof(ulong)), newId);
+                BinaryPrimitives.WriteUInt64LittleEndian(clone.AsSpan(reference.Offset - row.Offset, sizeof(ulong)), newId);
 
         byte[] result = new byte[checked(shiftedSource.Length + clone.Length)];
         shiftedSource.AsSpan(0, insertAt).CopyTo(result);
@@ -172,19 +164,15 @@ public sealed class BuildTableAsset
         var duplicateId = parsed.Objects.Where(obj => IsLocalId(obj.Id))
             .GroupBy(obj => obj.Id).FirstOrDefault(group => group.Count() > 1);
         if (duplicateId is not null)
-            throw new InvalidDataException(
-                $"The duplicated BuildTable contains local object id 0x{duplicateId.Key:X} more than once.");
+            throw new InvalidDataException($"The duplicated BuildTable contains local object id 0x{duplicateId.Key:X} more than once.");
         var parsedLocalObjects = parsed.Objects.Where(obj => IsLocalId(obj.Id))
             .OrderBy(obj => obj.Offset).ToList();
         if (parsedLocalObjects.Zip(parsedLocalObjects.Skip(1))
             .Any(pair => pair.First.Id >= pair.Second.Id))
-            throw new InvalidDataException(
-                "The duplicated BuildTable does not retain ordered local object ids.");
+            throw new InvalidDataException("The duplicated BuildTable does not retain ordered local object ids.");
         var defined = parsedLocalObjects.Select(obj => obj.Id).ToHashSet();
-        if (parsed.References.Any(reference => IsLocalId(reference.Value)
-                && !defined.Contains(reference.Value)))
-            throw new InvalidDataException(
-                "The duplicated BuildTable contains a local reference without an object.");
+        if (parsed.References.Any(reference => IsLocalId(reference.Value) && !defined.Contains(reference.Value)))
+            throw new InvalidDataException("The duplicated BuildTable contains a local reference without an object.");
         return result;
     }
 
@@ -222,12 +210,9 @@ public sealed class BuildTableAsset
 
         var row = Rows[rowIndex];
         var localIds = row.Objects.Where(obj => IsLocalId(obj.Id)).Select(obj => obj.Id).ToHashSet();
-        var outsideLink = References.FirstOrDefault(reference =>
-            (reference.Offset < row.Offset || reference.Offset >= row.Offset + row.Length)
-            && localIds.Contains(reference.Value));
+        var outsideLink = References.FirstOrDefault(reference => (reference.Offset < row.Offset || reference.Offset >= row.Offset + row.Length) && localIds.Contains(reference.Value));
         if (outsideLink is not null)
-            throw new InvalidOperationException(
-                $"This option is used by {outsideLink.Path} and cannot be removed safely.");
+            throw new InvalidOperationException($"This option is used by {outsideLink.Path} and cannot be removed safely.");
 
         byte[] source = Write();
         byte[] result = new byte[checked(source.Length - row.Length)];
@@ -323,8 +308,7 @@ public static class BuildTable
         {
             var header = ReadHeader(ClassHash, "BuildTable");
             _asset.Id = header.Id;
-            _asset.References.Add(new BuildTableReference(
-                0, header.Id, BuildTableReferenceKind.TableIdentity, "BuildTable identity"));
+            _asset.References.Add(new BuildTableReference(0, header.Id, BuildTableReferenceKind.TableIdentity, "BuildTable identity"));
             _asset.Prefix = ReadByte("BuildTable prefix");
 
             _asset.ColumnCount = ReadCount("BuildTable column");
@@ -344,10 +328,7 @@ public static class BuildTable
                 var row = ReadHeader(BuildRowHash, $"row {i}");
                 var rowData = ReadRow(i);
                 int end = checked((int)_reader.BaseStream.Position);
-                _asset.Rows.Add(new BuildTableRow(i, start, end - start, row.Id,
-                    _asset.References.Skip(referenceStart).ToList(),
-                    _asset.Objects.Skip(objectStart).ToList(), rowData.TagOffset,
-                    rowData.Tag, rowData.PossibleTags));
+                _asset.Rows.Add(new BuildTableRow(i, start, end - start, row.Id, _asset.References.Skip(referenceStart).ToList(), _asset.Objects.Skip(objectStart).ToList(), rowData.TagOffset, rowData.Tag, rowData.PossibleTags));
             }
 
             ReadByte("shuffle selection");
@@ -359,8 +340,7 @@ public static class BuildTable
                 ReadHandle($"sub-table {i}");
 
             if (_reader.BaseStream.Position != _reader.BaseStream.Length)
-                throw new InvalidDataException(
-                    $"BuildTable has {_reader.BaseStream.Length - _reader.BaseStream.Position} unexplained byte(s) at 0x{_reader.BaseStream.Position:X}.");
+                throw new InvalidDataException($"BuildTable has {_reader.BaseStream.Length - _reader.BaseStream.Position} unexplained byte(s) at 0x{_reader.BaseStream.Position:X}.");
         }
 
         void ReadColumn(int index)
@@ -386,8 +366,7 @@ public static class BuildTable
             {
                 uint marker = ReadUInt32($"column {index} component {i} marker");
                 if (marker != DynamicPropertyHash)
-                    throw new InvalidDataException(
-                        $"Column {index} component {i} marker is 0x{marker:X8}, expected 0x{DynamicPropertyHash:X8}.");
+                    throw new InvalidDataException($"Column {index} component {i} marker is 0x{marker:X8}, expected 0x{DynamicPropertyHash:X8}.");
                 ReadDynamicProperty($"column {index} component {i}");
             }
         }
@@ -412,8 +391,7 @@ public static class BuildTable
             if (solverTag != 0)
                 throw new InvalidDataException($"Property-path node solver uses unsupported tag {solverTag}.");
 
-            var solver = ReadHeader(MaterialPropertyPathNodeSolverHash,
-                $"column {column} property-path node {node} material solver");
+            var solver = ReadHeader(MaterialPropertyPathNodeSolverHash, $"column {column} property-path node {node} material solver");
             ReadByte($"column {column} property-path node {node} material solver blend-mode filter");
             ReadInt32($"column {column} property-path node {node} material solver blend mode");
             ReadBytes(2, $"column {column} property-path node {node} material solver alpha-test flags");
@@ -547,8 +525,7 @@ public static class BuildTable
                     ReadEmbeddedObject(field);
                     break;
                 default:
-                    throw new NotSupportedException(
-                        $"{field} has unknown dynamic-property storage 0x{storage:X8} (data type 0x{dataType:X8}, type 0x{type:X8}).");
+                    throw new NotSupportedException($"{field} has unknown dynamic-property storage 0x{storage:X8} (data type 0x{dataType:X8}, type 0x{type:X8}).");
             }
         }
 
@@ -617,8 +594,7 @@ public static class BuildTable
                     ReadBytes(40, field + " tag selection value data");
                     break;
                 default:
-                    throw new NotSupportedException(
-                        $"{field} embeds unsupported class 0x{header.ClassHash:X8} at 0x{_reader.BaseStream.Position - 4:X}.");
+                    throw new NotSupportedException($"{field} embeds unsupported class 0x{header.ClassHash:X8} at 0x{_reader.BaseStream.Position - 4:X}.");
             }
         }
 
@@ -706,8 +682,7 @@ public static class BuildTable
         void Ensure(int count, string field)
         {
             if (count < 0 || _reader.BaseStream.Position > _reader.BaseStream.Length - count)
-                throw new EndOfStreamException(
-                    $"Unexpected end of BuildTable while reading {field} at 0x{_reader.BaseStream.Position:X}.");
+                throw new EndOfStreamException($"Unexpected end of BuildTable while reading {field} at 0x{_reader.BaseStream.Position:X}.");
         }
     }
 }

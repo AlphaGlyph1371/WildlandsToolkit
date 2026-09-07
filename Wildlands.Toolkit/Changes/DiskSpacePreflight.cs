@@ -30,7 +30,8 @@ public static class DiskSpacePreflight
 
                 if (work.NeedsRebuild)
                 {
-                    peak = Math.Max(peak, checked(consumed + work.OutputSize));
+                    peak = Math.Max(peak, checked(consumed + work.OutputSize
+                        + work.IntermediateSize));
                     consumed = checked(consumed + work.OutputSize - work.Size);
                 }
             }

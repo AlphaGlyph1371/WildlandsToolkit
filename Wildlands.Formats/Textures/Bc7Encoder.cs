@@ -117,7 +117,6 @@ public static class Bc7Encoder
         return ones >= 2 ? 1 : 0;
     }
 
-    // A mode 6 endpoint is seven bits plus the shared bit below them
     static byte Quantize(float value, int shared)
     {
         int seven = Math.Clamp((int)MathF.Round((value - shared) / 2f), 0, 127);
@@ -159,8 +158,7 @@ public static class Bc7Encoder
         return (byte)best;
     }
 
-    static void Write(Span<byte> block, ReadOnlySpan<byte> e0, ReadOnlySpan<byte> e1, int p0, int p1,
-        ReadOnlySpan<byte> indices)
+    static void Write(Span<byte> block, ReadOnlySpan<byte> e0, ReadOnlySpan<byte> e1, int p0, int p1, ReadOnlySpan<byte> indices)
     {
         block.Clear();
         int at = 0;

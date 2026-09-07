@@ -188,8 +188,7 @@ public static class Skeleton
         bone.ChildrenCount = ReadUInt16(reader, $"bone {expectedIndex} children count");
 
         if (bone.Index != expectedIndex)
-            throw new InvalidDataException(
-                $"Bone {expectedIndex} at 0x{start:X} stores index {bone.Index}; the Skeleton is desynchronized or corrupt.");
+            throw new InvalidDataException($"Bone {expectedIndex} at 0x{start:X} stores index {bone.Index}; the Skeleton is desynchronized or corrupt.");
 
         return bone;
     }
@@ -254,9 +253,7 @@ public static class Skeleton
                 break;
 
             default:
-                throw new NotSupportedException(
-                    $"Skeleton bone {boneIndex} has unsupported modifier 0x{header.ClassHash:X8} at 0x{typeDataStart:X}. " +
-                    "The resource was not guessed or partially read.");
+                throw new NotSupportedException($"Skeleton bone {boneIndex} has unsupported modifier 0x{header.ClassHash:X8} at 0x{typeDataStart:X}. ");
         }
 
         long end = reader.BaseStream.Position;
@@ -367,8 +364,7 @@ public static class Skeleton
 
         for (int i = 0; i < bones.Count; i++)
             if (bones[i].ChildrenCount != descendants[i])
-                throw new InvalidDataException(
-                    $"Bone {i} states {bones[i].ChildrenCount} descendant(s) but the hierarchy holds {descendants[i]}.");
+                throw new InvalidDataException($"Bone {i} states {bones[i].ChildrenCount} descendant(s) but the hierarchy holds {descendants[i]}.");
     }
 
     static (byte Tag, ulong Id) ReadLinkPointer(BinaryReader reader, string field)
@@ -497,7 +493,6 @@ public static class Skeleton
     static void Ensure(BinaryReader reader, int count, string field)
     {
         if (count < 0 || reader.BaseStream.Position > reader.BaseStream.Length - count)
-            throw new EndOfStreamException(
-                $"Unexpected end of Skeleton while reading {field} at 0x{reader.BaseStream.Position:X}.");
+            throw new EndOfStreamException($"Unexpected end of Skeleton while reading {field} at 0x{reader.BaseStream.Position:X}.");
     }
 }

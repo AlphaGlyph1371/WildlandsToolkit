@@ -56,8 +56,7 @@ public sealed class ClusteredMeshData
             throw new InvalidDataException("The clustered mesh has vertex data but no positive vertex stride.");
         if (data.VertexStride > 0 && data.VertexBuffer.Length % data.VertexStride != 0)
             throw new InvalidDataException("The clustered vertex buffer is not aligned to its stride.");
-        if (data.DrawPrimitiveCount != data.ClustersPerDrawPrimitive.Length
-            || data.DrawPrimitiveCount != data.VertexOffsetPerDrawPrimitive.Length)
+        if (data.DrawPrimitiveCount != data.ClustersPerDrawPrimitive.Length || data.DrawPrimitiveCount != data.VertexOffsetPerDrawPrimitive.Length)
             throw new InvalidDataException("The clustered mesh draw tables have different lengths.");
 
         return data;
@@ -122,8 +121,7 @@ public sealed class ClusteredMeshData
 
     static void EnsureRemaining(BinaryReader reader, long length, string label)
     {
-        if (length < 0 || reader.BaseStream.CanSeek
-            && length > reader.BaseStream.Length - reader.BaseStream.Position)
+        if (length < 0 || reader.BaseStream.CanSeek && length > reader.BaseStream.Length - reader.BaseStream.Position)
             throw new EndOfStreamException($"The {label} runs past the end of the Mesh resource.");
     }
 

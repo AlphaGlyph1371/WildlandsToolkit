@@ -7,6 +7,8 @@ public enum ModOperationKind
     ReplaceResource,
     AddResource,
     AddForgeEntry,
+    RemoveResource,
+    RemoveForgeEntry,
 }
 
 public sealed class ModOperation
@@ -32,7 +34,8 @@ public sealed class ModOperation
     [JsonIgnore]
     public string Key => Kind switch
     {
-        ModOperationKind.AddForgeEntry => $"{Archive}|entry|{EntryId:X16}",
+        ModOperationKind.AddForgeEntry or ModOperationKind.RemoveForgeEntry =>
+            $"{Archive}|entry|{EntryId:X16}",
         _ => $"{Archive}|{EntryId:X16}|{ResourceClassHash:X8}|{ResourceId:X16}",
     };
 }

@@ -69,19 +69,13 @@ public sealed class DataFile
         return file;
     }
 
-    // A Forge entry's resource index precedes its payload. This avoids decompressing
-    // textures, meshes and other large payloads when only an exact resource id is needed.
     public static IReadOnlyList<ResourceIndexEntry> ReadResourceIndex(Stream stream)
     {
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         var indexBlob = CompressedBlob.Read(reader);
-        return ReadIndex(indexBlob)
-            .Select(entry => new ResourceIndexEntry(entry.Id, entry.Size))
-            .ToList();
+        return ReadIndex(indexBlob).Select(entry => new ResourceIndexEntry(entry.Id, entry.Size)).ToList();
     }
 
-    // The copy finder needs one answer, not an allocated list for every resource in every
-    // container. Scan the already-decompressed index directly to keep a full-game search light.
     public static bool ContainsResourceId(Stream stream, ulong id)
     {
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);

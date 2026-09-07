@@ -52,8 +52,7 @@ public static class MeshImport
         foreach (var group in geometry.Groups)
         {
             if (group.Vertices.Count == 0 || group.Indices.Count == 0)
-                throw new InvalidDataException(
-                    $"Group {group.Name} has no renderable vertices and triangles.");
+                throw new InvalidDataException($"Group {group.Name} has no renderable vertices and triangles.");
             if (group.Indices.Count % 3 != 0)
                 throw new InvalidDataException($"Group {group.Name} holds {group.Indices.Count} indices, which is not whole triangles.");
 
@@ -93,10 +92,6 @@ public static class MeshImport
                 patched = RemapJoints(vertices, geometry, mesh, original, out matched);
                 if (matched == 0)
                 {
-                    // A foreign rig is not a reason to reject otherwise valid geometry.
-                    // Treat it like an unskinned import and attach every vertex to the
-                    // nearest weights of the template mesh. Matching Wildlands bones are
-                    // still carried exactly when the file was exported from this asset.
                     TransferSkinning(vertices, original, all: true);
                     transferred = true;
                 }
@@ -193,8 +188,7 @@ public static class MeshImport
         var texture = new Vector2[layout.UvCount];
 
         for (int i = 0; i < texture.Length; i++)
-            texture[i] = i < source.Uv.Length ? source.Uv[i]
-                : source.Uv.Length > 0 ? source.Uv[0] : Vector2.Zero;
+            texture[i] = i < source.Uv.Length ? source.Uv[i] : source.Uv.Length > 0 ? source.Uv[0] : Vector2.Zero;
 
         var joints = new byte[layout.JointsPerVertex];
         var weights = new byte[layout.JointsPerVertex];
@@ -205,8 +199,7 @@ public static class MeshImport
             weights[i] = i < source.JointWeights.Length ? source.JointWeights[i] : (byte)0;
         }
 
-        byte tangentSign = Vector3.Dot(Vector3.Cross(normal, source.Tangent), source.Binormal) < 0
-            ? (byte)0 : (byte)255;
+        byte tangentSign = Vector3.Dot(Vector3.Cross(normal, source.Tangent), source.Binormal) < 0 ? (byte)0 : (byte)255;
 
         return new MeshVertex
         {
@@ -289,14 +282,14 @@ public static class MeshImport
         {
             weights[i] = (byte)(weights[i] * 255 / sum);
             running += weights[i];
-            if (weights[i] > weights[biggest]) biggest = i;
+            if (weights[i] > weights[biggest])
+                biggest = i;
         }
 
         weights[biggest] = (byte)(weights[biggest] + (255 - running));
     }
 
-    static void BuildTangents(List<MeshVertex> vertices, List<int> indices,
-        List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, VertexLayout layout)
+    static void BuildTangents(List<MeshVertex> vertices, List<int> indices, List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, VertexLayout layout)
     {
         var alongU = new Vector3[vertices.Count];
         var alongV = new Vector3[vertices.Count];
@@ -348,8 +341,7 @@ public static class MeshImport
 
             vertices[i].Tangent = tangent;
             vertices[i].Binormal = binormal;
-            vertices[i].TangentSign = Vector3.Dot(Vector3.Cross(normal, tangent), binormal) < 0
-                ? (byte)0 : (byte)255;
+            vertices[i].TangentSign = Vector3.Dot(Vector3.Cross(normal, tangent), binormal) < 0 ? (byte)0 : (byte)255;
         }
     }
 
@@ -424,8 +416,7 @@ public static class MeshImport
         return highest + 1;
     }
 
-    static void MatchRangeCount(Mesh mesh, IReadOnlyList<ImportedGroup> groups,
-        List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, ref ulong next)
+    static void MatchRangeCount(Mesh mesh, IReadOnlyList<ImportedGroup> groups, List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, ref ulong next)
     {
         if (mesh.Materials.Count == 0)
             throw new InvalidDataException("The mesh lists no material to copy for its draw ranges.");
@@ -475,8 +466,7 @@ public static class MeshImport
         for (int i = 0; i < ranges.Count; i++)
         {
             if (ranges[i].Count > ushort.MaxValue)
-                throw new InvalidDataException(
-                    $"Draw range {i} has {ranges[i].Count} vertices; the game mesh format stores at most {ushort.MaxValue} per range.");
+                throw new InvalidDataException($"Draw range {i} has {ranges[i].Count} vertices; the game mesh format stores at most {ushort.MaxValue} per range.");
             mesh.Instancing[i].SubMeshIndex = checked((ushort)i);
             mesh.Instancing[i].VertexCount = ranges[i].Count;
         }
@@ -486,9 +476,7 @@ public static class MeshImport
         IReadOnlyList<MeshInstancing> instancing, HashSet<int> used)
     {
         const string prefix = "Material_";
-        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            || !ulong.TryParse(name[prefix.Length..], System.Globalization.NumberStyles.HexNumber,
-                System.Globalization.CultureInfo.InvariantCulture, out ulong materialId))
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || !ulong.TryParse(name[prefix.Length..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out ulong materialId))
             return -1;
 
         for (int i = 0; i < Math.Min(materials.Count, instancing.Count); i++)
@@ -497,13 +485,10 @@ public static class MeshImport
         return -1;
     }
 
-    static void ValidateGpuLayout(Mesh mesh,
-        List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, int indexCount)
+    static void ValidateGpuLayout(Mesh mesh, List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, int indexCount)
     {
-        var clustered = mesh.Clustered
-            ?? throw new InvalidDataException("The imported mesh lost its clustered GPU buffers.");
-        if (clustered.VertexStride <= 0
-            || clustered.VertexBuffer.Length % clustered.VertexStride != 0)
+        var clustered = mesh.Clustered ?? throw new InvalidDataException("The imported mesh lost its clustered GPU buffers.");
+        if (clustered.VertexStride <= 0 || clustered.VertexBuffer.Length % clustered.VertexStride != 0)
             throw new InvalidDataException("The imported vertex buffer is not aligned to its stride.");
         int indexSize = mesh.Data.Indices32Bit ? 4 : 2;
         if (clustered.IndexBuffer.Length != checked(indexCount * indexSize))
@@ -528,8 +513,7 @@ public static class MeshImport
                 || primitive.TriangleCount * 3 != ranges[i].IndexCount
                 || instancing.SubMeshIndex != i
                 || instancing.VertexCount != ranges[i].Count)
-                throw new InvalidDataException(
-                    $"Imported draw range {i} disagrees with its primitive or instancing record.");
+                throw new InvalidDataException($"Imported draw range {i} disagrees with its primitive or instancing record.");
         }
     }
 

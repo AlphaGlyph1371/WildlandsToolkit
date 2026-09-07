@@ -1,8 +1,5 @@
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using Wildlands.Formats;
@@ -93,8 +90,6 @@ public partial class MainWindow : Window
         ContentRendered += OnFirstRender;
     }
 
-    // Anything that puts a dialog in front of the user waits until the window has drawn
-    // itself once, so the dialog does not sit on a blank white window.
     void OnFirstRender(object? sender, EventArgs e)
     {
         ContentRendered -= OnFirstRender;
@@ -128,8 +123,7 @@ public partial class MainWindow : Window
     void BeginUpdateCheck()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (_settings.LastUpdateCheckUtc is { } last
-            && last <= now && now - last < TimeSpan.FromHours(1))
+        if (_settings.LastUpdateCheckUtc is { } last && last <= now && now - last < TimeSpan.FromHours(1))
             return;
 
         _settings.LastUpdateCheckUtc = now;
@@ -150,7 +144,7 @@ public partial class MainWindow : Window
         }
         catch
         {
-            // Update checks are optional and must never interrupt normal startup.
+            // Update checks are optional
         }
     }
 
@@ -189,16 +183,12 @@ public partial class MainWindow : Window
     {
         if (_project is not null)
         {
-            MessageBox.Show(this,
-                "Close the active mod project before changing the game folder.",
-                "Mod project is active", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Close the active mod project before changing the game folder.", "Mod project is active", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         if (_changes.Count > 0)
         {
-            MessageBox.Show(this,
-                "Apply or discard the queued changes before changing the game folder.",
-                "Changes are still queued", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Apply or discard the queued changes before changing the game folder.", "Changes are still queued", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -399,8 +389,7 @@ public partial class MainWindow : Window
         int inDlc = found.Count(path => Path.GetFileName(Path.GetDirectoryName(path) ?? "")
             .StartsWith("dlc_", StringComparison.OrdinalIgnoreCase));
 
-        SetStatus($"{archives.Count} archives in {_settings.GamePath}"
-            + (inDlc > 0 ? $", {inDlc} of them in dlc folders" : ""));
+        SetStatus($"{archives.Count} archives in {_settings.GamePath}" + (inDlc > 0 ? $", {inDlc} of them in dlc folders" : ""));
     }
 
     async void ArchiveList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -512,8 +501,7 @@ public partial class MainWindow : Window
     void UpdateArmoryIndexButton()
     {
         ArmoryIndexButton.IsEnabled = !_buildingArmoryIndex;
-        ArmoryIndexButton.Content = _buildingArmoryIndex ? "Preparing…"
-            : _armoryIndex is null ? "Armory index" : "Refresh armory";
+        ArmoryIndexButton.Content = _buildingArmoryIndex ? "Preparing…" : _armoryIndex is null ? "Armory index" : "Refresh armory";
     }
 
     static string Elapsed(Stopwatch watch) => watch.Elapsed.TotalSeconds >= 1
@@ -543,6 +531,7 @@ public partial class MainWindow : Window
         }
 
         UpdateNavigationButtons();
+        UpdateAssetActions();
     }
 
     void RememberPlace()
@@ -703,6 +692,7 @@ public partial class MainWindow : Window
 
     void Menu_Opened(object sender, RoutedEventArgs e)
     {
+        UpdateAssetActions();
         var item = ItemList.SelectedItem as BrowserItem;
         int count = ItemList.SelectedItems.Count;
 
@@ -908,6 +898,7 @@ public partial class MainWindow : Window
 
     void ItemList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
+        UpdateAssetActions();
         ShowPreview(ItemList.SelectedItem as BrowserItem);
     }
 
@@ -1042,8 +1033,7 @@ public partial class MainWindow : Window
         note = "";
 
         if (resource.ClassHash == TextureMap.ClassHash)
-            return TextureLoader.FromTexture(name, TextureMap.Read(data), _archives,
-                PendingCompiledMips());
+            return TextureLoader.FromTexture(name, TextureMap.Read(data), _archives, PendingCompiledMips());
 
         if (resource.ClassHash == CompiledMip.ClassHash)
             return TextureLoader.FromMip(name, CompiledMip.Read(data), _archives, out note);
@@ -1081,8 +1071,7 @@ public partial class MainWindow : Window
     void DescribeMaterial(Material material, List<string> lines)
     {
         lines.Add("");
-        lines.Add($"blend  {material.BlendMode}{(material.IsOpaque ? "  (opaque)" : "")}"
-            + (material.Flags.TwoSided ? "  two-sided" : ""));
+        lines.Add($"blend  {material.BlendMode}{(material.IsOpaque ? "  (opaque)" : "")}" + (material.Flags.TwoSided ? "  two-sided" : ""));
 
         if (material.Note.Length > 0)
             lines.Add($"note   {material.Note}");
@@ -1282,8 +1271,7 @@ public partial class MainWindow : Window
         if (found is null)
             return;
 
-        var view = TextureLoader.FromTexture(found.Resource.Name,
-            TextureMap.Read(found.Resource.Data), _archives);
+        var view = TextureLoader.FromTexture(found.Resource.Name, TextureMap.Read(found.Resource.Data), _archives);
 
         TextureWindow? window = null;
         window = new TextureWindow(view, _settings, () =>
@@ -1319,8 +1307,7 @@ public partial class MainWindow : Window
                 return Mesh.Read(data);
             }
 
-            if (item.Entry is not null && item.Entry.FileExtension == ".data"
-                && item.Entry.Length <= MaxPreviewBytes)
+            if (item.Entry is not null && item.Entry.FileExtension == ".data" && item.Entry.Length <= MaxPreviewBytes)
             {
                 using var stream = new MemoryStream(_archive!.ReadEntry(item.Entry));
                 var file = DataFile.Read(stream);
@@ -1387,8 +1374,7 @@ public partial class MainWindow : Window
         if (item.Resource is null || _showing is null)
             return;
 
-        byte[] data = _changes.Find(_showing.ArchivePath, _showing.EntryIndex, item.Index)?.Data
-            ?? item.Resource.Data;
+        byte[] data = _changes.Find(_showing.ArchivePath, _showing.EntryIndex, item.Index)?.Data ?? item.Resource.Data;
 
         try
         {
@@ -1555,8 +1541,7 @@ public partial class MainWindow : Window
                 queueImport = (data, summary) => QueueMeshViewerImport(where, item, data, summary);
             }
 
-            new MeshWindow(_previewMesh, meshData, _previewMeshName, _previewSiblings,
-                _archives, _skeletonIndex, _settings, queueImport, pending).Show();
+            new MeshWindow(_previewMesh, meshData, _previewMeshName, _previewSiblings, _archives, _skeletonIndex, _settings, queueImport, pending).Show();
             return;
         }
 
@@ -1580,9 +1565,7 @@ public partial class MainWindow : Window
 
     void QueueMeshViewerImport(Location where, BrowserItem item, byte[] rebuilt, string _)
     {
-        if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex,
-                where.EntryName, item.Index, item.Name, rebuilt,
-                ResourceClassHash: Mesh.ClassHash)]))
+        if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName, item.Index, item.Name, rebuilt, ResourceClassHash: Mesh.ClassHash)]))
             return;
 
         if (ReferenceEquals(_previewMeshItem, item) && _previewMeshWhere == where)
@@ -1613,9 +1596,7 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var dialog = new ImportWindow(resource.Name, texture,
-            TextureImporter.Targets(texture, location, resource.Name, _archives))
-            { Owner = this };
+        var dialog = new ImportWindow(resource.Name, texture, TextureImporter.Targets(texture, location, resource.Name, _archives)) { Owner = this };
 
         if (dialog.ShowDialog() != true || dialog.Path is null)
             return null;
@@ -1623,8 +1604,7 @@ public partial class MainWindow : Window
         Mouse.OverrideCursor = Cursors.Wait;
         try
         {
-            var changes = TextureImporter.Build(dialog.Path, texture, resource.Data, location, index,
-                resource.Name, _archives, dialog.GenerateMips, out _);
+            var changes = TextureImporter.Build(dialog.Path, texture, resource.Data, location, index, resource.Name, _archives, dialog.GenerateMips, out _);
 
             if (!QueueChanges(changes, $"Replace textures for {resource.Name}"))
                 return null;
@@ -1650,9 +1630,7 @@ public partial class MainWindow : Window
     {
         var replaced = new Dictionary<ulong, byte[]>();
 
-        foreach (PendingChange change in changes.Where(change =>
-                     change.ResourceClassHash == CompiledMip.ClassHash
-                     && change.Data.Length >= sizeof(ulong)))
+        foreach (PendingChange change in changes.Where(change => change.ResourceClassHash == CompiledMip.ClassHash && change.Data.Length >= sizeof(ulong)))
             replaced[BitConverter.ToUInt64(change.Data, 0)] = change.Data;
 
         var view = TextureLoader.FromTexture(name, TextureMap.Read(changes[0].Data), _archives, replaced);
@@ -1666,8 +1644,7 @@ public partial class MainWindow : Window
 
     (Resource Resource, Location Location, int Index) LocateTexture(TextureView view)
     {
-        if (ItemList.SelectedItem is BrowserItem item && item.Resource is not null && _showing is not null
-            && item.Resource.ClassHash == TextureMap.ClassHash && item.Resource.Id == view.Texture.Id)
+        if (ItemList.SelectedItem is BrowserItem item && item.Resource is not null && _showing is not null && item.Resource.ClassHash == TextureMap.ClassHash && item.Resource.Id == view.Texture.Id)
             return (item.Resource, _showing, item.Index);
 
         var found = _archives?.FindResource(view.Texture.Id, TextureMap.ClassHash) ?? throw new InvalidOperationException($"The TextureMap behind this view (id 0x{view.Texture.Id:X}) was not found in any archive.");
@@ -1687,9 +1664,7 @@ public partial class MainWindow : Window
 
         new TimeCycleWindow(cycle, item.Name, data =>
         {
-            if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex,
-                    where.EntryName, item.Index, item.Name, data,
-                    ResourceClassHash: item.Resource!.ClassHash)], $"Edit {item.Name}"))
+            if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName, item.Index, item.Name, data, ResourceClassHash: item.Resource!.ClassHash)], $"Edit {item.Name}"))
                 return;
 
             SetStatus($"{item.Name}: changes queued");
@@ -1702,9 +1677,7 @@ public partial class MainWindow : Window
         if (_previewBuildTableData is null || _previewBuildTableItem is null || _previewBuildTableWhere is null)
             return;
 
-        var currentArchivePaths = _settings.IsConfigured
-            ? ArchiveLocator.Find(_settings.GamePath)
-            : [];
+        var currentArchivePaths = _settings.IsConfigured ? ArchiveLocator.Find(_settings.GamePath) : [];
         if (_armoryIndex is not null && !_armoryIndex.MatchesArchives(currentArchivePaths))
         {
             _armoryIndex = null;
@@ -1730,13 +1703,7 @@ public partial class MainWindow : Window
             .Where(shown => shown.Resource is not null && shown.Id != 0)
             .GroupBy(shown => shown.Id)
             .Select(group => group.First())
-            .Select(shown => new BuildTableTarget(
-                shown.Id,
-                shown.Name,
-                shown.Resource!.ClassHash,
-                ResourceTypes.NameOf(shown.Resource.ClassHash),
-                where.EntryName,
-                Path.GetFileName(where.ArchivePath)))
+            .Select(shown => new BuildTableTarget(shown.Id, shown.Name, shown.Resource!.ClassHash, ResourceTypes.NameOf(shown.Resource.ClassHash), where.EntryName, Path.GetFileName(where.ArchivePath)))
             .ToList();
 
         var archivePaths = currentArchivePaths;
@@ -1745,10 +1712,7 @@ public partial class MainWindow : Window
 
         var familyResources = _shown
             .Where(shown => shown.Resource?.ClassHash == BuildTable.ClassHash)
-            .Select(shown => new BuildTableResourceSource(
-                shown.Index, shown.Id, shown.Name,
-                _changes.Find(where.ArchivePath, where.EntryIndex, shown.Index)?.Data
-                    ?? shown.Resource!.Data))
+            .Select(shown => new BuildTableResourceSource(shown.Index, shown.Id, shown.Name, _changes.Find(where.ArchivePath, where.EntryIndex, shown.Index)?.Data ?? shown.Resource!.Data))
             .ToList();
         var previewResources = _shown
             .Where(shown => shown.Resource is not null && shown.Id != 0)
@@ -1771,18 +1735,14 @@ public partial class MainWindow : Window
         {
             var pendingArmoryChanges = _changes.Changes
                 .Where(change => BuildTableGameMetadataResolver.IsGameDatabaseContainer(change.EntryName))
-                .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex,
-                    change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
+                .Select(change => new ArmoryDatabaseResourceChange(change.ArchivePath, change.EntryIndex, change.EntryName, change.ResourceIndex, change.ResourceName, change.Data))
                 .ToList();
             workingArmoryIndex.ApplyChanges(pendingArmoryChanges);
         }
 
         new BuildTableWindow(data, item.Name, targets, archivePaths, familyResources, changed =>
         {
-            var queued = changed.Select(resource => new PendingChange(
-                    where.ArchivePath, where.EntryIndex, where.EntryName,
-                    resource.ResourceIndex, resource.Name, resource.Data,
-                    ResourceClassHash: BuildTable.ClassHash)).ToList();
+            var queued = changed.Select(resource => new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName, resource.ResourceIndex, resource.Name, resource.Data, ResourceClassHash: BuildTable.ClassHash)).ToList();
             if (!QueueChanges(queued, $"Edit {BuildTableNames.FamilyTitle(item.Name)}"))
                 return;
 
@@ -1797,9 +1757,7 @@ public partial class MainWindow : Window
             UpdateChangeButtons();
         }, workingArmoryIndex, databaseChanges =>
         {
-            var queued = databaseChanges.Select(change => new PendingChange(change.ArchivePath,
-                change.EntryIndex, change.EntryName, change.ResourceIndex,
-                change.ResourceName, change.Data)).ToList();
+            var queued = databaseChanges.Select(change => new PendingChange(change.ArchivePath, change.EntryIndex, change.EntryName, change.ResourceIndex, change.ResourceName, change.Data)).ToList();
             if (!QueueChanges(queued, "Update Gunsmith visibility"))
                 return;
 
@@ -1823,17 +1781,13 @@ public partial class MainWindow : Window
                 queued.AddRange(attachment.EntryAdditions.Select(addition => new PendingChange(
                     addition.ArchivePath, -1, addition.EntryName, -1, addition.EntryName,
                     addition.Data, null, new PendingForgeEntryAddition(addition.EntryId,
-                        addition.EntryName, addition.Extension, addition.InfoTemplate,
-                        addition.PrefetchBlock))));
+                        addition.EntryName, addition.Extension, addition.InfoTemplate, addition.PrefetchBlock))));
 
                 if (!QueueChanges(queued, $"Add attachment {attachment.DisplayName}"))
-                    throw new InvalidOperationException(
-                        "The attachment could not be added to the change list.");
+                    throw new InvalidOperationException("The attachment could not be added to the change list.");
 
-                BuildTableResourceChange? current = attachment.LocalChanges
-                    .FirstOrDefault(change => change.ResourceIndex == item.Index);
-                if (current is not null && _previewBuildTableItem == item
-                    && _previewBuildTableWhere == where)
+                BuildTableResourceChange? current = attachment.LocalChanges.FirstOrDefault(change => change.ResourceIndex == item.Index);
+                if (current is not null && _previewBuildTableItem == item && _previewBuildTableWhere == where)
                 {
                     _previewBuildTableData = current.Data;
                     _previewBuildTable = BuildTable.Read(current.Data);
@@ -1884,6 +1838,7 @@ public partial class MainWindow : Window
         CountText.Text = items.Count == _shown.Count
             ? $"{items.Count} items"
             : $"{items.Count} of {_shown.Count} items";
+        UpdateAssetActions();
     }
 
     void SetStatus(string text)
@@ -1903,9 +1858,7 @@ public partial class MainWindow : Window
         SetStatus($"{what}: {ex.Message}");
         StatusText.Foreground = (Brush)FindResource("Warning");
 
-        MessageBox.Show(owner ?? this,
-            $"{what}.{Environment.NewLine}{Environment.NewLine}{ex.Message}",
-            "Wildlands Toolkit", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(owner ?? this, $"{what}.{Environment.NewLine}{Environment.NewLine}{ex.Message}", "Wildlands Toolkit", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     protected override void OnClosed(EventArgs e)

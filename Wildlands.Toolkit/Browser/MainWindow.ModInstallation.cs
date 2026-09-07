@@ -1,8 +1,5 @@
 using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Input;
 using Microsoft.Win32;
 
 namespace Wildlands.Toolkit;
@@ -48,14 +45,11 @@ public partial class MainWindow
     static bool TryGetDroppedModPackage(IDataObject data, out string path)
     {
         path = "";
-        if (!data.GetDataPresent(DataFormats.FileDrop)
-            || data.GetData(DataFormats.FileDrop) is not string[] { Length: 1 } files)
+        if (!data.GetDataPresent(DataFormats.FileDrop) || data.GetData(DataFormats.FileDrop) is not string[] { Length: 1 } files)
             return false;
 
         string candidate = files[0];
-        if (!File.Exists(candidate)
-            || !Path.GetExtension(candidate).Equals(".wlmod",
-                StringComparison.OrdinalIgnoreCase))
+        if (!File.Exists(candidate) || !Path.GetExtension(candidate).Equals(".wlmod", StringComparison.OrdinalIgnoreCase))
             return false;
 
         path = Path.GetFullPath(candidate);
@@ -78,11 +72,9 @@ public partial class MainWindow
             }
 
             string? workspaceNotice = _project is not null
-                ? $"Installing this package will leave {_project.Name}. Its changes remain saved "
-                    + "in that project and will not be mixed with the mod being installed."
+                ? $"Installing this package will leave {_project.Name}. Its changes remain saved in that project and will not be mixed with the mod being installed."
                 : _changes.Count > 0
-                    ? $"Installing this package will discard "
-                        + $"{Amount(OperationCount(pendingOnly: true), "pending Free Mode change")}."
+                    ? $"Installing this package will discard {Amount(OperationCount(pendingOnly: true), "pending Free Mode change")}."
                     : null;
             var installDialog = new ModInstallWindow(package, workspaceNotice)
             {
@@ -97,8 +89,7 @@ public partial class MainWindow
             ModProject project;
             try
             {
-                project = await Task.Run(() => ModProject.ImportPackage(packagePath,
-                    AppSettings.ModLibraryPath));
+                project = await Task.Run(() => ModProject.ImportPackage(packagePath, AppSettings.ModLibraryPath));
             }
             finally
             {
@@ -115,16 +106,13 @@ public partial class MainWindow
             if (_changes.Count == 0)
             {
                 SetStatus($"{package.Name}: already installed");
-                MessageBox.Show(this,
-                    $"{package.Name} is already present in the game archives. No files needed to be written.",
-                    "Mod already installed", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, $"{package.Name} is already present in the game archives. No files needed to be written.", "Mod already installed", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             ApplyResult result = await ApplyChanges(this, package.Name);
             if (result == ApplyResult.Applied)
-                MessageBox.Show(this, $"{package.Name} was installed successfully.",
-                    "Mod installed", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, $"{package.Name} was installed successfully.", "Mod installed", MessageBoxButton.OK, MessageBoxImage.Information);
             else if (result is ApplyResult.Cancelled or ApplyResult.FailedBeforeWrite)
             {
                 RestoreWorkspace(previousProject, previousChanges);
@@ -163,8 +151,7 @@ public partial class MainWindow
         }
         catch
         {
-            // A leftover local package cache is harmless and must not hide the
-            // original installation error or cancellation.
+            // A leftover local package cache is harmless
         }
     }
 }

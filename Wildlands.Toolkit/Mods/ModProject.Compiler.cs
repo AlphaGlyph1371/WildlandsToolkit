@@ -36,16 +36,40 @@ public sealed partial class ModProject
                     ForgeEntry? entry = archive.Entries.FirstOrDefault(candidate =>
                         candidate.Id == operation.EntryId);
 
+                    if (operation.Kind == ModOperationKind.RemoveForgeEntry)
+                    {
+                        if (entry is null)
+                        {
+                            alreadyApplied++;
+                            continue;
+                        }
+
+                        byte[] current = archive.ReadEntry(entry);
+                        if (!Matches(operation.BaseSha256, current)
+                            && !Matches(operation.DeployedSha256, current))
+                            throw new InvalidDataException(
+                                $"{operation.EntryName} was changed by the game or another mod.");
+                        changes.Set(new PendingChange(archivePath, entry.Index, entry.Name,
+                            -1, entry.Name, [],
+                            EntryRemoval: new PendingForgeEntryRemoval(entry.Id),
+                            ProjectOperationKey: operation.Key,
+                            OperationGroupId: GroupId(operation),
+                            OperationLabel: GroupLabel(operation)));
+                        continue;
+                    }
+
                     if (operation.Kind == ModOperationKind.AddForgeEntry)
                     {
                         if (entry is null)
                         {
                             changes.Set(new PendingChange(archivePath, -1, operation.EntryName,
-                                -1, operation.EntryName, payload, null,
-                                new PendingForgeEntryAddition(operation.EntryId, operation.EntryName,
+                                -1, operation.EntryName, payload,
+                                EntryAddition: new PendingForgeEntryAddition(operation.EntryId, operation.EntryName,
                                     operation.EntryExtension, ReadPayload(operation.EntryInfoPayload!),
-                                    ReadPayload(operation.PrefetchPayload!)), operation.Key,
-                                GroupId(operation), GroupLabel(operation)));
+                                    ReadPayload(operation.PrefetchPayload!)),
+                                ProjectOperationKey: operation.Key,
+                                OperationGroupId: GroupId(operation),
+                                OperationLabel: GroupLabel(operation)));
                         }
                         else if (archive.ReadEntry(entry).AsSpan().SequenceEqual(payload))
                         {
@@ -79,6 +103,25 @@ public sealed partial class ModProject
                         && candidate.ClassHash == operation.ResourceClassHash);
                     if (resource is not null)
                     {
+                        if (operation.Kind == ModOperationKind.RemoveResource)
+                        {
+                            string currentHash = Hash(resource.Data);
+                            if (!Matches(operation.BaseSha256, currentHash)
+                                && !Matches(operation.DeployedSha256, currentHash))
+                                throw new InvalidDataException(
+                                    $"{operation.ResourceName} was changed by the game or another mod.");
+                            int removalIndex = entryFile.File.Resources.IndexOf(resource);
+                            changes.Set(new PendingChange(archivePath, entry.Index, entry.Name,
+                                removalIndex, operation.ResourceName, [],
+                                Removal: new PendingResourceRemoval(resource.Id,
+                                    resource.ClassHash),
+                                ProjectOperationKey: operation.Key,
+                                OperationGroupId: GroupId(operation),
+                                OperationLabel: GroupLabel(operation),
+                                ResourceClassHash: operation.ResourceClassHash));
+                            continue;
+                        }
+
                         if (resource.Data.AsSpan().SequenceEqual(payload))
                         {
                             alreadyApplied++;
@@ -117,6 +160,10 @@ public sealed partial class ModProject
                             OperationGroupId: GroupId(operation),
                             OperationLabel: GroupLabel(operation),
                             ResourceClassHash: operation.ResourceClassHash));
+                    }
+                    else if (operation.Kind == ModOperationKind.RemoveResource)
+                    {
+                        alreadyApplied++;
                     }
                     else
                     {

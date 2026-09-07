@@ -215,7 +215,7 @@ public sealed class ChangeOperationRow
             .Concat(changes.Select(change => Path.GetFileName(change.ArchivePath))), "archives");
         Status = changes.Count > 0 ? "Pending" : "Saved in project";
         RevealChange = changes.FirstOrDefault(change => change.EntryAddition is null
-            && change.EntryIndex >= 0 && change.ResourceIndex >= 0);
+            && change.EntryIndex >= 0);
         RevealOperation = projectOperations.FirstOrDefault();
     }
 

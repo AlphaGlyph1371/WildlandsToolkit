@@ -180,13 +180,28 @@ public sealed partial class ModProject
             archive = ForgeArchive.Open(archivePath);
             archives.Add(archivePath, archive);
         }
+
+        ForgeEntry archiveEntry = archive.Entries.FirstOrDefault(candidate =>
+            candidate.Index == change.EntryIndex)
+            ?? throw new InvalidDataException(
+                $"Entry index {change.EntryIndex} is outside {Path.GetFileName(archivePath)}.");
+        if (change.EntryRemoval is { } entryRemoval)
+        {
+            if (archiveEntry.Id != entryRemoval.Id)
+                throw new InvalidDataException(
+                    $"{change.EntryName} no longer identifies the Forge entry queued for deletion.");
+            operation.Kind = ModOperationKind.RemoveForgeEntry;
+            operation.EntryId = archiveEntry.Id;
+            operation.EntryName = archiveEntry.Name;
+            operation.BaseSha256 = Hash(archive.ReadEntry(archiveEntry));
+            SetOrUpdate(operation, [], null, null, null);
+            return operation.Key;
+        }
+
         if (!entries.TryGetValue((archivePath, change.EntryIndex), out var entryFile))
         {
-            ForgeEntry entry = archive.Entries.FirstOrDefault(candidate =>
-                candidate.Index == change.EntryIndex)
-                ?? throw new InvalidDataException(
-                    $"Entry index {change.EntryIndex} is outside {Path.GetFileName(archivePath)}.");
-            entryFile = (entry, DataFile.Read(new MemoryStream(archive.ReadEntry(entry))));
+            entryFile = (archiveEntry,
+                DataFile.Read(new MemoryStream(archive.ReadEntry(archiveEntry))));
             entries.Add((archivePath, change.EntryIndex), entryFile);
         }
 
@@ -217,6 +232,19 @@ public sealed partial class ModProject
             throw new InvalidDataException(
                 $"Resource index {change.ResourceIndex} is outside {entryFile.Entry.Name}.");
         Resource resource = entryFile.File.Resources[change.ResourceIndex];
+        if (change.Removal is { } removal)
+        {
+            if (resource.Id != removal.Id || resource.ClassHash != removal.ClassHash)
+                throw new InvalidDataException(
+                    $"{change.ResourceName} no longer identifies the resource queued for deletion.");
+            operation.Kind = ModOperationKind.RemoveResource;
+            operation.ResourceId = resource.Id;
+            operation.ResourceClassHash = resource.ClassHash;
+            operation.BaseSha256 = Hash(resource.Data);
+            SetOrUpdate(operation, [], null, null, null);
+            return operation.Key;
+        }
+
         operation.Kind = ModOperationKind.ReplaceResource;
         operation.ResourceId = resource.Id;
         operation.ResourceClassHash = resource.ClassHash;
@@ -235,7 +263,8 @@ public sealed partial class ModProject
         {
             operation.BaseSha256 ??= old.BaseSha256;
             operation.DeployedSha256 = old.DeployedSha256;
-            if (old.Kind == ModOperationKind.AddResource)
+            if (old.Kind == ModOperationKind.AddResource
+                && operation.Kind == ModOperationKind.ReplaceResource)
             {
                 operation.Kind = ModOperationKind.AddResource;
                 operation.BaseSha256 = null;
@@ -293,7 +322,14 @@ public sealed partial class ModProject
 
         Resource? target = desired.Resources.FirstOrDefault(resource =>
             resource.Id == resourceId && resource.ClassHash == classHash);
-        if (target is null)
+        if (change.Removal is not null)
+        {
+            if (target is null)
+                throw new InvalidDataException(
+                    $"{change.ResourceName} is not present in the added container.");
+            desired.Resources.Remove(target);
+        }
+        else if (target is null)
         {
             desired.Resources.Add(new Resource
             {
@@ -450,6 +486,8 @@ public sealed partial class ModProject
             {
                 ModOperationKind.AddForgeEntry => $"Add asset container {operation.EntryName}",
                 ModOperationKind.AddResource => $"Add resource {operation.ResourceName}",
+                ModOperationKind.RemoveForgeEntry => $"Delete asset container {operation.EntryName}",
+                ModOperationKind.RemoveResource => $"Delete resource {operation.ResourceName}",
                 _ => $"Replace {operation.ResourceName}",
             }
             : operation.OperationLabel;

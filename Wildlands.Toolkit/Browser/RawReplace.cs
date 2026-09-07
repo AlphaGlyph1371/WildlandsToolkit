@@ -33,17 +33,14 @@ public static class RawReplace
         }
         catch (Exception ex)
         {
-            MessageBox.Show(owner, ex.Message, $"Could not read {Path.GetFileName(dialog.FileName)}",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(owner, ex.Message, $"Could not read {Path.GetFileName(dialog.FileName)}", MessageBoxButton.OK, MessageBoxImage.Warning);
             return null;
         }
 
         data = ResourceCheck.NormalizeExternalFile(data, resource.ClassHash, out _);
         string? complaint = ResourceCheck.Against(data, resource.Id, resource.ClassHash, resource.Name);
 
-        if (complaint is not null && MessageBox.Show(owner,
-            complaint + "\n\nUse it anyway?", "Replace resource",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (complaint is not null && MessageBox.Show(owner, complaint + "\n\nUse it anyway?", "Replace resource", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
             return null;
         }

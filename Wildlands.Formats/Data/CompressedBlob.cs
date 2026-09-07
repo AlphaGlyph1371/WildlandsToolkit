@@ -50,9 +50,7 @@ public static class CompressedBlob
         var sizes = new (int Uncompressed, int Compressed)[blockCount];
         for (int i = 0; i < blockCount; i++)
         {
-            sizes[i] = info.HasWideBlockInfo
-                ? (reader.ReadInt32(), reader.ReadInt32())
-                : (reader.ReadUInt16(), reader.ReadUInt16());
+            sizes[i] = info.HasWideBlockInfo ? (reader.ReadInt32(), reader.ReadInt32()) : (reader.ReadUInt16(), reader.ReadUInt16());
         }
 
         int total = 0;
@@ -106,8 +104,7 @@ public static class CompressedBlob
 
             blocks[i] = stream.Length >= lengths[i] ? block.ToArray() : stream;
 
-            if (i < previousBlocks.Length && previousBlocks[i].Length < blocks[i].Length
-                && SameBlock(data, offset, lengths[i], previous, blockSize))
+            if (i < previousBlocks.Length && previousBlocks[i].Length < blocks[i].Length && SameBlock(data, offset, lengths[i], previous, blockSize))
                 blocks[i] = previousBlocks[i];
         }
 

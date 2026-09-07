@@ -39,15 +39,41 @@ public static class ArchiveWriteService
     static void Rebuild(ArchiveWork work, IProgress<string>? progress)
     {
         var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(work.Path))!);
-        long required = checked(work.OutputSize + DiskSpacePreflight.SafetyMargin);
+        long required = checked(work.OutputSize + work.IntermediateSize
+            + DiskSpacePreflight.SafetyMargin);
         if (drive.AvailableFreeSpace < required)
             throw new IOException($"Rebuilding {work.Name} needs "
                 + $"{DiskSpacePreflight.FormatBytes(required)} free on {drive.Name}, but only "
                 + $"{DiskSpacePreflight.FormatBytes(drive.AvailableFreeSpace)} are available.");
 
         string temporary = work.Path + ".rebuild";
-        using (ForgeArchive archive = ForgeArchive.Open(work.Path))
-            archive.Rebuild(temporary, work.Entries, work.EntryAdditions, progress);
-        File.Move(temporary, work.Path, overwrite: true);
+        string removalStage = work.Path + ".remove-stage";
+        try
+        {
+            if (work.EntryRemovals.Count > 0 && work.EntryAdditions.Count > 0)
+            {
+                progress?.Report($"Removing entries from {work.Name}...");
+                using (ForgeArchive archive = ForgeArchive.Open(work.Path))
+                    archive.Rebuild(removalStage, work.Entries, [], work.EntryRemovals, progress);
+                using (ForgeArchive archive = ForgeArchive.Open(removalStage))
+                    archive.Rebuild(temporary, new Dictionary<int, byte[]>(),
+                        work.EntryAdditions, progress);
+            }
+            else
+            {
+                using ForgeArchive archive = ForgeArchive.Open(work.Path);
+                archive.Rebuild(temporary, work.Entries, work.EntryAdditions,
+                    work.EntryRemovals, progress);
+            }
+
+            File.Move(temporary, work.Path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+            if (File.Exists(removalStage))
+                File.Delete(removalStage);
+        }
     }
 }

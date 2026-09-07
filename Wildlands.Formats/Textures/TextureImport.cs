@@ -32,16 +32,11 @@ public static class TextureImport
         }
 
         if (levels.Count < texture.MipCount)
-            throw new InvalidDataException(
-                $"The image is {width} x {height} and its mip chain has {levels.Count} levels, "
-                + $"where the texture needs {texture.MipCount}. Use an image at least as large as the texture.");
+            throw new InvalidDataException($"The image is {width} x {height} and its mip chain has {levels.Count} levels, where the texture needs {texture.MipCount}. Use an image at least as large as the texture.");
 
         return levels;
     }
 
-    // The number of mip levels never changes, only how big each of them is - a chain that
-    // starts higher simply ends at a larger level, which the game does itself in 469 of 3000
-    // textures. That is what makes a sharper texture possible without a new CompiledMip.
     public static byte[] EmbeddedChain(TextureMap texture, IReadOnlyList<byte[]> levels, int width, int height)
     {
         int start = texture.FirstStoredLevel();
@@ -71,14 +66,11 @@ public static class TextureImport
         }
 
         if (offset != chain.Length)
-            throw new InvalidDataException(
-                $"The rebuilt mip chain is {offset} bytes where the texture stores {chain.Length}.");
+            throw new InvalidDataException($"The rebuilt mip chain is {offset} bytes where the texture stores {chain.Length}.");
 
         return chain;
     }
 
-    // Both a TextureMap and a CompiledMip keep the length of their pixel block in the Int32
-    // right in front of it, so one function serves for both and a block may change size.
     public static byte[] ReplacePixels(byte[] resource, int offset, byte[] pixels)
     {
         int previous = BitConverter.ToInt32(resource, offset - 4);

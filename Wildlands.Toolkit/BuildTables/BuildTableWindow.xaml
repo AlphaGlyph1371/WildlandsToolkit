@@ -192,14 +192,14 @@
                           Background="{StaticResource Background}">
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="510"
                                     Margin="36" TextBlock.TextAlignment="Center">
-                            <TextBlock Text="Armory connection table" FontSize="22" FontWeight="SemiBold"
+                            <TextBlock x:Name="OverviewTitleText" Text="BuildTable connections" FontSize="22" FontWeight="SemiBold"
                                        Foreground="{StaticResource Text}"/>
-                            <TextBlock Margin="0,10,0,0" FontSize="14" Foreground="{StaticResource Text}"
+                            <TextBlock x:Name="OverviewSummaryText" Margin="0,10,0,0" FontSize="14" Foreground="{StaticResource Text}"
                                        TextWrapping="Wrap"
-                                       Text="This table is the map of this weapon's armory."/>
-                            <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextDim}"
+                                       Text="This table connects the asset to its option groups."/>
+                            <TextBlock x:Name="OverviewDetailsText" Margin="0,6,0,0" Foreground="{StaticResource TextDim}"
                                        TextWrapping="Wrap"
-                                       Text="It connects the weapon to its attachment categories. It does not contain individual barrels, sights or magazines itself."/>
+                                       Text="It links related BuildTables and does not contain every selectable item itself."/>
                             <Border Margin="0,22,0,18" Height="1" Background="{StaticResource Border}"/>
                             <TextBlock Foreground="{StaticResource TextDim}" TextWrapping="Wrap"
                                        Text="Choose a category on the left to view and edit the options that belong to it."/>

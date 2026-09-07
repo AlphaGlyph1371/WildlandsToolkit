@@ -29,7 +29,6 @@ public static class Bc7
     static readonly byte[][] Partitions2 = BuildPartitions2();
     static readonly byte[][] Partitions3 = BuildPartitions3();
 
-    // The anchor of a subset is its first pixel, so these follow from the tables above.
     static readonly byte[] Anchors2 = BuildAnchors(Partitions2, 1);
     static readonly byte[] Anchors3Second = BuildAnchors(Partitions3, 1);
     static readonly byte[] Anchors3Third = BuildAnchors(Partitions3, 2);
@@ -129,7 +128,6 @@ public static class Bc7
         int[] weights = WeightsFor(m.IndexBits);
         int[] weights2 = m.IndexBits2 > 0 ? WeightsFor(m.IndexBits2) : weights;
 
-        // With two index sets the selection bit decides which one drives colour.
         var colorIndices = indices;
         var colorWeights = weights;
         var alphaIndices = indices;

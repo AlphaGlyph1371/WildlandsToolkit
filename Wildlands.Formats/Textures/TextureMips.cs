@@ -47,21 +47,15 @@ public sealed class TextureMipSet
 
     public TextureMipLevel? Find(int level) => Levels.FirstOrDefault(l => l.Level == level);
 
-    public static TextureMipSet Collect(TextureMap texture, ArchiveSet? archives) =>
-        Collect(texture, archives, null);
+    public static TextureMipSet Collect(TextureMap texture, ArchiveSet? archives) => Collect(texture, archives, null);
 
-    // Replacements are streamed mips that have been rebuilt but not written yet, so a
-    // preview can show them before the archive is touched.
-    public static TextureMipSet Collect(TextureMap texture, ArchiveSet? archives,
-        IReadOnlyDictionary<ulong, byte[]>? replaced)
+    public static TextureMipSet Collect(TextureMap texture, ArchiveSet? archives, IReadOnlyDictionary<ulong, byte[]>? replaced)
     {
         var set = new TextureMipSet();
 
         foreach (ulong id in texture.StreamedMips)
         {
-            var level = replaced is not null && replaced.TryGetValue(id, out var pending)
-                ? Describe(texture, CompiledMip.Read(pending), "replacement")
-                : archives is null ? null : ReadStreamed(texture, archives, id);
+            var level = replaced is not null && replaced.TryGetValue(id, out var pending) ? Describe(texture, CompiledMip.Read(pending), "replacement") : archives is null ? null : ReadStreamed(texture, archives, id);
 
             if (level is null)
                 set.MissingStreamed.Add(id);
@@ -95,8 +89,7 @@ public sealed class TextureMipSet
         }
     }
 
-    public static TextureMipLevel? Describe(TextureMap texture, CompiledMip mip, string sourceName,
-        string sourceArchive = "")
+    public static TextureMipLevel? Describe(TextureMap texture, CompiledMip mip, string sourceName, string sourceArchive = "")
     {
         int level = (int)mip.Level;
         if (level < 0 || level >= texture.MipCount)
