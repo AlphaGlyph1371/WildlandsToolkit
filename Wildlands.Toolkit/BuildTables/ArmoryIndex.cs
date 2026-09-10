@@ -95,19 +95,24 @@ public sealed class ArmoryIndex
     }
 
     internal IReadOnlyList<ArmoryDatabaseResourceChange> CreateVestRegistryInsertions(
-        ulong templateRecordId, ulong newRecordId, ulong templateLootId, ulong newLootId)
+        ulong templateRecordId, ulong newRecordId, ulong templateLootId, ulong newLootId,
+        ulong templateTagTableId, ulong newTagTableId)
     {
         if (newRecordId == 0 || newLootId == 0
             || _databaseResources.Any(resource => resource.Id == newRecordId || resource.Id == newLootId))
             throw new InvalidOperationException("The new vest record or loot-configuration ID is zero or already used.");
+        if (newTagTableId == 0 || newTagTableId == templateTagTableId)
+            throw new InvalidOperationException($"Vest tag-table ID 0x{newTagTableId:X12} is zero or the template itself.");
 
         GunsmithAvailabilityList vests = GunsmithAvailability.FindVestRegistries(this, templateRecordId).Single();
+        GunsmithAvailabilityList vestTables = GunsmithAvailability.FindVestTagTableRegistries(this, templateTagTableId).Single();
         GunsmithAvailabilityList recordDatabase = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateRecordId).Single();
         GunsmithAvailabilityList lootDatabase = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateLootId).Single();
         GunsmithAvailabilityList unlockables = GunsmithAvailability.FindUnlockRegistries(this, templateRecordId).Single();
         var insertions = new List<(GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>
         {
             (vests, templateRecordId, newRecordId),
+            (vestTables, templateTagTableId, newTagTableId),
             (recordDatabase, templateRecordId, newRecordId),
             (lootDatabase, templateLootId, newLootId),
             (unlockables, templateRecordId, newRecordId),

@@ -64,6 +64,64 @@ internal static class GunsmithAvailability
         return results;
     }
 
+    public static IReadOnlyList<GunsmithAvailabilityList> FindVestTagTableRegistries(
+        ArmoryIndex index, ulong templateTagTableId)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        if (templateTagTableId == 0)
+            return [];
+
+        var owners = index.DatabaseResources
+            .Where(resource => resource.Id == VestsResourceId && resource.ClassHash == VestsClassHash)
+            .GroupBy(resource => resource.Id)
+            .Select(group => group.Last())
+            .ToList();
+
+        var results = new List<GunsmithAvailabilityList>();
+        foreach (ArmoryIndex.IndexedResource owner in owners)
+        {
+            var candidates = ReadTagTableLists(owner.Data, templateTagTableId);
+            if (candidates.Count == 0)
+                continue;
+            if (candidates.Count != 1)
+                throw new InvalidOperationException($"Vests resource 0x{owner.Id:X12} contains {candidates.Count} matching BuildTable lists and cannot be extended safely.");
+
+            var candidate = candidates[0];
+            results.Add(new GunsmithAvailabilityList(owner, candidate.CountOffset, 9, 1,
+                candidate.TableIds, candidate.TableIds));
+        }
+        return results;
+    }
+
+    static IReadOnlyList<(int CountOffset, IReadOnlyList<ulong> TableIds)> ReadTagTableLists(
+        ReadOnlySpan<byte> data, ulong requiredId)
+    {
+        const int entryStride = 9;
+        var results = new List<(int, IReadOnlyList<ulong>)>();
+        for (int offset = 0; offset + sizeof(uint) <= data.Length; offset++)
+        {
+            uint count = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+            if (count is < 2 or > 65_535 || offset + sizeof(uint) + (long)count * entryStride > data.Length)
+                continue;
+
+            int entriesOffset = offset + sizeof(uint);
+            var ids = new ulong[count];
+            bool valid = true, containsRequired = false;
+            for (int item = 0; item < ids.Length; item++)
+            {
+                int entryOffset = entriesOffset + item * entryStride;
+                if (data[entryOffset] != 0) { valid = false; break; }
+                ulong id = BinaryPrimitives.ReadUInt64LittleEndian(data[(entryOffset + 1)..]);
+                if (id is <= 0xFFFF or > 0xFFFFFFFFFFFF) { valid = false; break; }
+                ids[item] = id;
+                containsRequired |= id == requiredId;
+            }
+            if (valid && containsRequired && ids.Distinct().Count() == ids.Length)
+                results.Add((offset, ids));
+        }
+        return results;
+    }
+
     public static IReadOnlyList<GunsmithAvailabilityList> FindAttachmentTypeRegistries(ArmoryIndex index, ulong templateRecordId, uint templateRecordClassHash)
     {
         ArgumentNullException.ThrowIfNull(index);

@@ -76,6 +76,21 @@ public sealed class BuildTableTagList
     public string Path { get; }
 }
 
+public sealed class BuildTableHandleList
+{
+    internal BuildTableHandleList(int countOffset,
+        IReadOnlyList<BuildTableReference> entries, string path)
+    {
+        CountOffset = countOffset;
+        Entries = entries;
+        Path = path;
+    }
+
+    public int CountOffset { get; }
+    public IReadOnlyList<BuildTableReference> Entries { get; }
+    public string Path { get; }
+}
+
 public sealed class BuildTableRow
 {
     internal BuildTableRow(int index, int offset, int length, ulong id, IReadOnlyList<BuildTableReference> references, IReadOnlyList<BuildTableObject> objects, BuildTableTagEntry tag, BuildTableTagList possibleTags)
@@ -119,6 +134,7 @@ public sealed class BuildTableAsset
     public List<BuildTableObject> Objects { get; } = [];
     public List<BuildTableRow> Rows { get; } = [];
     public List<BuildTableTagList> BuildTagLists { get; } = [];
+    public List<BuildTableHandleList> HandleLists { get; } = [];
 
     public byte[] Write()
     {
@@ -295,6 +311,83 @@ public sealed class BuildTableAsset
         BuildTableAsset checkedTable = BuildTable.Read(updated);
         if (listIndexes.Any(index => checkedTable.BuildTagLists[index].Entries.Count(entry => entry.Value == newTag) != 1))
             throw new InvalidDataException("The new BuildTag was not retained in every matching BuildTags list.");
+        return true;
+    }
+
+    public bool TryAppendTableBranch(IReadOnlyDictionary<ulong, ulong> tableMap,
+        out byte[] updated, out bool found)
+    {
+        ArgumentNullException.ThrowIfNull(tableMap);
+        if (tableMap.Count == 0 || tableMap.Any(pair => pair.Key == 0
+                || pair.Value == 0 || pair.Key == pair.Value)
+            || tableMap.Values.Distinct().Count() != tableMap.Count)
+            throw new ArgumentException("BuildTable branch mappings must be distinct and non-zero.",
+                nameof(tableMap));
+
+        List<BuildTableHandleList> matches = HandleLists.Where(list =>
+                tableMap.Keys.All(template => list.Entries.Count(entry =>
+                    entry.Value == template) == 1))
+            .ToList();
+        found = matches.Count > 0;
+        if (!found)
+        {
+            updated = Write();
+            return false;
+        }
+
+        foreach (BuildTableHandleList list in matches)
+        {
+            int present = tableMap.Values.Count(value => list.Entries.Any(entry =>
+                entry.Value == value));
+            if (present != 0 && present != tableMap.Count)
+                throw new InvalidDataException($"{list.Path} contains only part of the cloned BuildTable branch.");
+        }
+        if (matches.All(list => tableMap.Values.All(value => list.Entries.Any(entry =>
+                entry.Value == value))))
+        {
+            updated = Write();
+            return false;
+        }
+
+        updated = Write();
+        foreach (BuildTableHandleList list in matches.OrderByDescending(list =>
+                     list.Entries[^1].Offset))
+        {
+            if (tableMap.Values.All(value => list.Entries.Any(entry =>
+                    entry.Value == value)))
+                continue;
+
+            var additions = tableMap.Select(pair =>
+                (Pair: pair, Template: list.Entries.Single(entry =>
+                        entry.Value == pair.Key)))
+                .OrderBy(item => item.Template.Offset)
+                .ToList();
+            int insertAt = list.Entries[^1].Offset + sizeof(ulong);
+            byte[] expanded = new byte[checked(updated.Length + additions.Count * 9)];
+            updated.AsSpan(0, insertAt).CopyTo(expanded);
+            for (int index = 0; index < additions.Count; index++)
+            {
+                int entryOffset = insertAt + index * 9;
+                expanded[entryOffset] = additions[index].Template.ReferenceTag ?? 0;
+                BinaryPrimitives.WriteUInt64LittleEndian(expanded.AsSpan(entryOffset + 1),
+                    additions[index].Pair.Value);
+            }
+            updated.AsSpan(insertAt).CopyTo(expanded.AsSpan(insertAt
+                + additions.Count * 9));
+            BinaryPrimitives.WriteInt32LittleEndian(expanded.AsSpan(list.CountOffset),
+                list.Entries.Count + additions.Count);
+            updated = expanded;
+        }
+
+        BuildTableAsset checkedTable = BuildTable.Read(updated);
+        List<BuildTableHandleList> checkedLists = checkedTable.HandleLists.Where(list =>
+                tableMap.Keys.All(template => list.Entries.Count(entry =>
+                    entry.Value == template) == 1))
+            .ToList();
+        if (checkedLists.Count != matches.Count || checkedLists.Any(list =>
+                tableMap.Values.Any(value => list.Entries.Count(entry =>
+                    entry.Value == value) != 1)))
+            throw new InvalidDataException("The cloned BuildTable branch did not survive handle-list validation.");
         return true;
     }
 
@@ -517,9 +610,13 @@ public static class BuildTable
             ReadHeader(RowSelectorHash, "default row selector");
             ReadRowSelector();
             ReadBytes(4, "BuildTable flags");
+            int subTableCountOffset = checked((int)_reader.BaseStream.Position);
             int subTables = ReadCount("sub-table");
+            var subTableEntries = new List<BuildTableReference>(subTables);
             for (int i = 0; i < subTables; i++)
-                ReadHandle($"sub-table {i}");
+                subTableEntries.Add(ReadHandle($"sub-table {i}"));
+            _asset.HandleLists.Add(new BuildTableHandleList(subTableCountOffset,
+                subTableEntries, "BuildTable sub-tables"));
 
             if (_reader.BaseStream.Position != _reader.BaseStream.Length)
                 throw new InvalidDataException($"BuildTable has {_reader.BaseStream.Length - _reader.BaseStream.Position} unexplained byte(s) at 0x{_reader.BaseStream.Position:X}.");
@@ -638,9 +735,13 @@ public static class BuildTable
                 ReadObjectPointer($"default selector selection {i}");
 
             ReadHandle("associated entity builder");
+            int additionalCountOffset = checked((int)_reader.BaseStream.Position);
             int additional = ReadCount("additional table");
+            var additionalEntries = new List<BuildTableReference>(additional);
             for (int i = 0; i < additional; i++)
-                ReadHandle($"additional table {i}");
+                additionalEntries.Add(ReadHandle($"additional table {i}"));
+            _asset.HandleLists.Add(new BuildTableHandleList(additionalCountOffset,
+                additionalEntries, "default selector additional tables"));
         }
 
         void ReadDynamicProperty(string field)
@@ -796,10 +897,11 @@ public static class BuildTable
             _asset.BuildTagLists.Add(new BuildTableTagList(headerOffset, countOffset, header.Id, entries, field));
         }
 
-        void ReadHandle(string field)
+        BuildTableReference ReadHandle(string field)
         {
             byte referenceTag = ReadByte(field + " handle tag");
             ReadReference(BuildTableReferenceKind.Handle, field, referenceTag);
+            return _asset.References[^1];
         }
 
         void ReadFileReference(string field)

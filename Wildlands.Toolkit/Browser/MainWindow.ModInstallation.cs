@@ -22,9 +22,10 @@ public partial class MainWindow
 
     void Window_PreviewDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = !_loading && !_applying && TryGetDroppedModPackage(e.Data, out _)
-            ? DragDropEffects.Copy
-            : DragDropEffects.None;
+        bool acceptsPackage = TryGetDroppedModPackage(e.Data, out _);
+        bool acceptsAssets = TryGetDroppedAssets(e.Data, out _);
+        e.Effects = !_loading && !_applying && (acceptsPackage || acceptsAssets)
+            ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
@@ -33,13 +34,27 @@ public partial class MainWindow
         e.Handled = true;
         if (_loading || _applying)
             return;
-        if (!TryGetDroppedModPackage(e.Data, out string packagePath))
+
+        if (TryGetDroppedModPackage(e.Data, out string packagePath))
         {
-            SetStatus("Drop exactly one .wlmod package to install it");
+            await InstallModPackageAsync(packagePath);
             return;
         }
 
-        await InstallModPackageAsync(packagePath);
+        if (!TryGetDroppedAssets(e.Data, out string[] paths))
+        {
+            SetStatus(_showing is null
+                ? "Open an archive before dropping assets"
+                : _showing.IsArchiveRoot
+                    ? "Drop one or more complete .data containers here"
+                    : "Drop one or more raw game resources here");
+            return;
+        }
+
+        if (_showing!.IsArchiveRoot)
+            await AddContainers(paths);
+        else
+            await AddResources(paths);
     }
 
     static bool TryGetDroppedModPackage(IDataObject data, out string path)
@@ -53,6 +68,26 @@ public partial class MainWindow
             return false;
 
         path = Path.GetFullPath(candidate);
+        return true;
+    }
+
+    bool TryGetDroppedAssets(IDataObject data, out string[] paths)
+    {
+        paths = [];
+        if (_showing is null || _archive is null
+            || !data.GetDataPresent(DataFormats.FileDrop)
+            || data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } files
+            || files.Any(file => !File.Exists(file)))
+            return false;
+
+        if (_showing.IsArchiveRoot
+            && files.Any(file => !Path.GetExtension(file).Equals(".data", StringComparison.OrdinalIgnoreCase)))
+            return false;
+        if (!_showing.IsArchiveRoot
+            && files.Any(file => Path.GetExtension(file).Equals(".wlmod", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        paths = files.Select(Path.GetFullPath).ToArray();
         return true;
     }
 

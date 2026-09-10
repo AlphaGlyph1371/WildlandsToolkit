@@ -87,6 +87,8 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  dblists <archive.forge> <container filter> <resource id> [id...]  find counted id lists in one database resource");
+    Console.WriteLine("  handlelists <archive.forge> <container filter> [table filter] [id...]  show the BuildTable handle lists that own sub-tables");
     Console.WriteLine("  armorymeta <game folder> <build tag> [build tag...]  resolve gameplay records for exact BuildTags");
     Console.WriteLine("  armorylists <game folder> <record id>  group binary list candidates containing an exact record ID");
     Console.WriteLine("  charactersmithcheck <game folder> <record id>  verify an in-memory CharacterSmith row insertion");
@@ -272,6 +274,12 @@ try
             return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
         case "buildinfo" when args.Length >= 3:
             return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "dblists" when args.Length >= 4:
+            return InspectDatabaseLists(args[1], args[2], ParseResourceId(args[3]),
+                args.Length >= 5 ? args[4..].Select(ParseResourceId).ToList() : []);
+        case "handlelists" when args.Length >= 3:
+            return InspectHandleLists(args[1], args[2], args.Length >= 4 ? args[3] : "",
+                args.Length >= 5 ? args[4..].Select(ParseResourceId).ToList() : []);
         case "armorymeta" when args.Length >= 3:
             return InspectArmoryMetadata(args[1], args[2..]);
         case "armorylists" when args.Length >= 3:
@@ -3952,6 +3960,108 @@ static int InspectBuildTables(string archivePath, string containerFilter, string
     }
     Console.WriteLine($"{found} BuildTable(s)");
     return found == 0 ? 1 : 0;
+}
+
+static int InspectHandleLists(string archivePath, string containerFilter, string tableFilter,
+    IReadOnlyList<ulong> wanted)
+{
+    int found = 0;
+    int holding = 0;
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
+
+        foreach (Resource resource in file.Resources.Where(resource =>
+                     resource.ClassHash == BuildTable.ClassHash
+                     && resource.Name.Contains(tableFilter, StringComparison.OrdinalIgnoreCase)))
+        {
+            BuildTableAsset table;
+            try
+            {
+                table = BuildTable.Read(resource.Data);
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"0x{resource.Id:X12} {resource.Name}: {exception.Message}");
+                continue;
+            }
+
+            found++;
+            var values = table.HandleLists.SelectMany(list => list.Entries)
+                .Select(reference => reference.Value)
+                .ToList();
+            int present = wanted.Count(id => values.Contains(id));
+            if (wanted.Count > 0 && present == 0)
+                continue;
+            if (present == wanted.Count && wanted.Count > 0)
+                holding++;
+
+            string lists = string.Join(", ", table.HandleLists.Select(list =>
+                $"{list.Path} at 0x{list.CountOffset:X}: {list.Entries.Count}"));
+            string carried = wanted.Count == 0 ? "" : $" | {present}/{wanted.Count} wanted";
+            Console.WriteLine($"{entry.Name} | 0x{resource.Id:X12} {resource.Name} | {lists}{carried}");
+            foreach (ulong id in wanted.Where(id => values.Contains(id)))
+            {
+                BuildTableReference match = table.HandleLists.SelectMany(list => list.Entries)
+                    .First(reference => reference.Value == id);
+                Console.WriteLine($"    0x{id:X12} at 0x{match.Offset:X} in {match.Path}");
+            }
+        }
+    }
+    Console.WriteLine($"{found} BuildTable(s), {holding} holding every wanted id");
+    return found == 0 ? 1 : 0;
+}
+
+static int InspectDatabaseLists(string archivePath, string containerFilter, ulong resourceId,
+    IReadOnlyList<ulong> wanted)
+{
+    using var archive = ForgeArchive.Open(archivePath);
+    foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
+                 && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
+    {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
+        Resource? resource = file.Resources.FirstOrDefault(candidate => candidate.Id == resourceId);
+        if (resource is null)
+            continue;
+
+        byte[] data = resource.Data;
+        Console.WriteLine($"{entry.Name} | 0x{resource.Id:X12} {resource.Name}, {data.Length} bytes");
+        for (int stride = 8; stride <= 12; stride++)
+        for (int valueOffset = 0; valueOffset + sizeof(ulong) <= stride; valueOffset++)
+        {
+            for (int offset = 0; offset + sizeof(uint) <= data.Length; offset++)
+            {
+                uint count = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset));
+                if (count is < 3 or > 65_535
+                    || offset + sizeof(uint) + (long)count * stride > data.Length)
+                    continue;
+
+                var ids = new ulong[count];
+                bool valid = true;
+                for (int item = 0; item < ids.Length && valid; item++)
+                {
+                    int entryOffset = offset + sizeof(uint) + item * stride;
+                    ulong id = BinaryPrimitives.ReadUInt64LittleEndian(
+                        data.AsSpan(entryOffset + valueOffset));
+                    valid = id is > 0xFFFF and <= 0xFFFFFFFFFFFF;
+                    ids[item] = id;
+                }
+                if (!valid || ids.Distinct().Count() != ids.Length)
+                    continue;
+                int present = wanted.Count(id => ids.Contains(id));
+                if (wanted.Count > 0 && present == 0)
+                    continue;
+                Console.WriteLine($"  count 0x{offset:X} = {count} | stride {stride} "
+                    + $"| value at +{valueOffset} | {present}/{wanted.Count} wanted "
+                    + $"| first 0x{ids[0]:X12} last 0x{ids[^1]:X12}");
+            }
+        }
+    }
+    return 0;
 }
 
 static bool TryReadDataFile(ForgeArchive archive, ForgeEntry entry, out DataFile file)

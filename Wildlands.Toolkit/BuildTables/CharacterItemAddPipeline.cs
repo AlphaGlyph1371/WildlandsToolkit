@@ -38,7 +38,8 @@ internal sealed record VestBranchMirrorPlan(
     ulong ItemTableId,
     ulong TagTableId,
     ulong ModelTableId,
-    IReadOnlyList<Resource> BranchResources);
+    IReadOnlyList<Resource> BranchResources,
+    IReadOnlyDictionary<uint, uint> RowTagMap);
 
 internal sealed record VestBranchMirrorResult(
     IReadOnlyList<ArmoryDatabaseResourceChange> Changes,
@@ -160,6 +161,7 @@ internal static class CharacterItemAddPipeline
             id => AttachmentAddPipeline.Allocate64($"character-buildtable:{draft.InternalName}:{id:X}", used64));
         var resourceAdditions = new List<ArmoryArchiveResourceAddition>();
         var branchResources = new List<Resource>();
+        var rowTagMap = new Dictionary<uint, uint>();
         foreach (ulong oldId in branchIds)
         {
             Resource source = GetLocalBuildTable(localResources, oldId);
@@ -177,12 +179,23 @@ internal static class CharacterItemAddPipeline
             }
             if (oldId == template.TagTableId)
                 clone.SetRowTag(0, gameplayTag);
+            else
+                for (int row = 0; row < clone.Rows.Count; row++)
+                {
+                    uint rowTag = AttachmentAddPipeline.Allocate32(
+                        $"character-row:{draft.InternalName}:{oldId:X}:{row}", usedTags);
+                    rowTagMap.Add(clone.Rows[row].Tag, rowTag);
+                    clone.SetRowTag(row, rowTag);
+                }
 
             byte[] cloneData = clone.Write();
             BuildTableAsset checkedClone = BuildTable.Read(cloneData);
             if (checkedClone.Id != tableIdMap[oldId]
                 || checkedClone.References.Any(reference => branchIds.Contains(reference.Value))
-                || checkedClone.References.Any(reference => selectorMap.ContainsKey(reference.Value)))
+                || checkedClone.References.Any(reference => selectorMap.ContainsKey(reference.Value))
+                || checkedClone.Rows.Select(row => row.Tag)
+                    .Intersect(BuildTable.Read(source.Data).Rows.Select(row => row.Tag))
+                    .Any())
                 throw new InvalidDataException($"The cloned character BuildTable 0x{oldId:X12} failed validation.");
 
             Resource clonedResource = DataFile.CloneResource(source, tableIdMap[oldId],
@@ -201,7 +214,14 @@ internal static class CharacterItemAddPipeline
         ReplaceComponentReference(editedConfiguration.Rows[newRowIndex], 8, template.ItemTableId, tableIdMap[template.ItemTableId]);
         ReplaceComponentReference(editedConfiguration.Rows[newRowIndex], 11, template.TagTableId, tableIdMap[template.TagTableId]);
         editedConfiguration.ReplacePossibleTag(newRowIndex, template.GameplayTag, gameplayTag);
-        byte[] configurationData = editedConfiguration.Write();
+        foreach ((uint templateRowTag, uint rowTag) in rowTagMap)
+            if (editedConfiguration.Rows[newRowIndex].PossibleTags.Count(tag =>
+                    tag == templateRowTag) == 1)
+                editedConfiguration.ReplacePossibleTag(newRowIndex, templateRowTag, rowTag);
+        if (!editedConfiguration.TryAppendTableBranch(tableIdMap,
+                out byte[] configurationData, out bool foundConfigurationTableList)
+            || !foundConfigurationTableList)
+            throw new InvalidDataException("MediumVestCFG does not own the complete template BuildTable branch.");
         BuildTableAsset checkedConfiguration = BuildTable.Read(configurationData);
         if (checkedConfiguration.RowCount != configurationTable.RowCount + 1
             || checkedConfiguration.Rows[newRowIndex].Tag != configurationTag
@@ -217,12 +237,12 @@ internal static class CharacterItemAddPipeline
                 template.ConfigurationTag, configurationTag, template.GameplayTag, gameplayTag,
                 template.ItemTableId, template.TagTableId, template.ModelTableId,
                 tableIdMap[template.ItemTableId], tableIdMap[template.TagTableId],
-                tableIdMap[template.ModelTableId], branchResources), preparedResourceData);
+                tableIdMap[template.ModelTableId], branchResources, rowTagMap), preparedResourceData);
         resourceAdditions.AddRange(mirroredContainers.Additions);
         CharacterBuilderTagMirrorResult mirroredBuilders = MirrorCharacterBuilderTags(
             archivePaths, localArchivePath, localEntryIndex,
             template.ConfigurationTag, configurationTag,
-            template.GameplayTag, gameplayTag, preparedResourceData);
+            template.GameplayTag, gameplayTag, preparedResourceData, tableIdMap);
 
         var recordSource = AttachmentAddPipeline.LoadIndexedResource(index, template.Metadata.RecordId);
         byte[] recordData = AttachmentAddPipeline.CloneGameplayRecord(recordSource.Resource.Data,
@@ -257,7 +277,8 @@ internal static class CharacterItemAddPipeline
         databaseChanges.AddRange(mirroredContainers.Changes);
         databaseChanges.AddRange(mirroredBuilders.Changes);
         databaseChanges.AddRange(index.CreateVestRegistryInsertions(
-            template.Metadata.RecordId, recordId, lootSource.Id, lootId));
+            template.Metadata.RecordId, recordId, lootSource.Id, lootId,
+            template.TagTableId, tableIdMap[template.TagTableId]));
         databaseChanges.Add(index.CreateStoreRegistryInsertion(infoSource.Id, infoId));
         databaseChanges.AddRange(AttachmentAddPipeline.BuildTagDictionaryChanges(index,
             [(template.ConfigurationTag, configurationTag),
@@ -456,9 +477,12 @@ internal static class CharacterItemAddPipeline
 
         var changes = new List<ArmoryDatabaseResourceChange>();
         var additions = new List<ArmoryArchiveResourceAddition>();
-        foreach (string path in archivePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        string sourceFullPath = Path.GetFullPath(sourceArchivePath);
+        foreach (string path in archivePaths
+                     .DistinctBy(Path.GetFullPath, StringComparer.OrdinalIgnoreCase))
         {
-            if (string.Equals(path, sourceArchivePath, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(Path.GetFullPath(path), sourceFullPath,
+                    StringComparison.OrdinalIgnoreCase))
                 continue;
             using var archive = ForgeArchive.Open(path);
             ForgeEntry? entry = archive.Entries.FirstOrDefault(candidate => candidate.Id == containerId);
@@ -505,7 +529,20 @@ internal static class CharacterItemAddPipeline
                     branch.TemplateTagTableId, branch.TagTableId);
                 edited.ReplacePossibleTag(newRowIndex, branch.TemplateGameplayTag,
                     branch.GameplayTag);
-                byte[] data = edited.Write();
+                foreach ((uint templateRowTag, uint rowTag) in branch.RowTagMap)
+                    if (edited.Rows[newRowIndex].PossibleTags.Count(tag =>
+                            tag == templateRowTag) == 1)
+                        edited.ReplacePossibleTag(newRowIndex, templateRowTag, rowTag);
+                var tableMap = new Dictionary<ulong, ulong>
+                {
+                    [branch.TemplateItemTableId] = branch.ItemTableId,
+                    [branch.TemplateTagTableId] = branch.TagTableId,
+                    [branch.TemplateModelTableId] = branch.ModelTableId,
+                };
+                if (!edited.TryAppendTableBranch(tableMap, out byte[] data,
+                        out bool foundConfigurationTableList)
+                    || !foundConfigurationTableList)
+                    throw new InvalidDataException($"MediumVestCFG in {Path.GetFileName(path)} does not own the complete template BuildTable branch.");
                 BuildTableAsset checkedTable = BuildTable.Read(data);
                 if (checkedTable.Rows[newRowIndex].Tag != branch.ConfigurationTag
                     || checkedTable.Rows[newRowIndex].PossibleTags.Count(tag =>
@@ -579,7 +616,8 @@ internal static class CharacterItemAddPipeline
         uint newConfigurationTag,
         uint oldGameplayTag,
         uint newGameplayTag,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData,
+        IReadOnlyDictionary<ulong, ulong>? tableMap = null)
     {
         ulong sourceContainerId;
         var targets = new HashSet<(ulong EntryId, ulong ResourceId)>();
@@ -599,7 +637,7 @@ internal static class CharacterItemAddPipeline
                              || resource.ClassHash == EntityBuilderClassHash))
                 {
                     if (CanMirrorTagPair(resource, oldConfigurationTag,
-                            newConfigurationTag, oldGameplayTag, newGameplayTag))
+                            newConfigurationTag, oldGameplayTag, newGameplayTag, tableMap))
                         targets.Add((entry.Id, resource.Id));
                 }
             }
@@ -609,6 +647,7 @@ internal static class CharacterItemAddPipeline
             throw new InvalidOperationException("No sibling character builder contains the exact template vest BuildTags.");
 
         var changes = new List<ArmoryDatabaseResourceChange>();
+        int registeredBuilders = 0;
         foreach (string path in archivePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             using var archive = ForgeArchive.Open(path);
@@ -633,8 +672,12 @@ internal static class CharacterItemAddPipeline
                     Resource source = file.Resources[resourceIndex];
                     if (!TryMirrorTagPair(source, oldConfigurationTag,
                             newConfigurationTag, oldGameplayTag, newGameplayTag,
-                            out byte[] updated))
+                            tableMap, out byte[] updated))
                         continue;
+                    if (tableMap is { Count: > 0 }
+                        && source.ClassHash == EntityBuilderClassHash
+                        && tableMap.Values.All(id => CountUInt64(updated, id) == 1))
+                        registeredBuilders++;
                     changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index,
                         entry.Name, resourceIndex, source.Name, updated));
                 }
@@ -643,17 +686,20 @@ internal static class CharacterItemAddPipeline
 
         if (changes.Count == 0)
             throw new InvalidOperationException("The sibling character builders already contain the addon BuildTags or no installed copy can be updated.");
+        if (tableMap is { Count: > 0 } && registeredBuilders == 0)
+            throw new InvalidOperationException("The cloned vest BuildTables could not be registered in the sibling character EntityBuilders.");
         return new CharacterBuilderTagMirrorResult(changes, targets.Count);
     }
 
     static bool CanMirrorTagPair(Resource source, uint oldConfigurationTag,
-        uint newConfigurationTag, uint oldGameplayTag, uint newGameplayTag)
+        uint newConfigurationTag, uint oldGameplayTag, uint newGameplayTag,
+        IReadOnlyDictionary<ulong, ulong>? tableMap)
         => TryMirrorTagPair(source, oldConfigurationTag, newConfigurationTag,
-            oldGameplayTag, newGameplayTag, out _);
+            oldGameplayTag, newGameplayTag, tableMap, out _);
 
     static bool TryMirrorTagPair(Resource source, uint oldConfigurationTag,
         uint newConfigurationTag, uint oldGameplayTag, uint newGameplayTag,
-        out byte[] updated)
+        IReadOnlyDictionary<ulong, ulong>? tableMap, out byte[] updated)
     {
         byte[] data = source.Data;
         bool changed = false;
@@ -670,6 +716,23 @@ internal static class CharacterItemAddPipeline
         {
             data = withGameplay;
             changed = true;
+            current = CopyResource(source, data);
+        }
+        if (tableMap is { Count: > 0 }
+            && source.ClassHash == EntityBuilderClassHash
+            && TryRegisterEntityBuilderReferences(current.Data, tableMap,
+                out byte[] withReferences, out _))
+        {
+            data = withReferences;
+            changed = true;
+        }
+        else if (tableMap is { Count: > 0 }
+            && source.ClassHash == BuildTable.ClassHash
+            && BuildTable.Read(current.Data).TryAppendTableBranch(tableMap,
+                out byte[] withBranch, out _))
+        {
+            data = withBranch;
+            changed = true;
         }
         updated = data;
         return changed;
@@ -684,6 +747,7 @@ internal static class CharacterItemAddPipeline
         var changes = new List<BuildTableResourceChange>();
         int configurationParents = 0;
         int gameplayParents = 0;
+        int registeredTableLists = 0;
         int registeredBuilderLists = 0;
         foreach (Resource source in resources.Values)
         {
@@ -721,6 +785,20 @@ internal static class CharacterItemAddPipeline
                 if (foundReferenceList)
                     registeredBuilderLists++;
             }
+            else if (source.ClassHash == BuildTable.ClassHash
+                && entityBuilderReferenceMap is { Count: > 0 })
+            {
+                current = CopyResource(source, data);
+                BuildTableAsset table = BuildTable.Read(current.Data);
+                if (table.TryAppendTableBranch(entityBuilderReferenceMap,
+                        out byte[] withReferences, out bool foundReferenceList))
+                {
+                    data = withReferences;
+                    changed = true;
+                }
+                if (foundReferenceList)
+                    registeredTableLists++;
+            }
             if (!changed)
                 continue;
             if (!resourceIndexes.TryGetValue(source.Id, out int resourceIndex))
@@ -732,11 +810,14 @@ internal static class CharacterItemAddPipeline
         if (entityBuilderReferenceMap is { Count: > 0 }
             && registeredBuilderLists == 0)
             throw new InvalidOperationException("The cloned vest BuildTables could not be registered in the character EntityBuilder.");
+        if (entityBuilderReferenceMap is { Count: > 0 }
+            && registeredTableLists == 0)
+            throw new InvalidOperationException("The cloned vest BuildTables could not be registered in the character BuildTable graph.");
         return changes;
     }
 
     /// <summary>
-    /// Extends the structured EntityBuilder file-reference list which already owns all of
+    /// Extends the structured EntityBuilder handle list which already owns all of
     /// the template branch tables. A FileReference in MediumVestCFG is not sufficient on
     /// its own: the game only resolves BuildTables which are also present in this owner
     /// list. Weapon additions avoid this requirement because they extend an existing,
@@ -816,12 +897,10 @@ internal static class CharacterItemAddPipeline
         }
 
         var expanded = new List<ulong>(candidate.Count + referenceMap.Count);
-        foreach (ulong value in candidate.References)
-        {
-            expanded.Add(value);
-            if (referenceMap.TryGetValue(value, out ulong addition))
-                expanded.Add(addition);
-        }
+        expanded.AddRange(candidate.References);
+        expanded.AddRange(referenceMap
+            .OrderBy(pair => candidate.References.ToList().IndexOf(pair.Key))
+            .Select(pair => pair.Value));
 
         int oldEnd = candidate.EntriesOffset + candidate.Count * 9;
         int newLength = checked(source.Length + referenceMap.Count * 9);
@@ -845,9 +924,10 @@ internal static class CharacterItemAddPipeline
         List<ulong> checkedList = checkedReferences.ToList();
         if (checkedList.Count != candidate.Count + referenceMap.Count
             || referenceMap.Any(pair =>
-                checkedList.Count(value => value == pair.Value) != 1
-                || checkedList.IndexOf(pair.Value)
-                    != checkedList.IndexOf(pair.Key) + 1))
+                checkedList.Count(value => value == pair.Value) != 1)
+            || !checkedList.Skip(candidate.Count).SequenceEqual(referenceMap
+                .OrderBy(pair => candidate.References.ToList().IndexOf(pair.Key))
+                .Select(pair => pair.Value)))
             throw new InvalidDataException("The cloned vest BuildTable references did not survive EntityBuilder validation.");
         return true;
     }
@@ -1253,7 +1333,8 @@ public static class CharacterVestAddValidator
             installed.ArchivePaths, sourceCharacterArchivePath, installed.SourceEntry.Index,
             new VestBranchMirrorPlan(templateRow.Tag, installedRow.Tag,
                 installed.TemplateGameplayTag, installed.GameplayTag, templateItemId, templateTagTableId,
-                templateModelId, itemId, tagTableId, modelId, branchResources),
+                templateModelId, itemId, tagTableId, modelId, branchResources,
+                new Dictionary<uint, uint>()),
             new Dictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>());
         if (mirrored.Changes.Count == 0)
             throw new InvalidOperationException("No missing character-container copy was found for the installed vest.");
@@ -2082,14 +2163,23 @@ public static class CharacterVestAddValidator
             new Dictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]>(),
             [], tag => metadata.ByBuildTag.GetValueOrDefault(tag),
             localizationPackages: localizationPackages);
-        if (plan.ResourceAdditions.GroupBy(addition =>
+        var duplicateResources = plan.ResourceAdditions.GroupBy(addition =>
                 (Path.GetFullPath(addition.ArchivePath).ToUpperInvariant(),
                     addition.EntryIndex, addition.ResourceId))
-                .Any(group => group.Count() > 1)
-            || plan.EntryAdditions.GroupBy(addition =>
-                (Path.GetFullPath(addition.ArchivePath).ToUpperInvariant(),
-                    addition.EntryId)).Any(group => group.Count() > 1))
-            throw new InvalidDataException("The vest plan allocated the same ID more than once in one archive container.");
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateResources is not null)
+            throw new InvalidDataException($"The vest plan adds resource 0x{duplicateResources.Key.ResourceId:X12} "
+                + $"({string.Join(", ", duplicateResources.Select(addition => addition.ResourceName))}) "
+                + $"{duplicateResources.Count()} times to entry {duplicateResources.Key.EntryIndex} of "
+                + Path.GetFileName(duplicateResources.First().ArchivePath) + ".");
+        var duplicateEntries = plan.EntryAdditions.GroupBy(addition =>
+                (Path.GetFullPath(addition.ArchivePath).ToUpperInvariant(), addition.EntryId))
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateEntries is not null)
+            throw new InvalidDataException($"The vest plan adds container 0x{duplicateEntries.Key.EntryId:X12} "
+                + $"({string.Join(", ", duplicateEntries.Select(addition => addition.EntryName))}) "
+                + $"{duplicateEntries.Count()} times to "
+                + Path.GetFileName(duplicateEntries.First().ArchivePath) + ".");
         return new PreparedVestPlan(plan, characterArchivePath, entry.Index, entry.Name,
             localIndexes[CharacterItemAddPipeline.MediumVestConfigurationTableId]);
     }

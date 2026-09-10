@@ -298,7 +298,7 @@
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="AddAssetButton" Content="Add…"
                                     Click="MenuAdd_Click" IsEnabled="False"
-                                    ToolTip="Add a new asset at the current level"/>
+                                    ToolTip="Add one or more assets at the current level"/>
                             <Button x:Name="DeleteAssetButton" Content="Delete"
                                     Click="DeleteAsset_Click" IsEnabled="False"
                                     Foreground="{StaticResource Warning}"

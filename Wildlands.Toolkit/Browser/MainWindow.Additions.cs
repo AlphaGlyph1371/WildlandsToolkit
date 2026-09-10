@@ -21,8 +21,8 @@ public partial class MainWindow
         AssetActionHint.Text = _showing is null
             ? "Open an archive to add or delete assets"
             : root
-                ? "Forge containers"
-                : "Resources in this .data container";
+                ? "Forge containers · drop .data files to add them"
+                : "Resources in this .data container · drop raw files to add them";
 
         MenuAdd.Header = root ? "Add .data container..." : "Add resource to this container...";
         MenuAdd.IsEnabled = available;
@@ -36,21 +36,16 @@ public partial class MainWindow
             return;
 
         if (_showing.IsArchiveRoot)
-            await AddContainer();
+            await ChooseContainersToAdd();
         else
-            AddResource();
+            await ChooseResourcesToAdd();
     }
 
-    void AddResource()
+    async Task ChooseResourcesToAdd()
     {
         if (_showing is null || _showing.IsArchiveRoot)
             return;
 
-        List<Resource> resources = _shown
-            .Select(item => item.Resource)
-            .Where(resource => resource is not null)
-            .Select(resource => resource!)
-            .ToList();
         Resource? preferred = (ItemList.SelectedItem as BrowserItem)?.Resource;
         string selectedType = preferred is null
             ? "game resource"
@@ -61,36 +56,16 @@ public partial class MainWindow
             Filter = preferred is null
                 ? "Raw game resources (*.bin;*.dat)|*.bin;*.dat|All files (*.*)|*.*"
                 : $"{selectedType} resources (*.{selectedType};*.bin;*.dat)|*.{selectedType};*.bin;*.dat|All files (*.*)|*.*",
+            Multiselect = true,
         };
         SetInitialFolder(fileDialog);
         if (fileDialog.ShowDialog(this) != true)
             return;
 
-        try
-        {
-            ResourceAdditionSource source = ArchiveAdditionService.InspectResource(fileDialog.FileName, resources, preferred);
-            IReadOnlyList<Resource> templates = ArchiveAdditionService.ResourceTemplates(source, resources);
-            Resource? preferredTemplate = preferred?.ClassHash == source.ClassHash ? preferred : templates.FirstOrDefault();
-            List<PendingChange> pending = PendingForCurrentContainer();
-            ulong suggestedId = ArchiveAdditionService.SuggestedResourceId(source, resources, pending);
-            var dialog = new AddAssetWindow(source, _showing.Display, templates, preferredTemplate, suggestedId) { Owner = this };
-            if (dialog.ShowDialog() != true || dialog.ResourceTemplate is not { } template)
-                return;
-
-            PendingChange change = ArchiveAdditionService.CreateResourceAddition(_showing, source, template, dialog.AssetName, dialog.AssetId, resources, pending);
-            if (!QueueChanges([change], $"Add {source.Type} {dialog.AssetName}"))
-                return;
-
-            RememberSourceFolder(fileDialog.FileName);
-            SetStatus($"{dialog.AssetName}: new {source.Type} queued in Changes");
-        }
-        catch (Exception ex)
-        {
-            ShowError("Could not add the resource", ex);
-        }
+        await AddResources(fileDialog.FileNames);
     }
 
-    async Task AddContainer()
+    async Task ChooseContainersToAdd()
     {
         if (_showing is null || !_showing.IsArchiveRoot || _archive is null)
             return;
@@ -99,46 +74,147 @@ public partial class MainWindow
         {
             Title = "Choose the complete .data container to add",
             Filter = "Wildlands data containers (*.data)|*.data|All files (*.*)|*.*",
+            Multiselect = true,
         };
         SetInitialFolder(fileDialog);
         if (fileDialog.ShowDialog(this) != true)
             return;
 
-        try
-        {
-            ContainerAdditionSource source = ArchiveAdditionService.InspectContainer(fileDialog.FileName);
-            IReadOnlyList<ForgeEntry> templates = ArchiveAdditionService.ContainerTemplates(source, _archive.Entries);
-            ForgeEntry? selected = (ItemList.SelectedItem as BrowserItem)?.Entry;
-            ForgeEntry? preferred = selected?.Extension == source.ClassHash && selected.FileExtension == ".data" ? selected : templates.FirstOrDefault();
-            var dialog = new AddAssetWindow(source, _showing.Display, templates, preferred) { Owner = this };
-            if (dialog.ShowDialog() != true || dialog.EntryTemplate is not { } template)
-                return;
+        await AddContainers(fileDialog.FileNames);
+    }
 
-            string assetName = dialog.AssetName;
-            string archivePath = _showing.ArchivePath;
-            List<PendingChange> pending = _changes.Changes.ToList();
-            SetLoading(true, $"Validating {assetName} and the Forge archive layout…");
-            PendingChange change;
+    async Task AddResources(IReadOnlyList<string> paths)
+    {
+        if (_showing is null || _showing.IsArchiveRoot || paths.Count == 0)
+            return;
+
+        Location target = _showing;
+        List<Resource> resources = _shown
+            .Select(item => item.Resource)
+            .Where(resource => resource is not null)
+            .Select(resource => resource!)
+            .ToList();
+        Resource? preferred = (ItemList.SelectedItem as BrowserItem)?.Resource;
+        List<string> failures = [];
+        int queued = 0;
+
+        foreach (string path in paths)
+        {
             try
             {
-                change = await Task.Run(() => ArchiveAdditionService.CreateContainerAddition(archivePath, source, template.Id, assetName, pending));
+                ResourceAdditionSource source = await RunWhileLoading(
+                    $"Reading {Path.GetFileName(path)}…",
+                    () => ArchiveAdditionService.InspectResource(path, resources, preferred));
+                IReadOnlyList<Resource> templates = ArchiveAdditionService.ResourceTemplates(source, resources);
+                Resource? preferredTemplate = preferred?.ClassHash == source.ClassHash
+                    ? preferred
+                    : templates.FirstOrDefault();
+                List<PendingChange> pending = PendingForCurrentContainer();
+                ulong suggestedId = ArchiveAdditionService.SuggestedResourceId(source, resources, pending);
+                var dialog = new AddAssetWindow(source, target.Display, templates, preferredTemplate, suggestedId)
+                {
+                    Owner = this,
+                };
+                if (dialog.ShowDialog() != true || dialog.ResourceTemplate is not { } template)
+                    break;
+
+                PendingChange change = ArchiveAdditionService.CreateResourceAddition(target, source,
+                    template, dialog.AssetName, dialog.AssetId, resources, pending);
+                if (!QueueChanges([change], $"Add {source.Type} {dialog.AssetName}"))
+                    break;
+
+                RememberSourceFolder(path);
+                queued++;
             }
-            finally
+            catch (Exception ex)
             {
-                SetLoading(false);
+                failures.Add($"{Path.GetFileName(path)}: {ex.Message}");
             }
-
-            if (!QueueChanges([change], $"Add .data container {assetName}"))
-                return;
-
-            RememberSourceFolder(fileDialog.FileName);
-            SetStatus($"{assetName}: new .data container queued in Changes");
         }
-        catch (Exception ex)
+
+        FinishBulkAddition(queued, failures, "resource", "resources");
+    }
+
+    async Task AddContainers(IReadOnlyList<string> paths)
+    {
+        if (_showing is null || !_showing.IsArchiveRoot || _archive is null || paths.Count == 0)
+            return;
+
+        Location target = _showing;
+        string archivePath = target.ArchivePath;
+        List<string> failures = [];
+        int queued = 0;
+
+        foreach (string path in paths)
         {
-            if (_loading)
-                SetLoading(false);
-            ShowError("Could not add the .data container", ex);
+            try
+            {
+                ContainerAdditionSource source = await RunWhileLoading(
+                    $"Reading {Path.GetFileName(path)}…",
+                    () => ArchiveAdditionService.InspectContainer(path));
+                IReadOnlyList<ForgeEntry> templates = ArchiveAdditionService.ContainerTemplates(
+                    source, _archive.Entries);
+                ForgeEntry? selected = (ItemList.SelectedItem as BrowserItem)?.Entry;
+                ForgeEntry? preferred = selected?.Extension == source.ClassHash && selected.FileExtension == ".data"
+                    ? selected
+                    : templates.FirstOrDefault();
+                var dialog = new AddAssetWindow(source, target.Display, templates, preferred) { Owner = this };
+                if (dialog.ShowDialog() != true || dialog.EntryTemplate is not { } template)
+                    break;
+
+                string assetName = dialog.AssetName;
+                List<PendingChange> pending = _changes.Changes.ToList();
+                PendingChange change = await RunWhileLoading(
+                    $"Validating {assetName} and the Forge archive layout…",
+                    () => ArchiveAdditionService.CreateContainerAddition(
+                        archivePath, source, template.Id, assetName, pending));
+
+                if (!QueueChanges([change], $"Add .data container {assetName}"))
+                    break;
+
+                RememberSourceFolder(path);
+                queued++;
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+
+        FinishBulkAddition(queued, failures, ".data container", ".data containers");
+    }
+
+    void FinishBulkAddition(int queued, IReadOnlyList<string> failures, string singular, string plural)
+    {
+        if (failures.Count > 0)
+        {
+            const int maximumShown = 8;
+            string details = string.Join(Environment.NewLine + Environment.NewLine,
+                failures.Take(maximumShown));
+            if (failures.Count > maximumShown)
+                details += $"{Environment.NewLine}{Environment.NewLine}…and {failures.Count - maximumShown} more.";
+            string summary = $"{queued} added, {failures.Count} could not be added.";
+            MessageBox.Show(this,
+                $"{summary}{Environment.NewLine}{Environment.NewLine}{details}",
+                "Some files could not be added", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        if (queued > 0)
+            SetStatus($"{queued} {(queued == 1 ? singular : plural)} queued in Changes");
+        else if (failures.Count > 0)
+            SetStatus($"No {plural} were added");
+    }
+
+    async Task<T> RunWhileLoading<T>(string status, Func<T> work)
+    {
+        SetLoading(true, status);
+        try
+        {
+            return await Task.Run(work);
+        }
+        finally
+        {
+            SetLoading(false);
         }
     }
 
