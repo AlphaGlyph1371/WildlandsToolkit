@@ -94,7 +94,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  charactersmithcheck <game folder> <record id>  verify an in-memory CharacterSmith row insertion");
     Console.WriteLine("  vestregistrycheck <game folder> <record id>  verify all currently proven vest registry insertions in memory");
     Console.WriteLine("  vestaddcheck <game folder> <character archive> <model> <diffuse> <normal> <mask1> [row]  build a complete vest plan in memory");
-    Console.WriteLine("  vestpack <game folder> <character archive> <model> <diffuse> <normal> <mask1> <project folder> <package> [row]  build and validate an installable vest package");
+    Console.WriteLine("  vestpack <game folder> <character archive> <model> <diffuse> <normal> <mask1> <project folder> <package> [row] [internal name] [display name]  build and validate an installable vest package");
     Console.WriteLine("  vestrepair <game folder> <template record> <installed record name> <display name> <language> <project folder> <package>  repair an installed vest addon's UI metadata");
     Console.WriteLine("  vestmodelrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  mirror an installed vest model branch into every character container");
     Console.WriteLine("  vestbuilderrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  register an installed vest in sibling character builders");
@@ -293,7 +293,9 @@ try
                 args.Length >= 8 ? int.Parse(args[7]) : 1);
         case "vestpack" when args.Length >= 9:
             return CreateVestPackage(args[1], args[2], args[3], args[4], args[5], args[6],
-                args[7], args[8], args.Length >= 10 ? int.Parse(args[9]) : 1);
+                args[7], args[8], args.Length >= 10 ? int.Parse(args[9]) : 1,
+                args.Length >= 11 ? args[10] : "VirtusVest",
+                args.Length >= 12 ? args[11] : "Virtus Vest");
         case "vestrepair" when args.Length >= 8:
             return CreateVestRepairPackage(args[1], args[2], args[3], args[4], args[5],
                 args[6], args[7]);
@@ -4801,10 +4803,10 @@ static int InspectPrefetchReferences(string archivePath, string entryText,
 
 static int CreateVestPackage(string gameFolder, string archivePath, string modelPath,
     string diffusePath, string normalPath, string mask1Path, string projectFolder,
-    string packagePath, int rowIndex)
+    string packagePath, int rowIndex, string internalName, string displayName)
 {
     CharacterVestPackageResult result = CharacterVestAddValidator.CreatePackage(gameFolder,
-        archivePath, rowIndex, "Virtus Vest", "VirtusVest", modelPath,
+        archivePath, rowIndex, displayName, internalName, modelPath,
         new AttachmentTextureDraft(diffusePath, normalPath, "", mask1Path),
         projectFolder, packagePath, "Wildlands Toolkit", "1.0.0", "German");
     CharacterVestAddValidationResult validation = result.Validation;
