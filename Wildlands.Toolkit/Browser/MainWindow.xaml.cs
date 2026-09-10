@@ -203,7 +203,8 @@ public partial class MainWindow : Window
 
     void LoadIndexes()
     {
-        LoadArmoryIndex();
+        if (FeatureAvailability.BuildTableEditor)
+            LoadArmoryIndex();
         LoadSkeletonIndex();
     }
 
@@ -261,7 +262,8 @@ public partial class MainWindow : Window
         if (!_settings.IsConfigured)
             return;
 
-        var setup = new IndexSetupWindow(_armoryIndex is not null, _skeletonIndex is not null) { Owner = this };
+        var setup = new IndexSetupWindow(_armoryIndex is not null, _skeletonIndex is not null,
+            FeatureAvailability.BuildTableEditor) { Owner = this };
         bool prepare = setup.ShowDialog() == true;
         _settings.SeenIndexSetup = true;
         _settings.Save();
@@ -272,7 +274,7 @@ public partial class MainWindow : Window
 
     async Task PrepareIndexesAsync()
     {
-        if (_armoryIndex is null && !await BuildArmoryIndexAsync())
+        if (FeatureAvailability.BuildTableEditor && _armoryIndex is null && !await BuildArmoryIndexAsync())
             return;
         if (_skeletonIndex is null)
             await BuildSkeletonIndexAsync();
@@ -283,6 +285,9 @@ public partial class MainWindow : Window
 
     async Task<bool> BuildArmoryIndexAsync(Action? completed = null)
     {
+        if (!FeatureAvailability.BuildTableEditor)
+            return false;
+
         if (_buildingArmoryIndex || !_settings.IsConfigured)
             return _armoryIndex is not null;
 
@@ -488,6 +493,7 @@ public partial class MainWindow : Window
 
             PathText.Text = location.Display;
             _showing = location;
+            RefreshQueuedAssetMarks();
             ApplyFilter();
             RestorePlace(location);
             return true;
@@ -513,6 +519,9 @@ public partial class MainWindow : Window
 
     void UpdateArmoryIndexButton()
     {
+        ArmoryIndexButton.Visibility = FeatureAvailability.BuildTableEditor
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         ArmoryIndexButton.IsEnabled = !_buildingArmoryIndex;
         ArmoryIndexButton.Content = _buildingArmoryIndex ? "Building…" : _armoryIndex is null ? "Build BT index" : "Rebuild BT index";
     }
@@ -712,11 +721,12 @@ public partial class MainWindow : Window
         bool stepsIn = item?.Entry is not null && item.CanOpen;
         MenuOpen.Header = stepsIn ? "Open"
             : _previewCycle is not null ? "Open in time cycle editor"
-            : _previewBuildTable is not null ? "Open in BuildTable editor"
+            : FeatureAvailability.BuildTableEditor && _previewBuildTable is not null ? "Open in BuildTable editor"
             : _previewMesh is not null ? "Open in mesh viewer"
             : "Open in texture viewer";
         MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null
-            || _previewMesh is not null || _previewCycle is not null || _previewBuildTable is not null));
+            || _previewMesh is not null || _previewCycle is not null
+            || FeatureAvailability.BuildTableEditor && _previewBuildTable is not null));
 
         MenuExtract.IsEnabled = count > 0;
         MenuExtract.Header = count > 1 ? $"Extract {count} items..." : "Extract...";
@@ -1416,7 +1426,9 @@ public partial class MainWindow : Window
         if (_changes.Contains(_showing.ArchivePath, _showing.EntryIndex, item.Index))
             lines.Add("       pending edit");
 
-        OpenBuildTableButton.Visibility = Visibility.Visible;
+        OpenBuildTableButton.Visibility = FeatureAvailability.BuildTableEditor
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     void ShowMesh(Mesh mesh, string name, List<string> lines)
@@ -1468,7 +1480,7 @@ public partial class MainWindow : Window
             lines.Add($"       {view.Mips.MissingStreamed.Count} streamed mip(s) not found in any archive");
 
         lines.Add("");
-        
+
         foreach (var level in view.Levels)
             lines.Add($"mip {level.Level,-2} {level.Size,-13} {(level.IsStreamed ? "CompiledMip" : "TextureMap")}");
 
@@ -1530,7 +1542,7 @@ public partial class MainWindow : Window
 
     void OpenViewer()
     {
-        if (_previewBuildTable is not null)
+        if (FeatureAvailability.BuildTableEditor && _previewBuildTable is not null)
         {
             OpenBuildTableEditor();
             return;
@@ -1687,6 +1699,9 @@ public partial class MainWindow : Window
 
     void OpenBuildTableEditor()
     {
+        if (!FeatureAvailability.BuildTableEditor)
+            return;
+
         if (_previewBuildTableData is null || _previewBuildTableItem is null || _previewBuildTableWhere is null)
             return;
 
@@ -1756,7 +1771,7 @@ public partial class MainWindow : Window
         new BuildTableWindow(data, item.Name, targets, archivePaths, familyResources, changed =>
         {
             var queued = changed.Select(resource => new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName, resource.ResourceIndex, resource.Name, resource.Data, ResourceClassHash: BuildTable.ClassHash)).ToList();
-            if (!QueueChanges(queued, $"Edit {BuildTableNames.FamilyTitle(item.Name)}"))
+            if (!QueueChanges(queued, $"Edit {item.Name}"))
                 return;
 
             var current = changed.FirstOrDefault(change => change.ResourceIndex == item.Index);
@@ -1766,7 +1781,7 @@ public partial class MainWindow : Window
                 _previewBuildTable = BuildTable.Read(current.Data);
             }
 
-            SetStatus($"{BuildTableNames.FamilyTitle(item.Name)}: changes queued");
+            SetStatus($"{item.Name}: changes queued");
             UpdateChangeButtons();
         }, workingArmoryIndex, databaseChanges =>
         {

@@ -1,0 +1,39 @@
+<Window x:Class="Wildlands.Toolkit.BuildTableModelPreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="3D preview" Width="980" Height="760" MinWidth="640" MinHeight="480"
+        Background="{StaticResource Background}" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="14,10">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Fit" Click="Fit_Click"/>
+                <StackPanel>
+                    <TextBlock x:Name="ModelNameText" FontSize="17" FontWeight="SemiBold"
+                               Foreground="{StaticResource Text}"/>
+                    <TextBlock x:Name="ModelDetailsText" Margin="0,3,0,0" FontSize="10"
+                               Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <Border x:Name="PreviewStage" Margin="12" Background="#FF111317"
+                    BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4"
+                    ClipToBounds="True">
+                <Viewport3D>
+                    <Viewport3D.Camera>
+                        <PerspectiveCamera x:Name="PreviewCamera" FieldOfView="45" UpDirection="0,0,1"/>
+                    </Viewport3D.Camera>
+                    <ModelVisual3D x:Name="PreviewScene"/>
+                </Viewport3D>
+            </Border>
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,24"
+                    Background="#D817191D" CornerRadius="3" Padding="10,6" IsHitTestVisible="False">
+                <TextBlock Text="Left-drag: rotate  ·  Right-drag: move  ·  Wheel: zoom"
+                           Foreground="{StaticResource TextDim}"/>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

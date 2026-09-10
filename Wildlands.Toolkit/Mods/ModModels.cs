@@ -21,6 +21,7 @@ public sealed class ModOperation
     public ulong ResourceId { get; set; }
     public uint ResourceClassHash { get; set; }
     public string ResourceName { get; set; } = "";
+    public ulong InsertAfterResourceId { get; set; }
     public string? BaseSha256 { get; set; }
     public string? DeployedSha256 { get; set; }
     public string Payload { get; set; } = "";

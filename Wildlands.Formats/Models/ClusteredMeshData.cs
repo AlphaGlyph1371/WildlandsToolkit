@@ -43,14 +43,14 @@ public sealed class ClusteredMeshData
         for (int i = 0; i < 3; i++) data.Center[i] = reader.ReadSingle();
         for (int i = 0; i < 3; i++) data.HalfExtent[i] = reader.ReadSingle();
 
-        data.DrawPrimitiveCount = ReadCount(reader, "draw primitive");
+        data.DrawPrimitiveCount = MeshBinaryReader.ReadCount(reader, "draw primitive");
         data.ClustersPerDrawPrimitive = ReadInts(reader, "clusters-per-draw-primitive");
         data.VertexOffsetPerDrawPrimitive = ReadInts(reader, "vertex-offset-per-draw-primitive");
         data.FixedClusterSize = reader.ReadBoolean();
 
-        data.VertexBuffer = ReadBytes(reader, "clustered vertex buffer");
-        data.IndexBuffer = ReadBytes(reader, "clustered index buffer");
-        data.PrimitiveDescriptions = ReadBytes(reader, "primitive descriptions");
+        data.VertexBuffer = MeshBinaryReader.ReadBytes(reader, "clustered vertex buffer");
+        data.IndexBuffer = MeshBinaryReader.ReadBytes(reader, "clustered index buffer");
+        data.PrimitiveDescriptions = MeshBinaryReader.ReadBytes(reader, "primitive descriptions");
 
         if (data.VertexStride <= 0 && data.VertexBuffer.Length > 0)
             throw new InvalidDataException("The clustered mesh has vertex data but no positive vertex stride.");
@@ -87,42 +87,14 @@ public sealed class ClusteredMeshData
 
     static int[] ReadInts(BinaryReader reader, string label)
     {
-        int count = ReadCount(reader, label);
-        EnsureRemaining(reader, (long)count * sizeof(int), label);
+        int count = MeshBinaryReader.ReadCount(reader, label);
+        MeshBinaryReader.EnsureRemaining(reader, (long)count * sizeof(int), label);
         var values = new int[count];
 
         for (int i = 0; i < values.Length; i++)
             values[i] = reader.ReadInt32();
 
         return values;
-    }
-
-    static int ReadCount(BinaryReader reader, string label)
-    {
-        EnsureRemaining(reader, sizeof(int), label + " count");
-        int count = reader.ReadInt32();
-        if (count < 0 || count > MaximumItems)
-            throw new InvalidDataException($"The {label} count {count} is outside the supported range.");
-        return count;
-    }
-
-    static byte[] ReadBytes(BinaryReader reader, string label)
-    {
-        EnsureRemaining(reader, sizeof(int), label + " byte count");
-        int length = reader.ReadInt32();
-        if (length < 0)
-            throw new InvalidDataException($"The {label} has a negative byte length.");
-        EnsureRemaining(reader, length, label);
-        byte[] bytes = reader.ReadBytes(length);
-        if (bytes.Length != length)
-            throw new EndOfStreamException($"The {label} ends after {bytes.Length} of {length} bytes.");
-        return bytes;
-    }
-
-    static void EnsureRemaining(BinaryReader reader, long length, string label)
-    {
-        if (length < 0 || reader.BaseStream.CanSeek && length > reader.BaseStream.Length - reader.BaseStream.Position)
-            throw new EndOfStreamException($"The {label} runs past the end of the Mesh resource.");
     }
 
     static void WriteInts(BinaryWriter writer, int[] values)

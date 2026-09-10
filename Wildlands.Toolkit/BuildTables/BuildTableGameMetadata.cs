@@ -20,7 +20,8 @@ public sealed record BuildTableOptionMetadata(
 
 public sealed class BuildTableGameMetadata
 {
-    public static BuildTableGameMetadata Empty { get; } = new(new Dictionary<uint, BuildTableOptionMetadata>(), new HashSet<uint>(), Array.Empty<string>(), new HashSet<ulong>(), new Dictionary<ulong, IReadOnlyList<string>>(), 0, "");
+    public static BuildTableGameMetadata Empty { get; } = new(new Dictionary<uint, BuildTableOptionMetadata>(), new HashSet<uint>(), Array.Empty<string>(), new HashSet<ulong>(),
+        new Dictionary<ulong, IReadOnlyList<string>>(), new Dictionary<ulong, IReadOnlySet<ulong>>(), 0, "");
 
     internal BuildTableGameMetadata(
         IReadOnlyDictionary<uint, BuildTableOptionMetadata> byBuildTag,
@@ -28,6 +29,7 @@ public sealed class BuildTableGameMetadata
         IReadOnlyList<string> ownerRecords,
         IReadOnlySet<ulong> ownerRecordIds,
         IReadOnlyDictionary<ulong, IReadOnlyList<string>> ownersByRecordId,
+        IReadOnlyDictionary<ulong, IReadOnlySet<ulong>> ownerIdsByRecordId,
         int localizedStringCount,
         string languagePackage)
     {
@@ -36,6 +38,7 @@ public sealed class BuildTableGameMetadata
         OwnerRecords = ownerRecords;
         OwnerRecordIds = ownerRecordIds;
         OwnersByRecordId = ownersByRecordId;
+        OwnerIdsByRecordId = ownerIdsByRecordId;
         LocalizedStringCount = localizedStringCount;
         LanguagePackage = languagePackage;
     }
@@ -45,6 +48,7 @@ public sealed class BuildTableGameMetadata
     public IReadOnlyList<string> OwnerRecords { get; }
     public IReadOnlySet<ulong> OwnerRecordIds { get; }
     public IReadOnlyDictionary<ulong, IReadOnlyList<string>> OwnersByRecordId { get; }
+    public IReadOnlyDictionary<ulong, IReadOnlySet<ulong>> OwnerIdsByRecordId { get; }
     public int LocalizedStringCount { get; }
     public string LanguagePackage { get; }
 }
@@ -101,9 +105,9 @@ public static class BuildTableGameMetadataResolver
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
-                // Missing optional archives do not invalidate metadata read from the others
+                throw new InvalidDataException($"Could not read BuildTable gameplay metadata from {path}.", ex);
             }
         }
 
@@ -116,17 +120,17 @@ public static class BuildTableGameMetadataResolver
                 foreach (var pair in LocalizationPackage.Read(resource.Data).Strings)
                     strings[pair.Key] = pair.Value;
             }
-            catch
+            catch (Exception ex)
             {
-                // A damaged language package must not create labels from partial data
+                throw new InvalidDataException("Could not parse an installed localization package for BuildTable labels.", ex);
             }
         }
 
-        return BuildFromResources(databaseResources, strings, ownerEntityIds, buildTags, preferredPackage, cancellationToken);
+        return BuildFromResources(databaseResources, strings, ownerEntityIds, buildTags, preferredPackage, cancellationToken, progress);
     }
 
     public static BuildTableGameMetadata Build(ArmoryIndex index, IReadOnlyCollection<ulong> ownerEntityIds, string? preferredLanguagePackage = null,
-        CancellationToken cancellationToken = default, IReadOnlyCollection<uint>? buildTags = null)
+        CancellationToken cancellationToken = default, IReadOnlyCollection<uint>? buildTags = null, IProgress<string>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(index);
         string preferredPackage = string.IsNullOrWhiteSpace(preferredLanguagePackage)
@@ -141,24 +145,29 @@ public static class BuildTableGameMetadataResolver
                 Data = resource.Data,
             })
             .ToList();
-        return BuildFromResources(resources, index.StringsFor(preferredPackage), ownerEntityIds, buildTags, preferredPackage, cancellationToken);
+        return BuildFromResources(resources, index.StringsFor(preferredPackage), ownerEntityIds, buildTags, preferredPackage, cancellationToken, progress);
     }
 
     static BuildTableGameMetadata BuildFromResources(IReadOnlyList<Resource> databaseResources, IReadOnlyDictionary<ulong, string> strings, IReadOnlyCollection<ulong> ownerEntityIds,
-        IReadOnlyCollection<uint>? buildTags, string preferredPackage, CancellationToken cancellationToken)
+        IReadOnlyCollection<uint>? buildTags, string preferredPackage, CancellationToken cancellationToken, IProgress<string>? progress)
     {
         var records = new List<BuildTableOptionMetadata>();
-        foreach (var resource in databaseResources)
+        for (int resourceIndex = 0; resourceIndex < databaseResources.Count; resourceIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (resourceIndex % 2_000 == 0)
+                progress?.Report($"Reading gameplay labels, {resourceIndex:N0} of {databaseResources.Count:N0} records…");
+            Resource resource = databaseResources[resourceIndex];
             if (TryReadRecord(resource, strings, out var record))
                 records.Add(record);
         }
 
+        progress?.Report($"Linking {records.Count:N0} confirmed gameplay labels to this BuildTable…");
         var recordIds = records.Select(record => record.RecordId).ToHashSet();
         var owners = databaseResources.Where(resource => ownerEntityIds.Any(id => ContainsUInt64(resource.Data, id))).ToList();
         var directlyLinkedIds = new HashSet<ulong>();
         var ownersByRecordId = new Dictionary<ulong, HashSet<string>>();
+        var ownerIdsByRecordId = new Dictionary<ulong, HashSet<ulong>>();
         foreach (var owner in owners)
             foreach (ulong recordId in recordIds)
                 if (ContainsUInt64(owner.Data, recordId))
@@ -167,6 +176,9 @@ public static class BuildTableGameMetadataResolver
                     if (!ownersByRecordId.TryGetValue(recordId, out var linkedOwners))
                         ownersByRecordId[recordId] = linkedOwners = new(StringComparer.OrdinalIgnoreCase);
                     linkedOwners.Add(owner.Name);
+                    if (!ownerIdsByRecordId.TryGetValue(recordId, out var linkedOwnerIds))
+                        ownerIdsByRecordId[recordId] = linkedOwnerIds = [];
+                    linkedOwnerIds.Add(owner.Id);
                 }
 
         var requestedTags = buildTags?.ToHashSet() ?? [];
@@ -177,21 +189,19 @@ public static class BuildTableGameMetadataResolver
         {
             var linked = group.Where(record => directlyLinkedIds.Contains(record.RecordId)).ToList();
             var candidates = linked.Count > 0 ? linked : group.ToList();
-            var names = candidates.Select(record => record.NameStringId).Distinct().ToList();
-            if (names.Count != 1 || linked.Count == 0 && candidates.Select(record => record.RecordId).Distinct().Count() != 1)
+            if (candidates.Select(record => record.RecordId).Distinct().Count() != 1)
             {
                 ambiguous.Add(group.Key);
                 continue;
             }
 
-            byTag[group.Key] = candidates
-                .OrderBy(record => record.RecordName, StringComparer.OrdinalIgnoreCase)
-                .First();
+            byTag[group.Key] = candidates[0];
         }
 
         var readOnlyOwners = ownersByRecordId.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.Order(StringComparer.OrdinalIgnoreCase).ToList());
+        var readOnlyOwnerIds = ownerIdsByRecordId.ToDictionary(pair => pair.Key, pair => (IReadOnlySet<ulong>)pair.Value);
         return new BuildTableGameMetadata(byTag, ambiguous, owners.Select(owner => owner.Name).Order(StringComparer.OrdinalIgnoreCase).ToList(),
-            owners.Select(owner => owner.Id).ToHashSet(), readOnlyOwners, strings.Count, strings.Count > 0 ? preferredPackage : "English(US)");
+            owners.Select(owner => owner.Id).ToHashSet(), readOnlyOwners, readOnlyOwnerIds, strings.Count, strings.Count > 0 ? preferredPackage : "English(US)");
     }
 
     internal static bool IsGameDatabaseContainer(string name) => string.Equals(Path.GetFileNameWithoutExtension(name), "Game Bootstrap Settings", StringComparison.OrdinalIgnoreCase);
@@ -227,9 +237,9 @@ public static class BuildTableGameMetadataResolver
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
-                // An unavailable archive simply cannot contribute a language package
+                throw new InvalidDataException($"Could not inspect installed language packages in {path}.", ex);
             }
         }
 

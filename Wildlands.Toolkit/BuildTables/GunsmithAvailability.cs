@@ -6,7 +6,8 @@ namespace Wildlands.Toolkit;
 
 internal sealed record GunsmithAvailabilityList(
     ArmoryIndex.IndexedResource Owner, int CountOffset, int EntryStride, int ValueOffset,
-    IReadOnlyList<ulong> RecordIds, IReadOnlyList<ulong> CanonicalRecordIds)
+    IReadOnlyList<ulong> RecordIds, IReadOnlyList<ulong> CanonicalRecordIds,
+    GunsmithAvailabilityLayout Layout = GunsmithAvailabilityLayout.SimpleList)
 {
     public string OwnerName => Owner.Name;
     public int IndexOf(ulong recordId)
@@ -18,35 +19,47 @@ internal sealed record GunsmithAvailabilityList(
     }
 }
 
+internal enum GunsmithAvailabilityLayout
+{
+    SimpleList,
+    UnlockableParallelColumns
+}
+
 internal static class GunsmithAvailability
 {
-    public static IReadOnlyList<GunsmithAvailabilityList> FindNamedRegistries(ArmoryIndex index, ulong templateRecordId, string ownerName)
+    const ulong UnlockablesResourceId = 0x003DFD3D8068;
+    const uint UnlockablesClassHash = 0xA6185466;
+    const ulong VestsResourceId = 0x006754E162DE;
+    const uint VestsClassHash = 0x4CD967BE;
+    const uint LootConfigurationClassHash = 0xB2C08E53;
+    const uint StoreEntryClassHash = 0xC66FCAF7;
+    const uint StoreObjectInfoClassHash = 0x36C9CB38;
+    const uint DatabaseContainerClassHash = 0x5768183B;
+
+    public static IReadOnlyList<GunsmithAvailabilityList> FindVestRegistries(ArmoryIndex index, ulong templateRecordId)
     {
         ArgumentNullException.ThrowIfNull(index);
-        if (templateRecordId == 0 || string.IsNullOrWhiteSpace(ownerName))
+        if (templateRecordId == 0)
             return [];
 
-        var effectiveOwnerIndexes = index.DatabaseResources
-            .Select((resource, resourceIndex) => (resource, resourceIndex))
-            .Where(item => string.Equals(item.resource.Name, ownerName, StringComparison.OrdinalIgnoreCase))
-            .GroupBy(item => item.resource.Id)
-            .Select(group => group.Last().resourceIndex)
-            .ToHashSet();
+        var knownIds = index.DatabaseResources.Select(resource => resource.Id).ToHashSet();
+        var owners = index.DatabaseResources
+            .Where(resource => resource.Id == VestsResourceId && resource.ClassHash == VestsClassHash)
+            .GroupBy(resource => resource.Id)
+            .Select(group => group.Last())
+            .ToList();
+
         var results = new List<GunsmithAvailabilityList>();
-        foreach (int ownerIndex in effectiveOwnerIndexes)
+        foreach (ArmoryIndex.IndexedResource owner in owners)
         {
-            ArmoryIndex.IndexedResource owner = index.DatabaseResources[ownerIndex];
-            var candidates = index.AvailabilityLists
-                .Where(candidate => candidate.OwnerResourceIndex == ownerIndex && candidate.RecordIds.Contains(templateRecordId) && MatchesIndexedBytes(owner.Data, candidate))
-                .OrderByDescending(candidate => candidate.RecordIds.Length)
-                .ToList();
+            var candidates = ReadContainerLists(owner.Data, templateRecordId, knownIds);
             if (candidates.Count == 0)
                 continue;
-            if (candidates.Count > 1 && candidates[0].RecordIds.Length == candidates[1].RecordIds.Length)
-                throw new InvalidOperationException($"{ownerName} contains two equally likely lists for the selected item.");
+            if (candidates.Count != 1)
+                throw new InvalidOperationException($"Vests resource 0x{owner.Id:X12} contains {candidates.Count} matching container lists and cannot be extended safely.");
 
-            ArmoryIndex.AvailabilityListCandidate selected = candidates[0];
-            results.Add(new GunsmithAvailabilityList(owner, selected.CountOffset, selected.EntryStride, selected.ValueOffset, selected.RecordIds, selected.RecordIds));
+            var candidate = candidates[0];
+            results.Add(new GunsmithAvailabilityList(owner, candidate.CountOffset, 10, 2, candidate.RecordIds, candidate.RecordIds));
         }
         return results;
     }
@@ -72,7 +85,7 @@ internal static class GunsmithAvailability
             .Where(candidate =>
             {
                 ArmoryIndex.IndexedResource owner = index.DatabaseResources[candidate.OwnerResourceIndex];
-                return owner.Name.StartsWith("WPN_AT_", StringComparison.OrdinalIgnoreCase) && candidate.RecordIds.Contains(templateRecordId)
+                return candidate.RecordIds.Contains(templateRecordId)
                     && candidate.RecordIds.All(id => effectiveResources.TryGetValue(id, out var resource) && resource.ClassHash == templateRecordClassHash)
                     && MatchesIndexedBytes(owner.Data, candidate);
             })
@@ -88,7 +101,7 @@ internal static class GunsmithAvailability
         {
             var candidates = group.ToList();
             if (candidates.Count != 1)
-                throw new InvalidOperationException("The template attachment belongs to an ambiguous WPN_AT registry and cannot be cloned safely.");
+                throw new InvalidOperationException("The template attachment belongs to an ambiguous structurally matched registry and cannot be cloned safely.");
 
             ArmoryIndex.AvailabilityListCandidate candidate = candidates[0];
             ArmoryIndex.IndexedResource owner = index.DatabaseResources[candidate.OwnerResourceIndex];
@@ -106,26 +119,23 @@ internal static class GunsmithAvailability
 
         var knownIds = index.DatabaseResources.Select(resource => resource.Id).ToHashSet();
         var effectiveOwners = index.DatabaseResources
-            .Select((resource, resourceIndex) => (resource, resourceIndex))
-            .Where(item => string.Equals(item.resource.Name, "DBUnlockables_default", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(item => item.resource.Id)
+            .Where(resource => resource.Id == UnlockablesResourceId && resource.ClassHash == UnlockablesClassHash)
+            .GroupBy(resource => resource.Id)
             .Select(group => group.Last())
             .ToList();
 
         var results = new List<GunsmithAvailabilityList>();
-        foreach (var (owner, _) in effectiveOwners)
+        foreach (var owner in effectiveOwners)
         {
-            var candidates = ReadTaggedHandleLists(owner.Data, templateRecordId, knownIds, maxEntries: 8_192)
-                .OrderByDescending(candidate => candidate.RecordIds.Count)
-                .ToList();
+            var candidates = ReadUnlockableTables(owner.Data, templateRecordId, knownIds);
             if (candidates.Count == 0)
                 continue;
-            if (candidates.Count > 1
-                && candidates[0].RecordIds.Count == candidates[1].RecordIds.Count)
-                throw new InvalidOperationException("DBUnlockables_default contains an ambiguous attachment registry and cannot be cloned safely.");
+            if (candidates.Count != 1)
+                throw new InvalidOperationException($"Unlockables resource 0x{owner.Id:X12} contains {candidates.Count} structurally valid tables for 0x{templateRecordId:X12}; no write is safe.");
 
             var selected = candidates[0];
-            results.Add(new GunsmithAvailabilityList(owner, selected.CountOffset, 9, 1, selected.RecordIds, selected.RecordIds));
+            results.Add(new GunsmithAvailabilityList(owner, selected.HandleCountOffset, 9, 1, selected.RecordIds, selected.RecordIds,
+                GunsmithAvailabilityLayout.UnlockableParallelColumns));
         }
         return results;
     }
@@ -138,7 +148,7 @@ internal static class GunsmithAvailability
 
         var knownIds = index.DatabaseResources.Select(resource => resource.Id).ToHashSet();
         var effectiveOwners = index.DatabaseResources
-            .Where(resource => resource.Name.StartsWith("DBLootConfig_", StringComparison.OrdinalIgnoreCase) && !resource.Name.EndsWith("_DEBUG", StringComparison.OrdinalIgnoreCase))
+            .Where(resource => resource.ClassHash == LootConfigurationClassHash)
             .GroupBy(resource => resource.Id)
             .Select(group => group.Last())
             .ToList();
@@ -146,14 +156,11 @@ internal static class GunsmithAvailability
         var results = new List<GunsmithAvailabilityList>();
         foreach (var owner in effectiveOwners)
         {
-            var candidates = ReadTaggedHandleLists(owner.Data, templateRecordId, knownIds, maxEntries: 8_192)
-                .OrderByDescending(candidate => candidate.RecordIds.Count)
-                .ToList();
+            var candidates = ReadTaggedHandleLists(owner.Data, templateRecordId, knownIds, maxEntries: 8_192);
             if (candidates.Count == 0)
                 continue;
-            if (candidates.Count > 1
-                && candidates[0].RecordIds.Count == candidates[1].RecordIds.Count)
-                throw new InvalidOperationException($"{owner.Name} contains an ambiguous loot registry and cannot be extended safely.");
+            if (candidates.Count != 1)
+                throw new InvalidOperationException($"Loot configuration 0x{owner.Id:X12} contains {candidates.Count} matching handle lists and cannot be extended safely.");
 
             var selected = candidates[0];
             results.Add(new GunsmithAvailabilityList(owner, selected.CountOffset,
@@ -161,30 +168,49 @@ internal static class GunsmithAvailability
         }
         return results;
     }
-    
+
     public static IReadOnlyList<GunsmithAvailabilityList> FindStoreRegistries(ArmoryIndex index, ulong templateInfoId)
     {
         ArgumentNullException.ThrowIfNull(index);
-        var knownIds = index.DatabaseResources.Select(resource => resource.Id).ToHashSet();
-        var owners = index.DatabaseResources
-            .Where(resource => resource.Name.StartsWith("StoreDBEntry_", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(resource => resource.Id)
-            .Select(group => group.Last())
-            .ToList();
+        if (templateInfoId == 0)
+            return [];
+
+        var storeInfoIds = index.DatabaseResources.Where(resource => resource.ClassHash == StoreObjectInfoClassHash).Select(resource => resource.Id).ToHashSet();
+        if (!storeInfoIds.Contains(templateInfoId))
+            return [];
 
         var results = new List<GunsmithAvailabilityList>();
-        foreach (var owner in owners)
+        foreach (ArmoryIndex.IndexedResource owner in index.DatabaseResources
+            .Where(resource => resource.ClassHash == StoreEntryClassHash)
+            .GroupBy(resource => resource.Id)
+            .Select(group => group.Last()))
         {
-            var candidates = ReadContainerLists(owner.Data, templateInfoId, knownIds)
-                .OrderByDescending(candidate => candidate.RecordIds.Count)
+            var candidates = ReadContainerLists(owner.Data, templateInfoId, storeInfoIds)
+                .Where(candidate => IsMaximalContainerList(owner.Data, candidate.CountOffset, candidate.RecordIds.Count, storeInfoIds))
                 .ToList();
             if (candidates.Count == 0)
                 continue;
-            if (candidates.Count > 1 && candidates[0].RecordIds.Count == candidates[1].RecordIds.Count)
-                throw new InvalidOperationException($"{owner.Name} holds an ambiguous store list and cannot be extended safely.");
-            results.Add(new GunsmithAvailabilityList(owner, candidates[0].CountOffset, 10, 2, candidates[0].RecordIds, candidates[0].RecordIds));
+            if (candidates.Count != 1)
+                throw new InvalidDataException($"Store resource 0x{owner.Id:X12} contains {candidates.Count} maximal StoreObjectInfo lists for 0x{templateInfoId:X12}.");
+
+            var candidate = candidates[0];
+            results.Add(new GunsmithAvailabilityList(owner, candidate.CountOffset, 10, 2, candidate.RecordIds, candidate.RecordIds));
         }
         return results;
+    }
+
+    static bool IsMaximalContainerList(ReadOnlySpan<byte> data, int countOffset, int count, IReadOnlySet<ulong> allowedIds)
+    {
+        const int entryStride = 10;
+        int entriesOffset = countOffset + sizeof(uint);
+        int endOffset = checked(entriesOffset + count * entryStride);
+        return !IsContainerEntry(data, entriesOffset - entryStride, allowedIds) && !IsContainerEntry(data, endOffset, allowedIds);
+    }
+
+    static bool IsContainerEntry(ReadOnlySpan<byte> data, int offset, IReadOnlySet<ulong> allowedIds)
+    {
+        return offset >= 0 && offset + 10 <= data.Length && data[offset] == 1 && data[offset + 1] == 0
+            && allowedIds.Contains(BinaryPrimitives.ReadUInt64LittleEndian(data[(offset + 2)..]));
     }
 
     static IReadOnlyList<(int CountOffset, IReadOnlyList<ulong> RecordIds)> ReadContainerLists(ReadOnlySpan<byte> data, ulong requiredId, IReadOnlySet<ulong> knownIds)
@@ -224,7 +250,7 @@ internal static class GunsmithAvailability
         var knownIds = index.DatabaseResources.Select(resource => resource.Id).ToHashSet();
         var effectiveOwners = index.DatabaseResources
             .Select((resource, resourceIndex) => (resource, resourceIndex))
-            .Where(item => item.resource.Name.StartsWith("DBContainerEntry_", StringComparison.OrdinalIgnoreCase))
+            .Where(item => item.resource.ClassHash == DatabaseContainerClassHash)
             .GroupBy(item => item.resource.Id)
             .Select(group => group.Last())
             .ToList();
@@ -277,45 +303,74 @@ internal static class GunsmithAvailability
         return true;
     }
 
-    static IReadOnlyList<(int CountOffset, IReadOnlyList<ulong> RecordIds)> ReadTaggedHandleLists(ReadOnlySpan<byte> data, ulong requiredId, IReadOnlySet<ulong> knownIds, int maxEntries)
+    static IReadOnlyList<UnlockableTable> ReadUnlockableTables(ReadOnlySpan<byte> data, ulong requiredId, IReadOnlySet<ulong> knownIds)
     {
-        var results = new List<(int, IReadOnlyList<ulong>)>();
-        for (int offset = 0; offset + sizeof(uint) <= data.Length; offset++)
+        const int maxEntries = 8_192;
+        const int handleStride = sizeof(byte) + sizeof(ulong);
+        var results = new List<UnlockableTable>();
+        for (int handleCountOffset = 0; handleCountOffset + sizeof(uint) <= data.Length; handleCountOffset++)
         {
-            uint count = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
-            if (count is < 1 || count > maxEntries || offset + sizeof(uint) + (long)count * 9 > data.Length)
+            if (!TryReadTaggedHandleList(data, handleCountOffset, requiredId, knownIds, maxEntries, out ulong[] ids))
                 continue;
 
-            int entriesOffset = offset + sizeof(uint);
-            var ids = new ulong[count];
-            bool containsRequired = false;
-            bool valid = true;
-            for (int item = 0; item < ids.Length; item++)
-            {
-                int entryOffset = entriesOffset + item * 9;
-                if (data[entryOffset] != 0)
-                {
-                    valid = false;
-                    break;
-                }
-                ulong id = BinaryPrimitives.ReadUInt64LittleEndian(data[(entryOffset + 1)..]);
-                if (!knownIds.Contains(id))
-                {
-                    valid = false;
-                    break;
-                }
-                ids[item] = id;
-                containsRequired |= id == requiredId;
-            }
+            int count = ids.Length;
+            uint rawCount = (uint)count;
+            int handlesEnd = checked(handleCountOffset + sizeof(uint) + count * handleStride);
+            int byteColumn1Offset = handleCountOffset - checked(sizeof(uint) * 3 + count * (sizeof(byte) + sizeof(uint) + sizeof(byte)));
+            if (byteColumn1Offset < 0)
+                continue;
+            int uintColumnOffset = byteColumn1Offset + sizeof(uint) + count;
+            int byteColumn2Offset = uintColumnOffset + sizeof(uint) + count * sizeof(uint);
+            int calculatedHandleCountOffset = byteColumn2Offset + sizeof(uint) + count;
+            if (calculatedHandleCountOffset != handleCountOffset
+                || BinaryPrimitives.ReadUInt32LittleEndian(data[byteColumn1Offset..]) != rawCount
+                || BinaryPrimitives.ReadUInt32LittleEndian(data[uintColumnOffset..]) != rawCount
+                || BinaryPrimitives.ReadUInt32LittleEndian(data[byteColumn2Offset..]) != rawCount)
+                continue;
 
-            if (valid && containsRequired && ids.Distinct().Count() == ids.Length)
-                results.Add((offset, ids));
+            results.Add(new UnlockableTable(byteColumn1Offset, uintColumnOffset, byteColumn2Offset, handleCountOffset, handlesEnd, ids));
         }
         return results;
     }
 
+    static IReadOnlyList<(int CountOffset, IReadOnlyList<ulong> RecordIds)> ReadTaggedHandleLists(ReadOnlySpan<byte> data, ulong requiredId,
+        IReadOnlySet<ulong> knownIds, int maxEntries)
+    {
+        var results = new List<(int, IReadOnlyList<ulong>)>();
+        for (int countOffset = 0; countOffset + sizeof(uint) <= data.Length; countOffset++)
+            if (TryReadTaggedHandleList(data, countOffset, requiredId, knownIds, maxEntries, out ulong[] ids))
+                results.Add((countOffset, ids));
+        return results;
+    }
+
+    static bool TryReadTaggedHandleList(ReadOnlySpan<byte> data, int countOffset, ulong requiredId, IReadOnlySet<ulong> knownIds, int maxEntries,
+        out ulong[] ids)
+    {
+        const int entryStride = sizeof(byte) + sizeof(ulong);
+        ids = [];
+        uint rawCount = BinaryPrimitives.ReadUInt32LittleEndian(data[countOffset..]);
+        if (rawCount is < 1 || rawCount > maxEntries || countOffset + sizeof(uint) + (long)rawCount * entryStride > data.Length)
+            return false;
+
+        int entriesOffset = countOffset + sizeof(uint);
+        ids = new ulong[rawCount];
+        bool containsRequired = false;
+        for (int item = 0; item < ids.Length; item++)
+        {
+            int entryOffset = entriesOffset + item * entryStride;
+            if (data[entryOffset] != 0)
+                return false;
+            ulong id = BinaryPrimitives.ReadUInt64LittleEndian(data[(entryOffset + sizeof(byte))..]);
+            if (!knownIds.Contains(id))
+                return false;
+            ids[item] = id;
+            containsRequired |= id == requiredId;
+        }
+        return containsRequired && ids.Distinct().Count() == ids.Length;
+    }
+
     public static IReadOnlyList<GunsmithAvailabilityList> Find(ArmoryIndex? index, BuildTableAsset table, BuildTableGameMetadata metadata,
-        IReadOnlyDictionary<uint, BuildTableOptionMetadata>? addedMetadata = null, IReadOnlyDictionary<ulong, IReadOnlyList<string>>? addedOwnersByRecordId = null)
+        IReadOnlyDictionary<uint, BuildTableOptionMetadata>? addedMetadata = null, IReadOnlyDictionary<ulong, IReadOnlySet<ulong>>? addedOwnerIdsByRecordId = null)
     {
         if (index is null || table.Rows.Count == 0 || metadata.OwnerRecordIds.Count == 0)
             return [];
@@ -342,8 +397,8 @@ internal static class GunsmithAvailability
             if (!effectiveOwnerIndexes.Contains(candidate.OwnerResourceIndex))
                 continue;
 
-            var currentForOwner = expected.Where(id => (metadata.OwnersByRecordId.TryGetValue(id, out var ownerNames) && ownerNames.Contains(owner.Name, StringComparer.OrdinalIgnoreCase))
-                    || (addedOwnersByRecordId?.TryGetValue(id, out var addedOwnerNames) == true && addedOwnerNames.Contains(owner.Name, StringComparer.OrdinalIgnoreCase))).ToHashSet();
+            var currentForOwner = expected.Where(id => (metadata.OwnerIdsByRecordId.TryGetValue(id, out var ownerIds) && ownerIds.Contains(owner.Id))
+                    || (addedOwnerIdsByRecordId?.TryGetValue(id, out var addedOwnerIds) == true && addedOwnerIds.Contains(owner.Id))).ToHashSet();
             if (currentForOwner.Count == 0 || candidate.RecordIds.Any(id => !currentForOwner.Contains(id)))
                 continue;
 
@@ -433,7 +488,7 @@ internal static class GunsmithAvailability
                     rewritten.Insert(templatePosition + 1, item.NewId);
                 }
 
-                if (string.Equals(list.OwnerName, "DBUnlockables_default", StringComparison.OrdinalIgnoreCase) && list.EntryStride == 9 && list.ValueOffset == 1)
+                if (list.Layout == GunsmithAvailabilityLayout.UnlockableParallelColumns)
                 {
                     updated = RewriteUnlockableRows(updated, list, items);
                     continue;
@@ -454,6 +509,7 @@ internal static class GunsmithAvailability
         int originalCount = list.RecordIds.Count;
         if (originalCount < 1)
             throw new InvalidDataException("DBUnlockables_default has an empty unlockable table.");
+        ValidateTaggedHandleList(source, list.CountOffset, list.RecordIds);
 
         int byteColumn1Offset = checked(list.CountOffset - (sizeof(uint) * 3 + originalCount * (sizeof(byte) + sizeof(uint) + sizeof(byte))));
         int uintColumnOffset = checked(byteColumn1Offset + sizeof(uint) + originalCount);
@@ -526,9 +582,18 @@ internal static class GunsmithAvailability
 
         source.AsSpan(oldEnd).CopyTo(output.AsSpan(write));
         ValidateList(output, writtenHandleCountOffset, 9, 1, ids);
+        ValidateTaggedHandleList(output, writtenHandleCountOffset, ids);
         if (write != byteColumn1Offset + newBlockLength)
             throw new InvalidDataException("DBUnlockables_default row clone wrote an invalid table length.");
         return output;
+    }
+
+    static void ValidateTaggedHandleList(ReadOnlySpan<byte> data, int countOffset, IReadOnlyList<ulong> expected)
+    {
+        var knownIds = expected.ToHashSet();
+        if (expected.Count == 0 || !TryReadTaggedHandleList(data, countOffset, expected[0], knownIds, expected.Count, out ulong[] actual)
+            || !actual.SequenceEqual(expected))
+            throw new InvalidDataException("The tagged-handle column does not match the structurally validated registry rows.");
     }
 
     static void WriteCount(byte[] output, ref int offset, int count)
@@ -639,4 +704,7 @@ internal static class GunsmithAvailability
                 return false;
         return true;
     }
+
+    readonly record struct UnlockableTable(int ByteColumn1Offset, int UIntColumnOffset, int ByteColumn2Offset, int HandleCountOffset,
+        int EndOffset, IReadOnlyList<ulong> RecordIds);
 }

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO;
+using System.Text;
 using Wildlands.Formats;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
@@ -14,7 +15,7 @@ internal sealed record AttachmentAddPlan(
     IReadOnlyList<BuildTableResourceChange> LocalChanges,
     BuildTableOptionMetadata Metadata,
     bool AddedToGunsmith,
-    IReadOnlyList<string> OwnerNames,
+    IReadOnlySet<ulong> OwnerIds,
     IReadOnlyList<ArmoryDatabaseResourceChange> DatabaseChanges,
     IReadOnlyList<ArmoryArchiveResourceAddition> ResourceAdditions,
     IReadOnlyList<ArmoryArchiveEntryAddition> EntryAdditions,
@@ -27,7 +28,6 @@ internal static class AttachmentAddPipeline
     const uint LocalizedValueMarker = 0x81A7045D;
     const uint DynamicHandleType = 18u << 16;
     const uint DynamicObjectPointerType = 20u << 16;
-    const uint StoreObjectInfoClass = 0x36C9CB38;
     const uint BuildTagColumnMapClass = 0xFFC5A970;
     const uint BuildTagColumnEntryMarker = 0xA31AA51D;
 
@@ -139,12 +139,14 @@ internal static class AttachmentAddPipeline
             : BuildParentTagChanges(table.Id, templateMetadata.BuildTag, buildTag, localResources, localResourceIndexes);
 
         var recordSource = LoadIndexedResource(index, category.ExemplarRecordId);
-        byte[] recordData = CloneGameplayRecord(recordSource.Resource.Data, category.ExemplarRecordId, recordId, buildTag, stringId);
+        byte[] recordData = CloneGameplayRecord(recordSource.Resource.Data,
+            category.ExemplarRecordId, recordId, buildTag, stringId,
+            draft.InternalName);
         string recordName = draft.InternalName;
         Resource newRecord = DataFile.CloneResource(recordSource.Resource, recordId, recordName, recordData);
         resourceAdditions.Add(ToAddition(recordSource.Location, newRecord));
 
-        var infoSource = index.DatabaseResources.LastOrDefault(resource => resource.ClassHash == StoreObjectInfoClass && Names(resource.Data, category.ExemplarRecordId))
+        var infoSource = index.DatabaseResources.LastOrDefault(resource => resource.ClassHash == StoreObjectInfo.ClassHash && Names(resource, category.ExemplarRecordId))
             ?? throw new InvalidOperationException("The chosen attachment category has no StoreObjectInfo beside its record.");
         ulong infoId = Allocate64("store-object-info:" + draft.InternalName, used64);
         var infoLoaded = LoadIndexedResource(index, infoSource.Id);
@@ -170,9 +172,7 @@ internal static class AttachmentAddPipeline
             databaseChanges.Add(new ArmoryDatabaseResourceChange(target.Location.ArchivePath, target.Location.EntryIndex, target.Location.EntryName, target.ResourceIndex, target.Resource.Name, localizationData));
         }
 
-        var ownerNames = gunsmithLists.Select(list => list.OwnerName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var ownerIds = gunsmithLists.Select(list => list.Owner.Id).ToHashSet();
 
         var databaseContainerInsertions = new List<(GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>();
         var databaseContainerRegistries = GunsmithAvailability.FindDatabaseContainerRegistries(index, category.ExemplarRecordId);
@@ -204,7 +204,7 @@ internal static class AttachmentAddPipeline
             byte[] typeData = CloneAttachmentTypeRegistry(typeRegistry, typeId, category.Tag, buildTag, recordId);
             resourceAdditions.Add(ToAddition(typeLoaded.Location, DataFile.CloneResource(typeLoaded.Resource, typeId, typeName, typeData)));
 
-            var typeInfoSource = index.DatabaseResources.LastOrDefault(resource => resource.ClassHash == StoreObjectInfoClass && Names(resource.Data, typeRegistry.Owner.Id))
+            var typeInfoSource = index.DatabaseResources.LastOrDefault(resource => resource.ClassHash == StoreObjectInfo.ClassHash && Names(resource, typeRegistry.Owner.Id))
                 ?? throw new InvalidOperationException("The WPN_AT attachment-type template has no StoreObjectInfo beside it.");
             ulong typeInfoId = Allocate64("attachment-type-info:" + draft.InternalName, used64);
             var typeInfoLoaded = LoadIndexedResource(index, typeInfoSource.Id);
@@ -288,7 +288,7 @@ internal static class AttachmentAddPipeline
         }
 
         var metadata = new BuildTableOptionMetadata(buildTag, stringId, draft.DisplayName, null, templateMetadata.DescriptionStringId, templateMetadata.Description, recordId, recordName, templateMetadata.RecordClassHash);
-        return new AttachmentAddPlan(tableData, localChanges, metadata, draft.AddToGunsmith, ownerNames, databaseChanges, resourceAdditions, entryAdditions, previewResources, modelSelectorId);
+        return new AttachmentAddPlan(tableData, localChanges, metadata, draft.AddToGunsmith, ownerIds, databaseChanges, resourceAdditions, entryAdditions, previewResources, modelSelectorId);
     }
 
     static AttachmentCategory ResolveFreeCategory(ArmoryIndex index, BuildTableAsset table, BuildTableOptionMetadata templateMetadata, IReadOnlyCollection<ulong> ownerRecordIds)
@@ -502,7 +502,7 @@ internal static class AttachmentAddPipeline
                 Resource resource = file.Resources[i];
                 if (i == leafIndex || resource.ClassHash != BuildTable.ClassHash && resource.ClassHash != entityBuilderHash)
                     continue;
-                if (!TryAddBuildTag(resource.Data, templateTag, newTag, out byte[] updated))
+                if (!TryAddBuildTag(resource, templateTag, newTag, out byte[] updated))
                     continue;
                 changes.Add(new ArmoryDatabaseResourceChange(path, entry.Index, entry.Name, i, resource.Name, updated));
                 tagged++;
@@ -608,7 +608,7 @@ internal static class AttachmentAddPipeline
                     .Select((row, index) => (row, index))
                     .Where(item => item.row.Tag == templateTag)
                     .ToList();
-                
+
                 if (templateRows.Count == 0)
                     continue;
                 if (templateRows.Count > 1)
@@ -687,7 +687,7 @@ internal static class AttachmentAddPipeline
         {
             if (resource.Id == leafTableId || resource.ClassHash != BuildTable.ClassHash && resource.ClassHash != entityBuilderHash)
                 continue;
-            if (!TryAddBuildTag(resource.Data, templateTag, newTag, out byte[] updated))
+            if (!TryAddBuildTag(resource, templateTag, newTag, out byte[] updated))
                 continue;
             if (!localResourceIndexes.TryGetValue(resource.Id, out int resourceIndex))
                 throw new InvalidOperationException($"{resource.Name} has no stable resource index in the opened weapon container.");
@@ -704,43 +704,24 @@ internal static class AttachmentAddPipeline
         return changes;
     }
 
-    internal static bool TryAddBuildTag(byte[] source, uint templateTag, uint newTag, out byte[] updated)
+    internal static bool TryAddBuildTag(Resource resource, uint templateTag, uint newTag, out byte[] updated)
     {
-        const uint buildTagsHash = 0x11BD5345;
-        const uint buildTagHash = 0xB332698E;
+        if (resource.ClassHash == BuildTable.ClassHash)
+            return BuildTable.Read(resource.Data).TryAddBuildTag(templateTag, newTag, out updated);
+        return TryAddEmbeddedBuildTag(resource.Data, templateTag, newTag, out updated);
+    }
+
+    internal static bool TryAddBuildTagToAll(Resource resource, uint templateTag, uint newTag, out byte[] updated)
+    {
+        if (resource.ClassHash == BuildTable.ClassHash)
+            return BuildTable.Read(resource.Data).TryAddBuildTagToAll(templateTag, newTag, out updated);
+        return TryAddEmbeddedBuildTag(resource.Data, templateTag, newTag, out updated);
+    }
+
+    static bool TryAddEmbeddedBuildTag(byte[] source, uint templateTag, uint newTag, out byte[] updated)
+    {
         const int entrySize = 16;
-        var matches = new List<(int CountOffset, int EntriesOffset, int Count, int TemplateIndex, IReadOnlyList<ulong> ObjectIds)>();
-
-        for (int markerOffset = sizeof(ulong); markerOffset + 8 <= source.Length; markerOffset++)
-        {
-            if (BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(markerOffset)) != buildTagsHash)
-                continue;
-            int countOffset = markerOffset + sizeof(uint);
-            int count = BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(countOffset));
-            int entriesOffset = countOffset + sizeof(int);
-            if (count is < 1 or > 10_000 || entriesOffset + (long)count * entrySize > source.Length)
-                continue;
-
-            var ids = new ulong[count];
-            int templateIndex = -1;
-            bool valid = true;
-            for (int item = 0; item < count; item++)
-            {
-                int entryOffset = entriesOffset + item * entrySize;
-                ulong objectId = BinaryPrimitives.ReadUInt64LittleEndian(source.AsSpan(entryOffset));
-                uint classHash = BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(entryOffset + 8));
-                if (objectId is < 0xF0000000UL or > uint.MaxValue || classHash != buildTagHash)
-                {
-                    valid = false;
-                    break;
-                }
-                ids[item] = objectId;
-                if (BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(entryOffset + 12)) == templateTag)
-                    templateIndex = item;
-            }
-            if (valid && templateIndex >= 0)
-                matches.Add((countOffset, entriesOffset, count, templateIndex, ids));
-        }
+        var matches = FindEmbeddedBuildTagLists(source, templateTag);
 
         if (matches.Count == 0)
         {
@@ -792,103 +773,269 @@ internal static class AttachmentAddPipeline
         return true;
     }
 
-    internal static IReadOnlyList<ArmoryDatabaseResourceChange> BuildTagColumnMapChanges(ArmoryIndex index, uint templateTag, uint newTag)
+    static List<(int CountOffset, int EntriesOffset, int Count, int TemplateIndex,
+        IReadOnlyList<ulong> ObjectIds)> FindEmbeddedBuildTagLists(
+            ReadOnlySpan<byte> source, uint templateTag)
     {
+        const uint buildTagsHash = 0x11BD5345;
+        const uint buildTagHash = 0xB332698E;
+        const int entrySize = 16;
+        var matches = new List<(int CountOffset, int EntriesOffset, int Count,
+            int TemplateIndex, IReadOnlyList<ulong> ObjectIds)>();
+        for (int markerOffset = sizeof(ulong); markerOffset + 8 <= source.Length;
+             markerOffset++)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(source[markerOffset..])
+                != buildTagsHash)
+                continue;
+            int countOffset = markerOffset + sizeof(uint);
+            int count = BinaryPrimitives.ReadInt32LittleEndian(source[countOffset..]);
+            int entriesOffset = countOffset + sizeof(int);
+            if (count is < 1 or > 10_000
+                || entriesOffset + (long)count * entrySize > source.Length)
+                continue;
+
+            var ids = new ulong[count];
+            int templateIndex = -1;
+            bool valid = true;
+            for (int item = 0; item < count; item++)
+            {
+                int entryOffset = entriesOffset + item * entrySize;
+                ulong objectId = BinaryPrimitives.ReadUInt64LittleEndian(
+                    source[entryOffset..]);
+                uint classHash = BinaryPrimitives.ReadUInt32LittleEndian(
+                    source[(entryOffset + 8)..]);
+                if (objectId is < 0xF0000000UL or > uint.MaxValue
+                    || classHash != buildTagHash)
+                {
+                    valid = false;
+                    break;
+                }
+                ids[item] = objectId;
+                if (BinaryPrimitives.ReadUInt32LittleEndian(
+                        source[(entryOffset + 12)..]) == templateTag)
+                    templateIndex = item;
+            }
+            if (valid && templateIndex >= 0)
+                matches.Add((countOffset, entriesOffset, count,
+                    templateIndex, ids));
+        }
+        return matches;
+    }
+
+    internal static IReadOnlyList<ArmoryDatabaseResourceChange> BuildTagColumnMapChanges(ArmoryIndex index, uint templateTag, uint newTag)
+        => BuildTagDictionaryChanges(index, [(templateTag, newTag)]);
+
+    internal static IReadOnlyList<ArmoryDatabaseResourceChange> BuildTagDictionaryChanges(
+        ArmoryIndex index, IReadOnlyList<(uint TemplateTag, uint NewTag)> tags)
+    {
+        if (tags.Count == 0)
+            return [];
         var changes = new List<ArmoryDatabaseResourceChange>();
+        var matched = new HashSet<(uint TemplateTag, uint NewTag)>();
         foreach (var resource in index.DatabaseResources
                      .Where(resource => resource.ClassHash == BuildTagColumnMapClass)
-                     .GroupBy(resource => (resource.ArchivePath, resource.EntryIndex, resource.ResourceIndex))
+                     .GroupBy(resource => resource.Id)
                      .Select(group => group.Last()))
         {
-            if (!TryAddBuildTagColumnMapEntry(resource.Data, templateTag, newTag, out byte[] updated))
-                continue;
-            changes.Add(new ArmoryDatabaseResourceChange(resource.ArchivePath, resource.EntryIndex, resource.EntryName, resource.ResourceIndex, resource.Name, updated));
+            try
+            {
+                byte[] data = resource.Data;
+                bool changed = false;
+                foreach ((uint templateTag, uint newTag) in tags)
+                {
+                    if (!TryCompleteTagDictionaryEntry(data, templateTag, newTag,
+                            out byte[] next, out bool found))
+                    {
+                        if (found)
+                            matched.Add((templateTag, newTag));
+                        continue;
+                    }
+                    matched.Add((templateTag, newTag));
+                    data = next;
+                    changed = true;
+                }
+                if (!changed)
+                    continue;
+                changes.Add(new ArmoryDatabaseResourceChange(resource.ArchivePath,
+                    resource.EntryIndex, resource.EntryName, resource.ResourceIndex,
+                    resource.Name, data));
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException($"BuildTag dictionary {resource.Name} (0x{resource.Id:X12}) in {Path.GetFileName(resource.ArchivePath)}/{resource.EntryName} is not writable: {ex.Message}", ex);
+            }
         }
 
-        if (changes.Count == 0)
-            throw new InvalidOperationException("No global BuildTag-to-column-mask map contains the copied attachment tag.");
+        var missing = tags.Where(tag => !matched.Contains(tag)).ToList();
+        if (missing.Count != 0)
+            throw new InvalidOperationException("No global TagDictionnaries resource contains template BuildTag(s) "
+                + string.Join(", ", missing.Select(tag => $"0x{tag.TemplateTag:X8}")) + ".");
         return changes;
+    }
+
+    static bool TryCompleteTagDictionaryEntry(byte[] source, uint templateTag,
+        uint newTag, out byte[] updated, out bool found)
+    {
+        List<int> templateDescriptors = FindTagColumnMapItems(source, templateTag);
+        if (templateDescriptors.Count == 0)
+        {
+            updated = source;
+            found = false;
+            return false;
+        }
+        found = true;
+        if (templateDescriptors.Count != 1)
+            throw new InvalidDataException("The template BuildTag has more than one TagDescriptor.");
+
+        byte[] data = source;
+        bool changed = false;
+        List<int> newDescriptors = FindTagColumnMapItems(data, newTag);
+        if (newDescriptors.Count == 0)
+        {
+            if (!TryAddBuildTagColumnMapEntry(data, templateTag, newTag,
+                    out byte[] withDescriptor))
+                throw new InvalidDataException("The template TagDescriptor could not be duplicated.");
+            data = withDescriptor;
+            changed = true;
+        }
+        else if (newDescriptors.Count != 1)
+        {
+            throw new InvalidDataException("The addon BuildTag has more than one TagDescriptor.");
+        }
+
+        var groupLists = FindEmbeddedBuildTagLists(data, templateTag);
+        if (groupLists.Count != 1)
+            throw new InvalidDataException($"The template BuildTag belongs to {groupLists.Count} structured TagGroupDescriptor lists instead of one.");
+        const int entrySize = 16;
+        var group = groupLists[0];
+        bool groupContainsNew = Enumerable.Range(0, group.Count).Any(item =>
+            BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(
+                group.EntriesOffset + item * entrySize + 12)) == newTag);
+        if (!groupContainsNew)
+        {
+            if (!TryAddEmbeddedBuildTag(data, templateTag, newTag,
+                    out byte[] withGroupMember))
+                throw new InvalidDataException("The template TagGroupDescriptor member could not be duplicated.");
+            data = withGroupMember;
+            changed = true;
+        }
+
+        if (FindTagColumnMapItems(data, newTag).Count != 1)
+            throw new InvalidDataException("The addon TagDescriptor did not survive validation.");
+        var checkedGroups = FindEmbeddedBuildTagLists(data, templateTag);
+        if (checkedGroups.Count != 1 || !Enumerable.Range(0, checkedGroups[0].Count)
+            .Any(item => BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(
+                checkedGroups[0].EntriesOffset + item * entrySize + 12)) == newTag))
+            throw new InvalidDataException("The addon TagGroupDescriptor member did not survive validation.");
+        updated = data;
+        return changed;
     }
 
     static bool TryAddBuildTagColumnMapEntry(byte[] source, uint templateTag, uint newTag, out byte[] updated)
     {
         const int entryStride = 21;
-        var templateItems = FindTagColumnMapItems(source, templateTag);
-        if (templateItems.Count == 0)
+        var templateLists = FindTagDescriptorLists(source, templateTag);
+        if (templateLists.Count == 0)
         {
             updated = source;
             return false;
         }
-        if (templateItems.Count != 1)
-            throw new InvalidOperationException("A global BuildTag-to-column-mask map contains the copied tag more than once.");
+        if (templateLists.Count != 1)
+            throw new InvalidOperationException("A global TagDictionnaries resource contains the copied TagDescriptor more than once.");
         if (FindTagColumnMapItems(source, newTag).Count != 0)
-            throw new InvalidOperationException("The new BuildTag already exists in a global BuildTag-to-column-mask map.");
+            throw new InvalidOperationException("The new BuildTag already has a global TagDescriptor.");
 
-        int templateStart = templateItems[0];
-        int runStart = templateStart;
-        while (IsTagColumnMapEntry(source, runStart - entryStride))
-            runStart -= entryStride;
-        int runEnd = templateStart;
-        while (IsTagColumnMapEntry(source, runEnd + entryStride))
-            runEnd += entryStride;
+        var list = templateLists[0];
+        if (list.ObjectIds.Zip(list.ObjectIds.Skip(1))
+            .Any(pair => pair.First >= pair.Second))
+            throw new InvalidDataException("The TagDescriptor list does not have ordered local object IDs.");
+        ulong newLocalId = list.ObjectIds[list.TemplateIndex] + 1;
+        if (newLocalId is < 0xF8000000UL or >= 0xF9000000UL)
+            throw new InvalidOperationException("The TagDictionnaries resource has no free local object ID.");
 
-        int countOffset = runStart - 24;
-        if (countOffset < 1 || source[countOffset - 1] != 1 || countOffset + 16 > source.Length || BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(countOffset + 12)) != BuildTagColumnEntryMarker)
-            throw new InvalidDataException("The global BuildTag-to-column-mask entry has no readable list header.");
-
-        int regularCount = (runEnd - runStart) / entryStride + 1;
-        int count = BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(countOffset));
-        if (count != regularCount + 1)
-            throw new InvalidDataException("The global BuildTag-to-column-mask list count does not match its entries.");
-
-        ulong maximumLocalId = 0;
+        byte[] shiftedSource = (byte[])source.Clone();
         for (int offset = 0; offset <= source.Length - sizeof(ulong); offset++)
         {
             ulong candidate = BinaryPrimitives.ReadUInt64LittleEndian(source.AsSpan(offset));
-            if (candidate is >= 0xF8000000UL and < 0xF9000000UL && candidate > maximumLocalId)
-                maximumLocalId = candidate;
+            if (candidate < newLocalId || candidate >= 0xF9000000UL)
+                continue;
+            BinaryPrimitives.WriteUInt64LittleEndian(shiftedSource.AsSpan(offset),
+                candidate + 1);
+            offset += sizeof(ulong) - 1;
         }
-        ulong newLocalId = maximumLocalId + 1;
-        if (newLocalId is < 0xF8000000UL or >= 0xF9000000UL)
-            throw new InvalidOperationException("The global BuildTag-to-column-mask map has no free local object ID.");
 
-        int insertAt = runEnd + entryStride;
+        int templateStart = list.CountOffset + sizeof(int)
+            + list.TemplateIndex * entryStride;
+        int insertAt = templateStart + entryStride;
         updated = new byte[checked(source.Length + entryStride)];
-        source.AsSpan(0, insertAt).CopyTo(updated);
-        source.AsSpan(templateStart, entryStride).CopyTo(updated.AsSpan(insertAt));
-        source.AsSpan(insertAt).CopyTo(updated.AsSpan(insertAt + entryStride));
-        BinaryPrimitives.WriteUInt64LittleEndian(updated.AsSpan(insertAt + 1), newLocalId);
-        BinaryPrimitives.WriteUInt32LittleEndian(updated.AsSpan(insertAt + 13), newTag);
-        BinaryPrimitives.WriteInt32LittleEndian(updated.AsSpan(countOffset), count + 1);
+        shiftedSource.AsSpan(0, insertAt).CopyTo(updated);
+        shiftedSource.AsSpan(templateStart, entryStride)
+            .CopyTo(updated.AsSpan(insertAt));
+        shiftedSource.AsSpan(insertAt)
+            .CopyTo(updated.AsSpan(insertAt + entryStride));
+        BinaryPrimitives.WriteUInt64LittleEndian(updated.AsSpan(insertAt), newLocalId);
+        BinaryPrimitives.WriteUInt32LittleEndian(updated.AsSpan(insertAt + 12), newTag);
+        BinaryPrimitives.WriteInt32LittleEndian(updated.AsSpan(list.CountOffset),
+            list.Count + 1);
 
-        if (BinaryPrimitives.ReadInt32LittleEndian(updated.AsSpan(countOffset)) != count + 1
-            || BinaryPrimitives.ReadUInt32LittleEndian(updated.AsSpan(insertAt + 13)) != newTag || FindTagColumnMapItems(updated, newTag).Count != 1)
-            throw new InvalidDataException("The global BuildTag-to-column-mask map did not retain its new entry.");
+        var checkedLists = FindTagDescriptorLists(updated, newTag);
+        if (checkedLists.Count != 1
+            || checkedLists[0].Count != list.Count + 1
+            || checkedLists[0].ObjectIds.Zip(checkedLists[0].ObjectIds.Skip(1))
+                .Any(pair => pair.First >= pair.Second))
+            throw new InvalidDataException("The global TagDescriptor list did not retain its new entry.");
         return true;
     }
 
     static List<int> FindTagColumnMapItems(ReadOnlySpan<byte> data, uint tag)
+        => FindTagDescriptorLists(data, tag)
+            .Select(match => match.CountOffset + sizeof(int)
+                + match.TemplateIndex * 21)
+            .ToList();
+
+    static List<(int CountOffset, int Count, int TemplateIndex,
+        IReadOnlyList<ulong> ObjectIds)> FindTagDescriptorLists(
+            ReadOnlySpan<byte> data, uint tag)
     {
-        Span<byte> needle = stackalloc byte[sizeof(uint)];
-        BinaryPrimitives.WriteUInt32LittleEndian(needle, tag);
-        var results = new List<int>();
-        int search = 0;
-        while (search <= data.Length - sizeof(uint))
+        const int entryStride = 21;
+        var results = new List<(int CountOffset, int Count, int TemplateIndex,
+            IReadOnlyList<ulong> ObjectIds)>();
+        for (int countOffset = 0; countOffset <= data.Length - 16;
+             countOffset++)
         {
-            int relative = data[search..].IndexOf(needle);
-            if (relative < 0)
-                break;
-            int tagOffset = search + relative;
-            int itemStart = tagOffset - 13;
-            if (IsTagColumnMapEntry(data, itemStart))
-                results.Add(itemStart);
-            search = tagOffset + sizeof(uint);
+            int count = BinaryPrimitives.ReadInt32LittleEndian(data[countOffset..]);
+            if (count is < 1 or > 10_000
+                || countOffset + sizeof(int) + (long)count * entryStride
+                    > data.Length
+                || BinaryPrimitives.ReadUInt32LittleEndian(
+                    data[(countOffset + 12)..]) != BuildTagColumnEntryMarker)
+                continue;
+            var ids = new ulong[count];
+            int templateIndex = -1;
+            bool valid = true;
+            for (int item = 0; item < count; item++)
+            {
+                int entryOffset = countOffset + sizeof(int) + item * entryStride;
+                ulong id = BinaryPrimitives.ReadUInt64LittleEndian(data[entryOffset..]);
+                uint classHash = BinaryPrimitives.ReadUInt32LittleEndian(
+                    data[(entryOffset + 8)..]);
+                if (id is < 0xF8000000UL or >= 0xF9000000UL
+                    || classHash != BuildTagColumnEntryMarker)
+                {
+                    valid = false;
+                    break;
+                }
+                ids[item] = id;
+                if (BinaryPrimitives.ReadUInt32LittleEndian(
+                        data[(entryOffset + 12)..]) == tag)
+                    templateIndex = item;
+            }
+            if (valid && templateIndex >= 0)
+                results.Add((countOffset, count, templateIndex, ids));
         }
         return results;
     }
-
-    static bool IsTagColumnMapEntry(ReadOnlySpan<byte> data, int offset) => offset >= 0 && offset + 21 <= data.Length && data[offset] == 1
-        && BinaryPrimitives.ReadUInt32LittleEndian(data[(offset + 9)..]) == BuildTagColumnEntryMarker;
 
     internal static (Resource Resource, ResourceLocation Location) LoadIndexedResource(ArmoryIndex index, ulong id)
     {
@@ -927,7 +1074,8 @@ internal static class AttachmentAddPipeline
         return result;
     }
 
-    internal static byte[] CloneGameplayRecord(byte[] source, ulong oldId, ulong newId, uint buildTag, uint stringId)
+    internal static byte[] CloneGameplayRecord(byte[] source, ulong oldId,
+        ulong newId, uint buildTag, uint stringId, string internalName)
     {
         byte[] result = (byte[])source.Clone();
         if (result.Length < 12 || BinaryPrimitives.ReadUInt64LittleEndian(result) != oldId)
@@ -943,50 +1091,115 @@ internal static class AttachmentAddPipeline
         if (localized < 0 || localized + 8 > result.Length)
             throw new InvalidDataException("The template gameplay record has no localized display-name field.");
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(localized + 4), stringId);
+        result = RewriteGameplayInternalName(result, newId, internalName);
         if (TryBuildTag(result) != buildTag)
             throw new InvalidDataException("The cloned gameplay record did not retain its new BuildTag.");
+        if (!string.Equals(ReadGameplayInternalName(result, newId), internalName,
+                StringComparison.Ordinal))
+            throw new InvalidDataException("The cloned gameplay record did not retain its new internal name.");
         return result;
     }
 
-    internal static byte[] CloneRecordInfo(byte[] source, ulong oldInfoId, ulong newInfoId, ulong oldRecordId, ulong newRecordId, string name)
+    internal static string ReadGameplayInternalName(ReadOnlySpan<byte> data,
+        ulong expectedId)
     {
-        if (source.Length < 24 || BinaryPrimitives.ReadUInt64LittleEndian(source) != oldInfoId)
-            throw new InvalidDataException("The template StoreObjectInfo does not start with its resource ID.");
-        int marker = IndexOfUInt32(source, LocalizedValueMarker, 12);
-        if (marker < 0 || marker + 12 > source.Length)
-            throw new InvalidDataException("The template StoreObjectInfo has no readable name field.");
+        GameplayNameField field = FindGameplayInternalName(data, expectedId);
+        return Encoding.UTF8.GetString(data[field.TextOffset..field.SuffixOffset]);
+    }
 
+    internal static byte[] RewriteGameplayInternalName(ReadOnlySpan<byte> source,
+        ulong expectedId, string internalName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(internalName);
+        if (internalName.IndexOf('\0') >= 0)
+            throw new ArgumentException("A gameplay internal name cannot contain a null character.", nameof(internalName));
+
+        GameplayNameField field = FindGameplayInternalName(source, expectedId);
+        byte[] encoded = Encoding.UTF8.GetBytes(internalName);
+        if (encoded.Length > 1_024)
+            throw new ArgumentOutOfRangeException(nameof(internalName),
+                "A gameplay internal name cannot exceed 1,024 UTF-8 bytes.");
+
+        byte[] result = new byte[checked(source.Length - field.ByteCount + encoded.Length)];
+        source[..field.TextOffset].CopyTo(result);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(field.CountOffset),
+            encoded.Length);
+        encoded.CopyTo(result.AsSpan(field.TextOffset));
+        source[field.SuffixOffset..].CopyTo(result.AsSpan(
+            field.TextOffset + encoded.Length));
+
+        if (!string.Equals(ReadGameplayInternalName(result, expectedId), internalName,
+                StringComparison.Ordinal))
+            throw new InvalidDataException("The rewritten gameplay record failed its internal-name validation.");
+        return result;
+    }
+
+    static GameplayNameField FindGameplayInternalName(ReadOnlySpan<byte> data,
+        ulong expectedId)
+    {
+        if (data.Length < 32
+            || BinaryPrimitives.ReadUInt64LittleEndian(data) != expectedId)
+            throw new InvalidDataException("The gameplay record does not start with its expected resource ID.");
+
+        int marker = IndexOfUInt32(data, BuildTagMarker, 12);
         int countOffset = marker + 8;
-        int characters = BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(countOffset));
-        int stringOffset = countOffset + sizeof(int);
-        if (characters < 0 || stringOffset + characters * 2 + 1 > source.Length)
-            throw new InvalidDataException("The template StoreObjectInfo has an invalid name length.");
-
-        byte[] encoded = System.Text.Encoding.Unicode.GetBytes(name);
-        int suffix = stringOffset + characters * 2 + 1;
-        byte[] result = new byte[checked(stringOffset + encoded.Length + 1 + source.Length - suffix)];
-        source.AsSpan(0, stringOffset).CopyTo(result);
-        BinaryPrimitives.WriteUInt64LittleEndian(result, newInfoId);
-        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(countOffset), encoded.Length / 2);
-        encoded.CopyTo(result.AsSpan(stringOffset));
-        source.AsSpan(suffix).CopyTo(result.AsSpan(stringOffset + encoded.Length + 1));
-
-        Span<byte> needle = stackalloc byte[sizeof(ulong)];
-        BinaryPrimitives.WriteUInt64LittleEndian(needle, oldRecordId);
-        int at = result.AsSpan().IndexOf(needle);
-        if (at < 0)
-            throw new InvalidDataException("The template StoreObjectInfo does not name its own record.");
-        BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(at), newRecordId);
-        if (result.AsSpan(at + sizeof(ulong)).IndexOf(needle) >= 0)
-            throw new InvalidDataException("The template StoreObjectInfo names its record more than once.");
-        return result;
+        if (marker < 0 || countOffset > data.Length - sizeof(int))
+            throw new InvalidDataException("The gameplay record has no structured internal-name field after its BuildTag.");
+        int byteCount = BinaryPrimitives.ReadInt32LittleEndian(data[countOffset..]);
+        int textOffset = countOffset + sizeof(int);
+        int suffixOffset = checked(textOffset + byteCount);
+        if (byteCount is < 1 or > 1_024 || suffixOffset >= data.Length
+            || data[suffixOffset] != 0)
+            throw new InvalidDataException("The gameplay record has an invalid structured internal-name field.");
+        return new GameplayNameField(countOffset, textOffset, suffixOffset,
+            byteCount);
     }
 
-    internal static bool Names(byte[] data, ulong id)
+    readonly record struct GameplayNameField(int CountOffset, int TextOffset,
+        int SuffixOffset, int ByteCount);
+
+    internal static uint ReadGameplayDisplayStringId(ReadOnlySpan<byte> data, ulong expectedId)
     {
-        Span<byte> needle = stackalloc byte[sizeof(ulong)];
-        BinaryPrimitives.WriteUInt64LittleEndian(needle, id);
-        return data.AsSpan().IndexOf(needle) >= 0;
+        if (data.Length < 12 || BinaryPrimitives.ReadUInt64LittleEndian(data) != expectedId)
+            throw new InvalidDataException("The gameplay record does not start with its expected resource ID.");
+
+        int tag = IndexOfUInt32(data, BuildTagMarker, 12);
+        if (tag < 0 || tag + 8 > data.Length)
+            throw new InvalidDataException("The gameplay record has no readable BuildTag field.");
+        int localized = IndexOfUInt32(data, LocalizedValueMarker, tag + 8);
+        if (localized < 0 || localized + 8 > data.Length)
+            throw new InvalidDataException("The gameplay record has no localized display-name field after its BuildTag.");
+
+        uint stringId = BinaryPrimitives.ReadUInt32LittleEndian(data[(localized + 4)..]);
+        if (stringId == 0)
+            throw new InvalidDataException("The gameplay record has a zero display-name string ID.");
+        return stringId;
+    }
+
+    internal static uint ReadGameplayBuildTag(ReadOnlySpan<byte> data, ulong expectedId)
+    {
+        if (data.Length < 12 || BinaryPrimitives.ReadUInt64LittleEndian(data) != expectedId)
+            throw new InvalidDataException("The gameplay record does not start with its expected resource ID.");
+        int marker = IndexOfUInt32(data, BuildTagMarker, 12);
+        if (marker < 0 || marker + 8 > data.Length)
+            throw new InvalidDataException("The gameplay record has no readable BuildTag field.");
+        uint buildTag = BinaryPrimitives.ReadUInt32LittleEndian(data[(marker + 4)..]);
+        if (buildTag == 0)
+            throw new InvalidDataException("The gameplay record has a zero BuildTag.");
+        return buildTag;
+    }
+
+    static byte[] CloneRecordInfo(byte[] source, ulong oldInfoId, ulong newInfoId, ulong oldRecordId, ulong newRecordId, string name)
+    {
+        StoreObjectInfo info = StoreObjectInfo.Parse(source, oldInfoId);
+        if (info.RecordId != oldRecordId)
+            throw new InvalidDataException($"StoreObjectInfo 0x{oldInfoId:X12} references 0x{info.RecordId:X12}, not the expected record 0x{oldRecordId:X12}.");
+        return info.Rewrite(source, newInfoId, newRecordId, name);
+    }
+
+    static bool Names(ArmoryIndex.IndexedResource resource, ulong id)
+    {
+        return StoreObjectInfo.TryParse(resource.Data, resource.Id, out StoreObjectInfo info) && info.RecordId == id;
     }
 
     static bool IsModelReference(BuildTableReference reference) => reference.Kind == BuildTableReferenceKind.Handle || reference.Kind == BuildTableReferenceKind.ObjectPointer && reference.ComponentIndex is not null;
@@ -1140,7 +1353,7 @@ internal static class AttachmentAddPipeline
             rebuilt.Write(output);
             byte[] info = (byte[])file.Info.Clone();
             BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4), Candidate64("forge-entry:" + draft.InternalName + ":" + file.EntryName, 0));
-            additions.Add(new ArmoryArchiveEntryAddition(file.ArchivePath, newEntryId, Rename(file.EntryName, source.EntryName, draft.InternalName),
+            additions.Add(new ArmoryArchiveEntryAddition(localArchivePath, newEntryId, Rename(file.EntryName, source.EntryName, draft.InternalName),
                 rebuilt.Resources[0].ClassHash, info, output.ToArray(), file.PrefetchBlock));
         }
 
@@ -1416,7 +1629,7 @@ internal static class AttachmentAddPipeline
         return entry.Id == 0 || next is null ? (0, 0) : (entry.Id, next.Id);
     }
 
-    static void ApplyPreparedResourceData(DataFile file, string archivePath, int entryIndex, IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
+    internal static void ApplyPreparedResourceData(DataFile file, string archivePath, int entryIndex, IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
     {
         for (int resourceIndex = 0; resourceIndex < file.Resources.Count; resourceIndex++)
             if (preparedResourceData.TryGetValue((archivePath, entryIndex, resourceIndex), out byte[]? prepared))
@@ -1424,7 +1637,8 @@ internal static class AttachmentAddPipeline
     }
 
     internal static List<LocalizationTarget> FindLocalizationTargets(IReadOnlyList<string> packages, IReadOnlyList<string> archivePaths,
-        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData)
+        IReadOnlyDictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> preparedResourceData,
+        ulong templateStringId = 0)
     {
         var wanted = packages.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var candidates = new List<LocalizationTarget>();
@@ -1446,6 +1660,8 @@ internal static class AttachmentAddPipeline
                     Resource resource = resources[resourceIndex];
                     if (preparedResourceData.TryGetValue((path, entry.Index, resourceIndex), out byte[]? prepared))
                         resource.Data = (byte[])prepared.Clone();
+                    if (templateStringId != 0 && !LocalizationPackage.Read(resource.Data).Strings.ContainsKey(templateStringId))
+                        continue;
                     candidates.Add(new LocalizationTarget(package, resource, resourceIndex, new ResourceLocation(path, entry.Index, entry.Name)));
                 }
             }
@@ -1456,7 +1672,7 @@ internal static class AttachmentAddPipeline
         }
         return candidates
             .GroupBy(target => target.Package, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderByDescending(target => target.Resource.Data.Length).First())
+            .Select(group => group.Last())
             .ToList();
     }
 

@@ -22,6 +22,26 @@ your mod did nothing.
 
 ---
 
+## What's new in 0.2.0
+
+Version 0.2.0 is the largest Toolkit update so far. The main additions are:
+
+- A complete mesh workflow: export a game mesh as glTF, edit it in Blender and import it back
+- Persistent mod projects and portable `.wlmod` packages that can be reviewed before installation
+- Adding and deleting individual resources or complete `.data` containers
+- A dedicated Changes window with grouped operations, pending-change markers and safer archive writes
+- Automatic skeleton discovery for rigged exports, plus improved FBX and OBJ export
+- Background archive loading, full DLC archive discovery and an exact cross-archive copy finder
+- Redesigned mesh and texture viewers, update notifications and recoverable crash reports
+
+The experimental BuildTable editor is intentionally disabled in this release. BuildTable resources
+can still be inspected, extracted and replaced as raw resources.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete list of additions, changes, fixes and current
+limitations.
+
+---
+
 ## Features
 
 Note: because most of you probably will not read all of that, here is the short version on meshes.
@@ -34,11 +54,6 @@ times over in Blender, imported back, and the game draws it: geometry intact dow
 the picatinny rail, textures sitting where they belong, lighting and shadows correct, the weapon
 still held properly in the hands. That mesh is vertex format 2, the richest one in the game, with
 three uv sets and vertex colours.
-
-The Armory editor can also create a new attachment option with its own gameplay record, BuildTag,
-Gunsmith registration, cloned model resources and imported geometry. It does not require an unused
-Short/Medium/Long row, but it still starts from an existing attachment as the gameplay and material
-template. Keep the `.original` backups anyway.
 
 Changes can be made without a project, or inside an optional mod project. A project keeps
 every changed, added or newly created Forge resource across Toolkit restarts and builds the exact
@@ -56,6 +71,7 @@ The **Changes** window lists those edits as the actions the user performed, not 
 of internal writes. A complete attachment addition remains one change even when it touches dozens
 of resources. Pending changes can be opened again or removed before Apply; saved project operations
 remain listed after Apply so the project's contents do not disappear from the UI.
+Existing resources with queued changes carry an **EDITED** or **REMOVED** marker in the browser.
 
 ### Archives
 
@@ -63,6 +79,12 @@ remain listed after Apply so the project's contents do not disappear from the UI
   (23 archives in a full install, not just the 10 in the main folder)
 - Searches neighbouring archives in the background, so a resource is found even when it lives in a different archive or file
 - Right-click any resource and choose **Find copies in game...** to scan every installed archive for the same exact 64-bit resource ID. Results name the archive and data container for each confirmed copy; the scan never guesses from filenames.
+- Adds a raw resource to an existing `.data` container by cloning the binary layout of a compatible
+  resource already present in that container
+- Adds a complete `.data` container to a Forge archive and updates the archive metadata required to
+  keep it addressable
+- Deletes individual resources or complete `.data` containers after an explicit warning; deletions
+  remain queued until **Apply changes** like every other edit
 - **Replaces any resource with a raw file**, whatever its type: drop a `.Skeleton` or a `.BuildTable`
   straight in, from your own tools or from somewhere else. Bigger and smaller files are both fine
 - Before it accepts a raw file it checks the type, the id and whether it still reads back, and says
@@ -91,7 +113,8 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
 - Validates triangle topology, accessor bounds, attribute counts and skin ownership before touching a
   game resource. Unsupported compression extensions and unapplied morph targets stop with an explicit
   explanation instead of producing malformed geometry
-- Exports **binary FBX** with skeleton and skin, without the Autodesk SDK
+- Exports **binary FBX** with skeleton and skin, without the Autodesk SDK. Static props and vehicle
+  parts export directly without an irrelevant skeleton prompt
 - Exports and re-imports Wavefront OBJ as well, for tools that want it
 - Finds the matching skeleton across all archives through a bone name index, and uses it to give
   both FBX and glTF a real bone hierarchy instead of a flat list. **98.8% of skinned meshes do not
@@ -113,27 +136,8 @@ shape. It tells you when it does that.
 - Resolves texture sets to their textures
 - Reads and rewrites `.BuildTable` resources byte for byte, all 3649 of them
 
-**About BuildTables, because they had me confused for a while:** they are the game's variant
-system, and they are where a lot of the "what does this thing look like" actually lives.
-
-Practically: if you want a piece of gear to look different, changing the mesh is often the heavy
-way round, and changing an option in the table chain is the light one. The BuildTable editor follows
-the connected tables and keeps their exact internal names visible. User-facing option names are not
-invented from asset filenames: where a root table has the exact same-container EntityBuilder key,
-the editor follows that EntityBuilder into `Game Bootstrap Settings`, reads the weapon/gear record's
-attachment references, matches their real BuildTags, and resolves their LocalizedString IDs from the
-installed package matching the Windows UI language (with `LocalizationPackage_English(US)` fallback).
-
-If that complete ID chain is absent or ambiguous, the UI says that the label is unresolved and shows
-the raw BuildTag. It does not claim that an asset is compatible merely because its filename, container
-or resource class looks similar. Arbitrary single-reference replacement is therefore available only
-as an explicitly unverified technical operation and always warns that companion selectors, tags and
-gameplay records are not updated automatically.
-
-Complete rows can be removed, and an exact row can be duplicated in technical mode. Every structural
-operation allocates fresh local ids and reparses the complete binary object graph before it reaches
-the change list; internal owner fields remain protected. Creating a genuinely new option still needs
-a complete, game-confirmed row template rather than a guessed collection of assets.
+The interactive BuildTable editor is temporarily disabled and is not part of the current release.
+BuildTable resources can still be inspected, extracted and replaced as raw resources.
 
 ### Weather and lighting
 
@@ -144,8 +148,9 @@ a complete, game-confirmed row template rather than a guessed collection of asse
 
 ### Command line
 
-The Wildlands CLI is part of the project which is also usable for batch texture work but it is recommended to use the normal GUI instead.
-There is a full command reference at the bottom of this page.
+The Wildlands CLI is part of the project and is also usable for batch and diagnostic work, but the
+normal GUI is recommended for regular use. A selected command reference is available at the bottom
+of this page.
 
 The `...cycle` commands are the ones I actually trust the formats on. Point them at a folder of
 extracted `.data` files and they check the whole lot; see the section above for the numbers.

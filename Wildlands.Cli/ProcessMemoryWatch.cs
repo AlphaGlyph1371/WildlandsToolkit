@@ -19,17 +19,6 @@ internal static class ProcessMemoryWatch
 
     public static int Run(string processText, IReadOnlyList<string> valueTexts)
     {
-        Process process;
-        try
-        {
-            process = ResolveProcess(processText);
-        }
-        catch (Exception exception)
-        {
-            Console.WriteLine(exception.Message);
-            return 1;
-        }
-
         List<SearchValue> values;
         try
         {
@@ -41,14 +30,7 @@ internal static class ProcessMemoryWatch
             return 1;
         }
 
-        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
-        if (handle == 0)
-        {
-            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
-            return 1;
-        }
-
-        try
+        return WithProcessHandle(processText, (process, handle) =>
         {
             Console.WriteLine($"watching {process.ProcessName} ({process.Id})");
             foreach (SearchValue value in values)
@@ -69,20 +51,14 @@ internal static class ProcessMemoryWatch
             Console.WriteLine();
             PrintDifference(before, after, values);
             return 0;
-        }
-        finally
-        {
-            CloseHandle(handle);
-        }
+        });
     }
 
     public static int Find(string processText, IReadOnlyList<string> valueTexts)
     {
-        Process process;
         List<SearchValue> values;
         try
         {
-            process = ResolveProcess(processText);
             values = valueTexts.Select(ParseValue).ToList();
         }
         catch (Exception exception)
@@ -91,14 +67,7 @@ internal static class ProcessMemoryWatch
             return 1;
         }
 
-        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
-        if (handle == 0)
-        {
-            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
-            return 1;
-        }
-
-        try
+        return WithProcessHandle(processText, (_, handle) =>
         {
             Snapshot snapshot = Capture(handle, values);
             PrintSnapshot("current", snapshot, values);
@@ -108,11 +77,7 @@ internal static class ProcessMemoryWatch
                 PrintAddresses(snapshot, "=", snapshot.Hits[value.Label].Order().ToList());
             }
             return 0;
-        }
-        finally
-        {
-            CloseHandle(handle);
-        }
+        });
     }
 
     // The first value is the locked object. Every later value is a known-working
@@ -121,11 +86,9 @@ internal static class ProcessMemoryWatch
     // the unlock investigation in unrelated copies from archive buffers and code.
     public static int CompareContexts(string processText, IReadOnlyList<string> valueTexts)
     {
-        Process process;
         List<SearchValue> values;
         try
         {
-            process = ResolveProcess(processText);
             values = valueTexts.Select(ParseValue).ToList();
             if (values.Count < 2)
                 throw new ArgumentException("provide one locked value and at least one known-working value");
@@ -138,14 +101,7 @@ internal static class ProcessMemoryWatch
             return 1;
         }
 
-        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
-        if (handle == 0)
-        {
-            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
-            return 1;
-        }
-
-        try
+        return WithProcessHandle(processText, (process, handle) =>
         {
             Console.WriteLine($"comparing runtime contexts in {process.ProcessName} ({process.Id})");
             Snapshot snapshot = Capture(handle, values);
@@ -199,11 +155,7 @@ internal static class ProcessMemoryWatch
                 }
             }
             return 0;
-        }
-        finally
-        {
-            CloseHandle(handle);
-        }
+        });
     }
 
     static ContextWindow? ReadComparisonWindow(nint process, ulong address, int valueLength)
@@ -275,11 +227,9 @@ internal static class ProcessMemoryWatch
 
     public static int Save(string processText, string outputPath, IReadOnlyList<string> valueTexts)
     {
-        Process process;
         List<SearchValue> values;
         try
         {
-            process = ResolveProcess(processText);
             values = valueTexts.Select(ParseValue).ToList();
         }
         catch (Exception exception)
@@ -288,14 +238,7 @@ internal static class ProcessMemoryWatch
             return 1;
         }
 
-        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
-        if (handle == 0)
-        {
-            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
-            return 1;
-        }
-
-        try
+        return WithProcessHandle(processText, (_, handle) =>
         {
             Snapshot snapshot = Capture(handle, values);
             PrintSnapshot(Path.GetFileNameWithoutExtension(outputPath), snapshot, values);
@@ -305,11 +248,7 @@ internal static class ProcessMemoryWatch
             File.WriteAllText(outputPath, JsonSerializer.Serialize(saved));
             Console.WriteLine("saved " + Path.GetFullPath(outputPath));
             return 0;
-        }
-        finally
-        {
-            CloseHandle(handle);
-        }
+        });
     }
 
     public static int Compare(string beforePath, string afterPath)
@@ -335,12 +274,10 @@ internal static class ProcessMemoryWatch
 
     public static int Read(string processText, string addressText, string lengthText)
     {
-        Process process;
         ulong address;
         int length;
         try
         {
-            process = ResolveProcess(processText);
             address = ParseUnsigned(addressText);
             ulong parsedLength = ParseUnsigned(lengthText);
             if (parsedLength is 0 or > 1024 * 1024)
@@ -354,14 +291,7 @@ internal static class ProcessMemoryWatch
             return 1;
         }
 
-        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
-        if (handle == 0)
-        {
-            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
-            return 1;
-        }
-
-        try
+        return WithProcessHandle(processText, (_, handle) =>
         {
             var buffer = new byte[length];
             if (!ReadProcessMemory(handle, unchecked((nint)address), buffer,
@@ -383,20 +313,14 @@ internal static class ProcessMemoryWatch
                 Console.WriteLine($"{address + (ulong)offset:X16}  {hex,-32}  {ascii}");
             }
             return 0;
-        }
-        finally
-        {
-            CloseHandle(handle);
-        }
+        });
     }
 
     public static int SaveRegion(string processText, string addressText, string outputPath)
     {
-        Process process;
         ulong address;
         try
         {
-            process = ResolveProcess(processText);
             address = ParseUnsigned(addressText);
         }
         catch (Exception exception)
@@ -405,14 +329,7 @@ internal static class ProcessMemoryWatch
             return 1;
         }
 
-        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
-        if (handle == 0)
-        {
-            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
-            return 1;
-        }
-
-        try
+        return WithProcessHandle(processText, (_, handle) =>
         {
             int informationSize = Marshal.SizeOf<MemoryBasicInformation>();
             if (VirtualQueryEx(handle, unchecked((nint)address), out MemoryBasicInformation information,
@@ -451,6 +368,32 @@ internal static class ProcessMemoryWatch
                 + $"({FormatBytes(read)}) to {Path.GetFullPath(outputPath)}");
             Console.WriteLine($"requested address is at file offset 0x{address - regionBase:X}");
             return 0;
+        });
+    }
+
+    static int WithProcessHandle(string processText, Func<Process, nint, int> action)
+    {
+        Process process;
+        try
+        {
+            process = ResolveProcess(processText);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception.Message);
+            return 1;
+        }
+
+        nint handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, process.Id);
+        if (handle == 0)
+        {
+            Console.WriteLine($"could not open {process.ProcessName} ({process.Id}): Windows error {Marshal.GetLastWin32Error()}");
+            return 1;
+        }
+
+        try
+        {
+            return action(process, handle);
         }
         finally
         {

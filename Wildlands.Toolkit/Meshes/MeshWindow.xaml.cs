@@ -46,23 +46,16 @@ public partial class MeshWindow : Window
     bool _textured;
     readonly DirectionalLight _light = new(Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
 
-    Point3D _target;
-    double _distance = 10;
-    double _yaw = -2.2;
-    double _pitch = 0.45;
-
     bool _colourRanges = true;
     BackFaces _backFaces = BackFaces.FromMaterial;
-
-    Point _dragStart;
-    bool _orbiting;
-    bool _panning;
+    readonly OrbitCameraController _cameraController;
 
     public MeshWindow(Mesh mesh, byte[] resourceData, string name, List<Resource> siblings,
         ArchiveSet? archives, SkeletonIndex? skeletonIndex, AppSettings settings,
         Action<byte[], string>? queueImport = null, bool hasPendingChange = false)
     {
         InitializeComponent();
+        _cameraController = new OrbitCameraController(Stage, Camera, _light);
 
         _mesh = mesh;
         _resourceData = (byte[])resourceData.Clone();
@@ -215,46 +208,7 @@ public partial class MeshWindow : Window
     void Fit()
     {
         var bounds = MeshScene.Bounds(_parts);
-        if (bounds.IsEmpty)
-            return;
-
-        _target = new Point3D(
-            bounds.X + bounds.SizeX / 2,
-            bounds.Y + bounds.SizeY / 2,
-            bounds.Z + bounds.SizeZ / 2);
-
-        double radius = new Vector3D(bounds.SizeX, bounds.SizeY, bounds.SizeZ).Length / 2;
-        double half = Camera.FieldOfView / 2 * Math.PI / 180;
-
-        _distance = Math.Max(radius / Math.Sin(half) * 1.1, 0.1);
-        UpdateCamera();
-    }
-
-    void UpdateCamera()
-    {
-        var direction = new Vector3D(
-            Math.Cos(_pitch) * Math.Cos(_yaw),
-            Math.Cos(_pitch) * Math.Sin(_yaw),
-            Math.Sin(_pitch));
-
-        Camera.Position = _target + direction * _distance;
-        Camera.LookDirection = -direction;
-
-        Camera.NearPlaneDistance = _distance / 100;
-
-        var (right, up) = Axes(direction);
-        _light.Direction = -direction - up * 0.4 + right * 0.3;
-    }
-
-    static (Vector3D Right, Vector3D Up) Axes(Vector3D direction)
-    {
-        var right = Vector3D.CrossProduct(direction, new Vector3D(0, 0, 1));
-        right.Normalize();
-
-        var up = Vector3D.CrossProduct(right, direction);
-        up.Normalize();
-
-        return (right, up);
+        _cameraController.Fit(bounds);
     }
 
     void Colour_Click(object sender, RoutedEventArgs e)
@@ -349,59 +303,20 @@ public partial class MeshWindow : Window
 
     void Export_Click(object sender, RoutedEventArgs e)
     {
-        string done = MeshExporter.Save(this, _mesh, _name, _siblings, _skeletonIndex, _settings, _skeleton);
+        string done;
+        try
+        {
+            done = MeshExporter.Save(this, _mesh, _name, _siblings, _skeletonIndex, _settings, _skeleton);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not export mesh",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
 
         if (done.Length > 0)
             StatusText.Text = done;
-    }
-
-    void Stage_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        _dragStart = e.GetPosition(Stage);
-        _orbiting = e.ChangedButton == MouseButton.Left;
-        _panning = e.ChangedButton == MouseButton.Right;
-
-        Stage.CaptureMouse();
-        Stage.Cursor = _panning ? Cursors.SizeAll : Cursors.ScrollAll;
-    }
-
-    void Stage_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (!_orbiting && !_panning)
-            return;
-
-        var now = e.GetPosition(Stage);
-        var moved = now - _dragStart;
-        _dragStart = now;
-
-        if (_orbiting)
-        {
-            _yaw -= moved.X * 0.008;
-
-            _pitch = Math.Clamp(_pitch + moved.Y * 0.008, -1.5, 1.5);
-        }
-        else
-        {
-            var (right, up) = Axes(Camera.LookDirection);
-            double scale = _distance * 0.0015;
-            _target += right * (moved.X * scale) + up * (moved.Y * scale);
-        }
-
-        UpdateCamera();
-    }
-
-    void Stage_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _orbiting = false;
-        _panning = false;
-        Stage.ReleaseMouseCapture();
-        Stage.Cursor = Cursors.Arrow;
-    }
-
-    void Stage_MouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        _distance = Math.Clamp(_distance * (e.Delta > 0 ? 0.85 : 1 / 0.85), 0.05, 100000);
-        UpdateCamera();
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

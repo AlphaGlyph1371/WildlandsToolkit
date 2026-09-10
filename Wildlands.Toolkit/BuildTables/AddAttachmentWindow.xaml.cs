@@ -1,7 +1,6 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
@@ -47,24 +46,32 @@ public sealed record AttachmentTextureDraft(
 
 public partial class AddAttachmentWindow : Window
 {
+    readonly bool _characterVest;
     ImportedGeometry? _geometry;
     List<MeshPart> _previewParts = [];
-    Point3D _previewTarget;
-    double _previewDistance = 10;
-    double _previewYaw = -2.2;
-    double _previewPitch = 0.45;
-    Point _dragStart;
-    bool _orbiting;
-    bool _panning;
     readonly DirectionalLight _previewLight = new(Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
+    readonly OrbitCameraController _previewCameraController;
 
-    public AddAttachmentWindow(string slotName, IReadOnlyList<AddAttachmentTemplate> templates)
+    public AddAttachmentWindow(string slotName, IReadOnlyList<AddAttachmentTemplate> templates, bool characterVest = false)
     {
         InitializeComponent();
-        TitleText.Text = "Add attachment";
+        _characterVest = characterVest;
+        _previewCameraController = new OrbitCameraController(PreviewStage, PreviewCamera, _previewLight);
+        TitleText.Text = characterVest ? "Add vest" : "Add attachment";
+        Title = TitleText.Text;
+        AddButton.Content = TitleText.Text;
         SlotText.Text = slotName;
         TemplateBox.ItemsSource = templates;
         TemplateBox.SelectedIndex = templates.Count > 0 ? 0 : -1;
+        if (characterVest)
+        {
+            ExistingAssetMode.Visibility = Visibility.Collapsed;
+            ExistingAssetBox.Visibility = Visibility.Collapsed;
+            ImportModelMode.IsChecked = true;
+            TemplateHelpText.Text = "Copies the installed vest's proven configuration, male/female branches and gameplay registrations. The original vest is not replaced.";
+            MaterialHelpText.Text = "Optional texture maps for the new vest. Empty slots keep the selected template's texture. The imported model is built into distinct male and female branches.";
+            ModelImportInfo.Text = "Supported: glTF (.glb, .gltf) and OBJ (.obj). The model is cloned into both verified character gender branches.";
+        }
     }
 
     public AddAttachmentDraft? Draft { get; private set; }
@@ -84,7 +91,7 @@ public partial class AddAttachmentWindow : Window
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Choose attachment model",
+            Title = _characterVest ? "Choose vest model" : "Choose attachment model",
             Filter = "Supported models (*.glb;*.gltf;*.obj)|*.glb;*.gltf;*.obj|glTF (*.glb;*.gltf)|*.glb;*.gltf|Wavefront OBJ (*.obj)|*.obj",
         };
         if (dialog.ShowDialog(this) != true)
@@ -186,7 +193,7 @@ public partial class AddAttachmentWindow : Window
                      .Where(path => path.Length > 0))
             if (!File.Exists(path))
             {
-                MessageBox.Show(this, $"Texture file not found:\n{path}", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, $"Texture file not found:\n{path}", TitleText.Text, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -200,12 +207,12 @@ public partial class AddAttachmentWindow : Window
         modelOrAsset = (importing ? ModelPathBox.Text : ExistingAssetBox.Text).Trim();
         if (DisplayNameBox.Text.Trim().Length == 0 || InternalNameBox.Text.Trim().Length == 0 || TemplateBox.SelectedItem is not AddAttachmentTemplate || modelOrAsset.Length == 0)
         {
-            MessageBox.Show(this, "Fill in all required fields.", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Fill in all required fields.", TitleText.Text, MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
         if (importing && !File.Exists(modelOrAsset))
         {
-            MessageBox.Show(this, "Choose an existing model file.", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Choose an existing model file.", TitleText.Text, MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
         return true;
@@ -341,74 +348,7 @@ public partial class AddAttachmentWindow : Window
     void PreviewFit()
     {
         Rect3D bounds = MeshScene.Bounds(_previewParts);
-        if (bounds.IsEmpty)
-            return;
-        _previewTarget = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
-        double radius = new Vector3D(bounds.SizeX, bounds.SizeY, bounds.SizeZ).Length / 2;
-        double half = PreviewCamera.FieldOfView / 2 * Math.PI / 180;
-        _previewDistance = Math.Max(radius / Math.Sin(half) * 1.1, 0.1);
-        UpdatePreviewCamera();
-    }
-
-    void UpdatePreviewCamera()
-    {
-        var direction = new Vector3D(Math.Cos(_previewPitch) * Math.Cos(_previewYaw), Math.Cos(_previewPitch) * Math.Sin(_previewYaw), Math.Sin(_previewPitch));
-        PreviewCamera.Position = _previewTarget + direction * _previewDistance;
-        PreviewCamera.LookDirection = -direction;
-        PreviewCamera.NearPlaneDistance = _previewDistance / 100;
-        var (right, up) = PreviewAxes(direction);
-        _previewLight.Direction = -direction - up * 0.4 + right * 0.3;
-    }
-
-    static (Vector3D Right, Vector3D Up) PreviewAxes(Vector3D direction)
-    {
-        var right = Vector3D.CrossProduct(direction, new Vector3D(0, 0, 1));
-        right.Normalize();
-        var up = Vector3D.CrossProduct(right, direction);
-        up.Normalize();
-        return (right, up);
-    }
-
-    void Preview_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        _dragStart = e.GetPosition(PreviewStage);
-        _orbiting = e.ChangedButton == MouseButton.Left;
-        _panning = e.ChangedButton == MouseButton.Right;
-        PreviewStage.CaptureMouse();
-    }
-
-    void Preview_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (!_orbiting && !_panning)
-            return;
-        var now = e.GetPosition(PreviewStage);
-        Vector moved = now - _dragStart;
-        _dragStart = now;
-        if (_orbiting)
-        {
-            _previewYaw -= moved.X * 0.008;
-            _previewPitch = Math.Clamp(_previewPitch + moved.Y * 0.008, -1.5, 1.5);
-        }
-        else
-        {
-            var (right, up) = PreviewAxes(PreviewCamera.LookDirection);
-            double scale = _previewDistance * 0.0015;
-            _previewTarget += right * (moved.X * scale) + up * (moved.Y * scale);
-        }
-        UpdatePreviewCamera();
-    }
-
-    void Preview_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _orbiting = false;
-        _panning = false;
-        PreviewStage.ReleaseMouseCapture();
-    }
-
-    void Preview_MouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        _previewDistance = Math.Clamp(_previewDistance * (e.Delta > 0 ? 0.85 : 1 / 0.85), 0.001, 100000);
-        UpdatePreviewCamera();
+        _previewCameraController.Fit(bounds);
     }
 
     void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;

@@ -142,11 +142,12 @@
                         <StackPanel DockPanel.Dock="Top" Margin="10,10,10,6">
                             <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                             <Button x:Name="ArmoryIndexButton" Grid.Column="0" Content="Build BT index"
                                 Click="ArmoryIndex_Click" Padding="6,3" Margin="0,0,3,0" FontSize="11"
+                                Visibility="Collapsed"
                                 ToolTip="Prepare confirmed weapon, gear and character data for the BuildTable editor."/>
                             <Button x:Name="SkeletonIndexButton" Grid.Column="1" Content="Build SK index"
                                 Click="SkeletonIndex_Click" Padding="6,3" Margin="3,0" FontSize="11"
@@ -332,10 +333,24 @@
                         <GridViewColumn Header="Name" Width="290">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <Path Style="{StaticResource RowIcon}" Data="{Binding Icon}"/>
-                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                    </StackPanel>
+                                    <Grid Width="270">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Path Grid.Column="0" Style="{StaticResource RowIcon}" Data="{Binding Icon}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/>
+                                        <Border Grid.Column="2" Margin="8,0,0,0" Padding="5,1" VerticalAlignment="Center"
+                                                CornerRadius="3" Background="#3D2B12"
+                                                BorderBrush="#D99A31" BorderThickness="1"
+                                                Visibility="{Binding ChangeMarkVisibility}"
+                                                ToolTip="Queued in Changes">
+                                            <TextBlock Text="{Binding ChangeMark}" FontSize="9"
+                                                       FontWeight="SemiBold" Foreground="#FFC45C"/>
+                                        </Border>
+                                    </Grid>
                                 </DataTemplate>
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>

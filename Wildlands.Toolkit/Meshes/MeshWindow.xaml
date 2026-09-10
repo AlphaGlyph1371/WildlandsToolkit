@@ -107,13 +107,7 @@
             </Grid>
         </Border>
 
-        <Border x:Name="Stage" Background="#FF141416" ClipToBounds="True"
-                MouseLeftButtonDown="Stage_MouseDown"
-                MouseRightButtonDown="Stage_MouseDown"
-                MouseMove="Stage_MouseMove"
-                MouseLeftButtonUp="Stage_MouseUp"
-                MouseRightButtonUp="Stage_MouseUp"
-                MouseWheel="Stage_MouseWheel">
+        <Border x:Name="Stage" Background="#FF141416" ClipToBounds="True">
             <Viewport3D x:Name="Viewport">
                 <Viewport3D.Camera>
                     <PerspectiveCamera x:Name="Camera" FieldOfView="45" UpDirection="0,0,1"/>

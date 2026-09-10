@@ -40,16 +40,13 @@ public static class MeshImporter
         }
         catch (Exception ex)
         {
-            MessageBox.Show(owner, ex.Message, $"Could not replace {name}",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(owner, ex.Message, $"Could not replace {name}", MessageBoxButton.OK, MessageBoxImage.Warning);
             return null;
         }
 
         if (result.CarriedSkinning)
         {
-            bool clean = result.JointsMatched == result.JointsInFile
-                && result.JointsMatched == result.BoneCount
-                && result.PatchedVertices == 0;
+            bool clean = result.JointsMatched == result.JointsInFile && result.JointsMatched == result.BoneCount && result.PatchedVertices == 0;
 
             if (!Ask(owner, SkeletonNotice(name, result), clean ? MessageBoxImage.Information : MessageBoxImage.Warning))
                 return null;
@@ -83,8 +80,7 @@ public static class MeshImporter
         }
         catch (Exception ex)
         {
-            MessageBox.Show(owner, ex.Message, "The rebuilt mesh does not read back",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(owner, ex.Message, "The rebuilt mesh does not read back", MessageBoxButton.OK, MessageBoxImage.Error);
             return null;
         }
 
@@ -117,6 +113,5 @@ public static class MeshImporter
         return headline + fit + patched + "\n\nReplace anyway?";
     }
 
-    static bool Ask(Window owner, string question, MessageBoxImage icon = MessageBoxImage.Warning) =>
-        MessageBox.Show(owner, question, "Replace mesh", MessageBoxButton.YesNo, icon) == MessageBoxResult.Yes;
+    static bool Ask(Window owner, string question, MessageBoxImage icon = MessageBoxImage.Warning) => MessageBox.Show(owner, question, "Replace mesh", MessageBoxButton.YesNo, icon) == MessageBoxResult.Yes;
 }

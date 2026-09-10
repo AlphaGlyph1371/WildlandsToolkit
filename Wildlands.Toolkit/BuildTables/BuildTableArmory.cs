@@ -37,32 +37,46 @@ sealed class BuildTableFamilyItem
 {
     public required BuildTableDocument Document { get; init; }
     public required BuildTableSlot Slot { get; init; }
+    public required BuildTableGroup Group { get; init; }
     public required bool IsOverview { get; init; }
     public required int Order { get; init; }
 
+    public bool IsSelectionValue => BuildTableFamily.IsSelectionValue(Document.Table);
     public string Title => Document.Name;
+    public string GroupTitle => BuildTableNames.GroupTitle(Group);
     public string Subtitle => IsOverview
         ? "References the linked BuildTables"
-        : $"{Document.Table.RowCount} rows from the game file";
+        : IsSelectionValue ? "Selection value from the game file" : $"{Document.Table.RowCount} rows";
     public string InternalName => Document.Name;
+    public string SearchText => $"{Title} {GroupTitle} {InternalName}";
+}
+
+enum BuildTableGroup
+{
+    ModelMappings,
+    BuildTableLinks,
+    ResourceMappings,
+    SelectionValues,
+    TagOnly,
 }
 
 sealed class BuildTableOptionItem : INotifyPropertyChanged
 {
     Model3D? _previewModel;
-    string _previewStatus = "Loading model…";
-    string _previewDetails = "Resolving the mesh referenced by this BuildTable row.";
+    string _previewStatus = "Loading preview…";
+    string _previewDetails = "Resolving preview-capable assets referenced by this BuildTable row.";
     string _previewBadge = "";
 
     public required int RowIndex { get; init; }
     public required IReadOnlyList<BuildTableReferenceRow> Parts { get; init; }
     public required BuildTableReferenceRow? PrimaryPart { get; init; }
+    public required string RowLabel { get; init; }
     public required string DisplayName { get; init; }
     public required string InternalName { get; init; }
+    public bool IsSelectionValue { get; init; }
     public bool IsHiddenFromGunsmith { get; init; }
     public string GunsmithBadge { get; init; } = "";
 
-    public string Number => $"OPTION {RowIndex + 1}";
     public Visibility GunsmithBadgeVisibility => GunsmithBadge.Length > 0
         ? Visibility.Visible
         : Visibility.Collapsed;
@@ -78,8 +92,9 @@ sealed class BuildTableOptionItem : INotifyPropertyChanged
     {
         _previewModel = preview.AtFamilyScale(familyLargestDimension);
         _previewStatus = "";
-        _previewDetails = $"BuildTable mesh: {preview.MeshName} · {preview.Triangles:N0} triangles";
-        _previewBadge = sharedBySeveralOptions ? "SHARED BUILDTABLE MESH" : "";
+        _previewDetails = $"3D preview: {preview.MeshName} · {preview.Triangles:N0} triangles"
+            + (sharedBySeveralOptions ? " · the same preview mesh is referenced by multiple rows" : "");
+        _previewBadge = sharedBySeveralOptions ? "SAME PREVIEW MESH" : "";
         Changed(nameof(PreviewModel));
         Changed(nameof(PreviewStatus));
         Changed(nameof(PreviewDetails));
@@ -106,32 +121,24 @@ sealed class BuildTableOptionItem : INotifyPropertyChanged
 
 static class BuildTableFamily
 {
-    static readonly Dictionary<BuildTableSlot, int> SlotOrder = new()
+    static readonly Dictionary<BuildTableGroup, int> GroupOrder = new()
     {
-        [BuildTableSlot.Optic] = 10,
-        [BuildTableSlot.Barrel] = 20,
-        [BuildTableSlot.Muzzle] = 30,
-        [BuildTableSlot.Magazine] = 40,
-        [BuildTableSlot.Underbarrel] = 50,
-        [BuildTableSlot.SideRail] = 60,
-        [BuildTableSlot.Stock] = 70,
-        [BuildTableSlot.Headgear] = 110,
-        [BuildTableSlot.Facewear] = 120,
-        [BuildTableSlot.Hair] = 130,
-        [BuildTableSlot.Beard] = 140,
-        [BuildTableSlot.Top] = 150,
-        [BuildTableSlot.Vest] = 160,
-        [BuildTableSlot.Backpack] = 170,
-        [BuildTableSlot.Gloves] = 180,
-        [BuildTableSlot.Pants] = 190,
-        [BuildTableSlot.Footwear] = 200,
-        [BuildTableSlot.Holster] = 210,
-        [BuildTableSlot.Character] = 220,
+        [BuildTableGroup.ModelMappings] = 10,
+        [BuildTableGroup.BuildTableLinks] = 20,
+        [BuildTableGroup.ResourceMappings] = 30,
+        [BuildTableGroup.SelectionValues] = 40,
+        [BuildTableGroup.TagOnly] = 50,
     };
 
-    public static IReadOnlyList<BuildTableFamilyItem> Find(IReadOnlyList<BuildTableDocument> documents, BuildTableDocument opened)
+    public static IReadOnlyList<BuildTableFamilyItem> Find(IReadOnlyList<BuildTableDocument> documents,
+        BuildTableDocument opened, IReadOnlyList<BuildTableTarget> localTargets)
     {
         var byId = documents.ToDictionary(document => document.Id);
+        var tableIds = byId.Keys.ToHashSet();
+        var targetTypes = localTargets
+            .Where(target => target.Id != 0)
+            .GroupBy(target => target.Id)
+            .ToDictionary(group => group.Key, group => group.First().Type);
         var links = documents.ToDictionary(document => document.Id, _ => new HashSet<ulong>());
 
         foreach (var document in documents)
@@ -165,57 +172,63 @@ static class BuildTableFamily
         return component
             .Select(document =>
             {
-                var slot = BuildTableCompatibility.DetectSlot(document.Name);
+                var slot = BuildTableCompatibility.GuessSlotForDisplay(document.Name);
                 bool isOverview = document == overview && component.Count > 1;
-                int order = isOverview ? 0 : SlotOrder.GetValueOrDefault(slot, 900);
+                BuildTableGroup group = Classify(document.Table, tableIds, targetTypes);
                 return new BuildTableFamilyItem
                 {
                     Document = document,
                     Slot = slot,
+                    Group = group,
                     IsOverview = isOverview,
-                    Order = order,
+                    Order = GroupOrder[group],
                 };
             })
             .OrderBy(item => item.Order)
             .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    static BuildTableGroup Classify(BuildTableAsset table, IReadOnlySet<ulong> tableIds,
+        IReadOnlyDictionary<ulong, string> targetTypes)
+    {
+        if (IsSelectionValue(table))
+            return BuildTableGroup.SelectionValues;
+
+        var targets = table.References
+            .Where(reference => reference.Kind != BuildTableReferenceKind.TableIdentity
+                && reference.Value != 0 && reference.Value != table.Id)
+            .Select(reference => reference.Value)
+            .Distinct()
+            .ToList();
+        if (targets.Any(id => targetTypes.GetValueOrDefault(id) is "Mesh" or "LODSelector"))
+            return BuildTableGroup.ModelMappings;
+        if (targets.Any(tableIds.Contains))
+            return BuildTableGroup.BuildTableLinks;
+        return targets.Count > 0 ? BuildTableGroup.ResourceMappings : BuildTableGroup.TagOnly;
+    }
+
+    public static bool IsSelectionValue(BuildTableAsset table) => table.RowCount == 1
+        && table.References
+            .Where(reference => reference.Kind != BuildTableReferenceKind.TableIdentity)
+            .All(reference => reference.Value == 0 || reference.Value == table.Id);
 }
 
-public static class BuildTableNames
+static class BuildTableNames
 {
-    public static string FamilyTitle(string name) => name;
-    public static string FriendlyAsset(string name, string familyName) => name;
-    public static string Friendly(string value) => value;
-
-    public static string SlotTitle(BuildTableSlot slot) => slot switch
+    internal static string GroupTitle(BuildTableGroup group) => group switch
     {
-        BuildTableSlot.Barrel => "Barrels",
-        BuildTableSlot.Magazine => "Magazines",
-        BuildTableSlot.Optic => "Sights & scopes",
-        BuildTableSlot.Underbarrel => "Underbarrel",
-        BuildTableSlot.Muzzle => "Muzzle",
-        BuildTableSlot.Stock => "Stocks",
-        BuildTableSlot.SideRail => "Side rail",
-        BuildTableSlot.Attachment => "Attachments",
-        BuildTableSlot.Headgear => "Headgear",
-        BuildTableSlot.Vest => "Vests",
-        BuildTableSlot.Backpack => "Backpacks",
-        BuildTableSlot.Pants => "Pants",
-        BuildTableSlot.Top => "Tops",
-        BuildTableSlot.Gloves => "Gloves",
-        BuildTableSlot.Footwear => "Footwear",
-        BuildTableSlot.Facewear => "Facewear",
-        BuildTableSlot.Hair => "Hair",
-        BuildTableSlot.Beard => "Facial hair",
-        BuildTableSlot.Holster => "Holsters",
-        BuildTableSlot.Character => "Character",
-        _ => "Options",
+        BuildTableGroup.ModelMappings => "3D asset mappings",
+        BuildTableGroup.BuildTableLinks => "BuildTable links",
+        BuildTableGroup.ResourceMappings => "Resource mappings",
+        BuildTableGroup.SelectionValues => "Selection values",
+        BuildTableGroup.TagOnly => "Tag-only tables",
+        _ => throw new ArgumentOutOfRangeException(nameof(group)),
     };
 
-    public static string TableTitle(string tableName, BuildTableSlot slot) => tableName;
+    internal static int GroupCount(IEnumerable<BuildTableFamilyItem> items) => items
+        .Select(item => item.GroupTitle)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Count();
 
-    public static string OptionCount(int count) => count == 1 ? "option" : "options";
-
-    public static string EmptyOption(BuildTableSlot slot) => "No asset assigned";
 }

@@ -4,9 +4,16 @@ namespace Wildlands.Toolkit;
 
 public partial class IndexSetupWindow : Window
 {
-    public IndexSetupWindow(bool armoryReady, bool skeletonReady)
+    public IndexSetupWindow(bool armoryReady, bool skeletonReady, bool includeArmory = true)
     {
         InitializeComponent();
+
+        if (!includeArmory)
+        {
+            ArmoryPanel.Visibility = Visibility.Collapsed;
+            SkeletonTitle.Text = "Skeleton index";
+            Height = 330;
+        }
 
         ArmoryText.Text = armoryReady
             ? "Ready. It stores confirmed game database and language data for the Armory editor."
@@ -15,7 +22,7 @@ public partial class IndexSetupWindow : Window
             ? "Ready. It helps rigged mesh exports find their matching skeleton."
             : "Recommended for rigged mesh exports. This is the larger scan and can take several minutes, especially on a hard drive.";
 
-        if (armoryReady && skeletonReady)
+        if ((!includeArmory || armoryReady) && skeletonReady)
             PrepareButton.Content = "Close";
     }
 

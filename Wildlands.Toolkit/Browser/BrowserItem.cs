@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Media;
 using Wildlands.Formats;
 using Wildlands.Formats.Data;
@@ -5,8 +8,10 @@ using Wildlands.Formats.Forge;
 
 namespace Wildlands.Toolkit;
 
-public sealed class BrowserItem
+public sealed class BrowserItem : INotifyPropertyChanged
 {
+    string _changeMark = "";
+
     public int Index { get; init; }
     public string Name { get; init; } = "";
     public string Type { get; init; } = "";
@@ -22,6 +27,25 @@ public sealed class BrowserItem
     public string IdText => Id == 0 ? "" : $"0x{Id:X}";
 
     public bool CanOpen => Entry?.FileExtension == ".data";
+
+    public string ChangeMark
+    {
+        get => _changeMark;
+        private set
+        {
+            if (_changeMark == value)
+                return;
+            _changeMark = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ChangeMarkVisibility));
+        }
+    }
+
+    public Visibility ChangeMarkVisibility => ChangeMark.Length == 0
+        ? Visibility.Collapsed
+        : Visibility.Visible;
+
+    public void SetChangeMark(string? mark) => ChangeMark = mark ?? "";
 
     public static BrowserItem FromEntry(ForgeEntry entry) => new()
     {
@@ -53,4 +77,9 @@ public sealed class BrowserItem
             return $"{bytes / (1024.0 * 1024):0.0} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):0.00} GB";
     }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

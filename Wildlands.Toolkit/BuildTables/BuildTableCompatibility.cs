@@ -72,7 +72,11 @@ public static class BuildTableCompatibility
         _ => BuildTableAssetRole.Resource,
     };
 
-    public static BuildTableSlot DetectSlot(string value)
+    /// <summary>
+    /// Guesses a label and display order from a resource name. This result is never evidence that
+    /// a table supports editing or adding assets.
+    /// </summary>
+    public static BuildTableSlot GuessSlotForDisplay(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
             return BuildTableSlot.Unknown;

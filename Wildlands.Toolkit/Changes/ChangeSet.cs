@@ -34,14 +34,16 @@ public sealed class ChangeSet
         left.ArchivePath.Equals(right.ArchivePath, StringComparison.OrdinalIgnoreCase);
 
     public bool Contains(string archivePath, int entryIndex, int resourceIndex) =>
-        _changes.Any(change => change.ArchivePath == archivePath
+        _changes.Any(change => change.ArchivePath.Equals(archivePath,
+                StringComparison.OrdinalIgnoreCase)
             && change.EntryIndex == entryIndex
             && change.EntryAddition is null
             && change.EntryRemoval is null
             && change.ResourceIndex == resourceIndex);
 
     public PendingChange? Find(string archivePath, int entryIndex, int resourceIndex) =>
-        _changes.LastOrDefault(change => change.ArchivePath == archivePath
+        _changes.LastOrDefault(change => change.ArchivePath.Equals(archivePath,
+                StringComparison.OrdinalIgnoreCase)
             && change.EntryIndex == entryIndex
             && change.EntryAddition is null
             && change.EntryRemoval is null

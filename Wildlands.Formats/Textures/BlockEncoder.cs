@@ -25,25 +25,25 @@ public static class BlockEncoder
                 return bgra[..expected].ToArray();
 
             case PixelFormat.R8G8B8A8Signed:
-            {
-                var output = new byte[expected];
-                for (int i = 0; i < width * height; i++)
                 {
-                    output[i * 4 + 0] = (byte)(sbyte)(bgra[i * 4 + 2] - 128);
-                    output[i * 4 + 1] = (byte)(sbyte)(bgra[i * 4 + 1] - 128);
-                    output[i * 4 + 2] = (byte)(sbyte)(bgra[i * 4 + 0] - 128);
-                    output[i * 4 + 3] = (byte)(sbyte)(bgra[i * 4 + 3] - 128);
+                    var output = new byte[expected];
+                    for (int i = 0; i < width * height; i++)
+                    {
+                        output[i * 4 + 0] = (byte)(sbyte)(bgra[i * 4 + 2] - 128);
+                        output[i * 4 + 1] = (byte)(sbyte)(bgra[i * 4 + 1] - 128);
+                        output[i * 4 + 2] = (byte)(sbyte)(bgra[i * 4 + 0] - 128);
+                        output[i * 4 + 3] = (byte)(sbyte)(bgra[i * 4 + 3] - 128);
+                    }
+                    return output;
                 }
-                return output;
-            }
 
             case PixelFormat.R8:
-            {
-                var output = new byte[width * height];
-                for (int i = 0; i < output.Length; i++)
-                    output[i] = bgra[i * 4 + 2];
-                return output;
-            }
+                {
+                    var output = new byte[width * height];
+                    for (int i = 0; i < output.Length; i++)
+                        output[i] = bgra[i * 4 + 2];
+                    return output;
+                }
 
             default:
                 throw new NotSupportedException($"Cannot write {format} yet.");
@@ -268,8 +268,8 @@ public static class BlockEncoder
 
     static void BuildPalette(Span<byte> palette, ushort c0, ushort c1, bool fourColor)
     {
-        From565(palette, 0, c0);
-        From565(palette, 1, c1);
+        Rgb565.WriteBgra(palette, 0, c0);
+        Rgb565.WriteBgra(palette, 1, c1);
 
         for (int c = 0; c < 3; c++)
         {
@@ -309,15 +309,4 @@ public static class BlockEncoder
         return (ushort)((r << 11) | (g << 5) | b);
     }
 
-    static void From565(Span<byte> target, int slot, ushort value)
-    {
-        int r = (value >> 11) & 0x1F;
-        int g = (value >> 5) & 0x3F;
-        int b = value & 0x1F;
-
-        target[slot * 4 + 0] = (byte)((b << 3) | (b >> 2));
-        target[slot * 4 + 1] = (byte)((g << 2) | (g >> 4));
-        target[slot * 4 + 2] = (byte)((r << 3) | (r >> 2));
-        target[slot * 4 + 3] = 255;
-    }
 }

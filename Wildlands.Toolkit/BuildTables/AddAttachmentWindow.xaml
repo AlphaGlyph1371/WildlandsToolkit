@@ -35,7 +35,7 @@
 
                 <TextBlock Text="Gameplay template *" Foreground="{StaticResource Text}"/>
                 <ComboBox x:Name="TemplateBox" Margin="0,5,0,4" DisplayMemberPath="DisplayName"/>
-                <TextBlock Margin="0,0,0,18" Foreground="{StaticResource TextDim}" FontSize="10"
+                <TextBlock x:Name="TemplateHelpText" Margin="0,0,0,18" Foreground="{StaticResource TextDim}" FontSize="10"
                            TextWrapping="Wrap"
                            Text="Copies the attachment's slot behavior, stats and base materials. It does not restrict which geometry you can import."/>
 
@@ -72,10 +72,7 @@
 
             <Grid Grid.Column="0" Margin="0,0,16,0">
                 <Border x:Name="PreviewStage" Background="#FF111317" ClipToBounds="True"
-                        BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4"
-                        MouseLeftButtonDown="Preview_MouseDown" MouseRightButtonDown="Preview_MouseDown"
-                        MouseMove="Preview_MouseMove" MouseLeftButtonUp="Preview_MouseUp"
-                        MouseRightButtonUp="Preview_MouseUp" MouseWheel="Preview_MouseWheel">
+                        BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="4">
                     <Viewport3D x:Name="PreviewViewport">
                         <Viewport3D.Camera>
                             <PerspectiveCamera x:Name="PreviewCamera" FieldOfView="45" UpDirection="0,0,1"/>
@@ -99,7 +96,7 @@
                 <StackPanel x:Name="TextureOptionsPanel">
                     <TextBlock Text="Materials" FontSize="20" FontWeight="SemiBold"
                                Foreground="{StaticResource Text}"/>
-                    <TextBlock Margin="0,4,0,16" Foreground="{StaticResource TextDim}"
+                    <TextBlock x:Name="MaterialHelpText" Margin="0,4,0,16" Foreground="{StaticResource TextDim}"
                                TextWrapping="Wrap"
                                Text="Optional texture maps for the new attachment. Empty slots keep the gameplay template's texture. Matching DDS compression and mip levels are copied without recompression; other images are encoded for Wildlands. The viewport previews Diffuse only."/>
 

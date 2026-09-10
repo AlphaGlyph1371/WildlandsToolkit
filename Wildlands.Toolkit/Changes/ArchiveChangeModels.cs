@@ -21,7 +21,8 @@ public sealed record PendingChange(
 public sealed record PendingResourceAddition(
     ulong Id,
     uint ClassHash,
-    byte[] Header);
+    byte[] Header,
+    ulong InsertAfterResourceId = 0);
 
 public sealed record PendingForgeEntryAddition(
     ulong Id,

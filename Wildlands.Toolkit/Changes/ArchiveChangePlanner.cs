@@ -67,7 +67,17 @@ public static class ArchiveChangePlanner
                     if (file.Resources.Any(resource => resource.Id == addition.Id))
                         throw new InvalidDataException(
                             $"{entry.Name} already contains resource 0x{addition.Id:X}.");
-                    file.Resources.Add(new Resource
+                    int insertionIndex = file.Resources.Count;
+                    if (addition.InsertAfterResourceId != 0)
+                    {
+                        int templateIndex = file.Resources.FindIndex(resource =>
+                            resource.Id == addition.InsertAfterResourceId);
+                        if (templateIndex < 0)
+                            throw new InvalidDataException(
+                                $"{entry.Name} does not contain insertion anchor 0x{addition.InsertAfterResourceId:X} for {change.ResourceName}.");
+                        insertionIndex = templateIndex + 1;
+                    }
+                    file.Resources.Insert(insertionIndex, new Resource
                     {
                         Id = addition.Id,
                         ClassHash = addition.ClassHash,
@@ -129,4 +139,5 @@ public static class ArchiveChangePlanner
 
         return plans;
     }
+
 }

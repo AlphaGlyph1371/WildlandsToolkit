@@ -15,7 +15,9 @@ public static class MeshExporter
         var dialog = new SaveFileDialog
         {
             Title = "Export mesh",
-            FileName = name + ".glb",
+            FileName = name,
+            AddExtension = true,
+            DefaultExt = ".glb",
             Filter = "glTF binary (*.glb)|*.glb|FBX model (*.fbx)|*.fbx|Wavefront OBJ (*.obj)|*.obj|All files (*.*)|*.*",
         };
 
@@ -29,8 +31,13 @@ public static class MeshExporter
         settings.Save();
 
         string extension = Path.GetExtension(dialog.FileName);
-        bool wantsBones = !extension.Equals(".obj", System.StringComparison.OrdinalIgnoreCase);
-        var rig = wantsBones ? chosenSkeleton ?? SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex) : null;
+        var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
+        bool isSkinned = layout.IsSkinned && mesh.Bones.Count > 0;
+        bool wantsSkeleton = isSkinned
+            && !extension.Equals(".obj", System.StringComparison.OrdinalIgnoreCase);
+        var rig = wantsSkeleton
+            ? chosenSkeleton ?? SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex)
+            : null;
 
         if (extension.Equals(".obj", System.StringComparison.OrdinalIgnoreCase))
         {
@@ -38,12 +45,9 @@ public static class MeshExporter
             return $"Wrote {Path.GetFileName(dialog.FileName)} ({mesh.Data.Standard.Count} draw range(s), positions, normals and one uv set)";
         }
 
-        if (extension.Equals(".glb", System.StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".gltf", System.StringComparison.OrdinalIgnoreCase))
+        if (extension.Equals(".glb", System.StringComparison.OrdinalIgnoreCase) || extension.Equals(".gltf", System.StringComparison.OrdinalIgnoreCase))
         {
             GltfFile.Write(mesh, name, dialog.FileName, rig);
-            var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
-
             return $"Wrote {Path.GetFileName(dialog.FileName)} ({mesh.Data.Standard.Count} primitive(s), "
                 + $"{layout.UvCount} uv set(s)" + (layout.HasColor ? ", vertex colours" : "")
                 + (layout.IsSkinned && mesh.Bones.Count > 0
@@ -54,14 +58,16 @@ public static class MeshExporter
         string picked = "";
         var skeleton = rig;
 
-        if (skeleton is null && Ask(owner, "No skeleton found for this mesh, so its bones come out unconnected.\n\nPick one yourself?"))
+        if (isSkinned && skeleton is null
+            && Ask(owner, "No skeleton found for this mesh, so its bones come out unconnected.\n\nPick one yourself?"))
         {
             skeleton = SkeletonPicker.Choose(owner, out picked);
         }
 
         FbxWriter.Write(mesh, name, dialog.FileName, skeleton);
 
-        string how = skeleton is null ? "flat bone list"
+        string how = !isSkinned ? "static mesh"
+            : skeleton is null ? "flat bone list"
             : picked.Length > 0 ? $"skeleton {picked}"
             : $"skeleton with {skeleton.Count} bones";
 

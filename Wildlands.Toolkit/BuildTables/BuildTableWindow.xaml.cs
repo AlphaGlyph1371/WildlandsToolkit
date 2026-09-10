@@ -1,9 +1,10 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -22,10 +23,13 @@ public sealed record AttachmentSaveChanges(
 
 public partial class BuildTableWindow : Window
 {
+    const ulong MediumVestConfigurationTableId = 0x001E9ED02A7B;
+
     BuildTableAsset _table;
     readonly List<BuildTableDocument> _documents;
     BuildTableDocument _currentDocument;
     IReadOnlyList<BuildTableFamilyItem> _family;
+    readonly ListCollectionView _familyView;
     byte[] _savedData
     {
         get => _currentDocument.SavedData;
@@ -43,10 +47,12 @@ public partial class BuildTableWindow : Window
     readonly string _localArchivePath;
     readonly int _localEntryIndex;
     readonly string _localEntryName;
+    readonly bool _weaponFamily;
+    readonly HashSet<ulong> _containerLocalReferenceIds;
     readonly HashSet<ulong> _gunsmithRemovals = [];
     readonly HashSet<ulong> _gunsmithAdditions = [];
     readonly Dictionary<uint, BuildTableOptionMetadata> _addedMetadata = [];
-    readonly Dictionary<ulong, IReadOnlyList<string>> _addedOwnersByRecordId = [];
+    readonly Dictionary<ulong, IReadOnlySet<ulong>> _addedOwnerIdsByRecordId = [];
     readonly Dictionary<ulong, bool> _addedGunsmithVisibility = [];
     readonly Dictionary<(string ArchivePath, int EntryIndex, int ResourceIndex), byte[]> _preparedResourceData = [];
     readonly HashSet<ulong> _preparedIds = [];
@@ -59,6 +65,7 @@ public partial class BuildTableWindow : Window
     BuildTableGameMetadata _gameMetadata = BuildTableGameMetadata.Empty;
     IReadOnlyList<ulong> _ownerEntityIds = [];
     CancellationTokenSource? _languageLoad;
+    Task<BuildTableTargetCatalog?>? _fullCatalogTask;
 
     IReadOnlyList<BuildTableTarget> _catalog = [];
     int _searchVersion;
@@ -68,6 +75,7 @@ public partial class BuildTableWindow : Window
     bool _changingSelection;
     bool _settingLanguage;
     bool _targetsResolved;
+    bool _fullCatalogLoaded;
     int? _selectedArmoryRow;
 
     public BuildTableWindow(byte[] data, string name,
@@ -123,7 +131,12 @@ public partial class BuildTableWindow : Window
         if (!_documents.Contains(_currentDocument))
             _documents.Add(_currentDocument);
         _table = _currentDocument.Table;
-        _family = BuildTableFamily.Find(_documents, _currentDocument);
+        _family = BuildTableFamily.Find(_documents, _currentDocument, localTargets);
+        _containerLocalReferenceIds = _documents
+            .SelectMany(document => document.Table.References)
+            .Where(reference => reference.Value != 0 && reference.IsContainerLocal)
+            .Select(reference => reference.Value)
+            .ToHashSet();
 
         foreach (var target in localTargets)
             if (target.Id != 0)
@@ -133,26 +146,30 @@ public partial class BuildTableWindow : Window
         RebuildRows();
 
         string familyTitle = _family.FirstOrDefault(item => item.IsOverview)?.Document.Name ?? name;
-        bool weaponFamily = _family.Any(item => IsWeaponSlot(item.Slot));
-        Title = $"{familyTitle} - {(weaponFamily ? "Armory" : "BuildTable")} editor";
+        _weaponFamily = _family.Any(item => IsWeaponDisplaySlot(item.Slot));
+        Title = $"{familyTitle} - BuildTable editor";
         FamilyTitleText.Text = familyTitle;
         FamilySubtitleText.Text = _family.Count > 1
             ? $"{_family.Count - 1} linked BuildTables"
             : "One table";
-        OverviewTitleText.Text = weaponFamily ? "Armory connection table" : "BuildTable connections";
-        OverviewSummaryText.Text = weaponFamily
+        OverviewTitleText.Text = _weaponFamily ? "Weapon BuildTable connections" : "BuildTable connections";
+        OverviewSummaryText.Text = _weaponFamily
             ? "This table is the map of this weapon's armory."
-            : "This table connects a character asset to its related option groups.";
-        OverviewDetailsText.Text = weaponFamily
+            : "This table connects an asset to its related BuildTables.";
+        OverviewDetailsText.Text = _weaponFamily
             ? "It connects the weapon to its attachment categories. It does not contain individual barrels, sights or magazines itself."
-            : "Character equipment may span model, gender, loadout, color and compatibility tables. Choose a linked table to inspect its actual options.";
-        FamilyList.ItemsSource = _family;
+            : "BuildTable families may span variants, models, materials, colors, loadouts and compatibility tables. Choose a linked table to inspect its actual rows.";
+        _familyView = new ListCollectionView(_family.ToList());
+        _familyView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BuildTableFamilyItem.GroupTitle)));
+        FamilyList.ItemsSource = _familyView;
+        RefreshFamilySearch();
         KindBox.ItemsSource = new[]
         {
             "Editable fields",
             "Variant choices",
             "Built assets",
             "Related groups",
+            "Container-local references",
             "Empty optional fields",
             "All fields (advanced)",
             "Internal fields",
@@ -181,6 +198,48 @@ public partial class BuildTableWindow : Window
         FamilyList.SelectedItem = selected ?? _family.FirstOrDefault();
     }
 
+    void FamilySearch_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (IsInitialized)
+            RefreshFamilySearch();
+    }
+
+    void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            FamilySearchBox.Focus();
+            FamilySearchBox.SelectAll();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && FamilySearchBox.IsKeyboardFocusWithin
+            && FamilySearchBox.Text.Length > 0)
+        {
+            FamilySearchBox.Clear();
+            e.Handled = true;
+        }
+    }
+
+    void RefreshFamilySearch()
+    {
+        string[] words = FamilySearchBox.Text
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        bool Matches(BuildTableFamilyItem item) => words.All(word =>
+            item.SearchText.Contains(word, StringComparison.OrdinalIgnoreCase));
+
+        _familyView.Filter = candidate => candidate is BuildTableFamilyItem item && Matches(item);
+        _familyView.Refresh();
+
+        int visible = _family.Count(Matches);
+        FamilySearchCountText.Text = words.Length == 0
+            ? $"{visible:N0} tables in {BuildTableNames.GroupCount(_family)} groups"
+            : $"{visible:N0} of {_family.Count:N0} tables";
+
+        if (FamilyList.SelectedItem is not BuildTableFamilyItem selected || !Matches(selected))
+            FamilyList.SelectedItem = _family.FirstOrDefault(item => !item.IsOverview && Matches(item))
+                ?? _family.FirstOrDefault(Matches);
+    }
+
     BuildTableTarget? Resolve(ulong value) => _targets.GetValueOrDefault(value);
 
     void Family_Changed(object sender, SelectionChangedEventArgs e)
@@ -203,7 +262,7 @@ public partial class BuildTableWindow : Window
         if (!IsInitialized)
             return;
         bool technical = TechnicalModeBox.IsChecked == true;
-        ArmoryPane.Visibility = technical ? Visibility.Collapsed : Visibility.Visible;
+        OptionPane.Visibility = technical ? Visibility.Collapsed : Visibility.Visible;
         TechnicalPane.Visibility = technical ? Visibility.Visible : Visibility.Collapsed;
 
         if (technical && ReferenceList.SelectedItem is null && ReferenceList.Items.Count > 0)
@@ -230,10 +289,7 @@ public partial class BuildTableWindow : Window
 
         BuildTableSlot slot = familyItem?.Slot ?? BuildTableSlot.Unknown;
         string internalTableName = familyItem?.Document.Name ?? _name;
-        string slotTitle = slot == BuildTableSlot.Unknown
-            ? internalTableName
-            : BuildTableNames.SlotTitle(slot);
-        SlotTitleText.Text = slotTitle;
+        SlotTitleText.Text = internalTableName;
 
         if (familyItem?.IsOverview == true)
         {
@@ -250,25 +306,36 @@ public partial class BuildTableWindow : Window
         OverviewPane.Visibility = Visibility.Collapsed;
         OptionHeaderPanel.Visibility = Visibility.Visible;
         OptionList.Visibility = Visibility.Visible;
-        SlotSubtitleText.Text = slot == BuildTableSlot.Unknown
-            ? $"{_table.RowCount} options"
-            : $"{_table.RowCount} options from {internalTableName}";
-        bool weaponSlot = IsWeaponSlot(slot);
-        AddAttachmentButton.Visibility = weaponSlot ? Visibility.Visible : Visibility.Collapsed;
-        var gunsmithLists = weaponSlot ? FindGunsmithLists() : [];
+        bool weaponTable = IsWeaponDisplaySlot(slot);
+        bool selectionValue = familyItem?.IsSelectionValue == true;
+        SlotSubtitleText.Text = weaponTable
+            ? $"{_table.RowCount} options from {internalTableName}"
+            : $"{_table.RowCount} BuildTable rows";
+        IReadOnlyList<GunsmithAvailabilityList> gunsmithLists = weaponTable ? FindGunsmithLists() : [];
+        TryGetAttachmentWriteSupport(out string addLabel, out string addReason);
+        bool vestTable = _table.Id == MediumVestConfigurationTableId;
+        int vestTemplateCount = vestTable && _armoryIndex is not null
+            ? CharacterItemAddPipeline.FindVestTemplates(_table, _localPreviewResources, MetadataForTag).Count
+            : 0;
+        AddAttachmentButton.Content = addLabel;
+        AddAttachmentButton.IsEnabled = vestTable
+            ? _targetsResolved && vestTemplateCount > 0 && _saveAttachment is not null
+            : gunsmithLists.Count > 0;
+        AddAttachmentButton.ToolTip = vestTable && vestTemplateCount > 0
+            ? $"Create a distinct vest from one of {vestTemplateCount} structurally verified installed templates"
+            : gunsmithLists.Count > 0
+            ? $"Set up a new option for {internalTableName}"
+            : addReason;
+        AddAttachmentButton.Visibility = weaponTable || _table.Id == MediumVestConfigurationTableId
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         var options = new List<BuildTableOptionItem>();
         for (int rowIndex = 0; rowIndex < _table.RowCount; rowIndex++)
         {
-            var allParts = _rows.Where(row => row.BuildRowIndex == rowIndex && row.Editable && (row.Reference.Kind is BuildTableReferenceKind.FileReference or BuildTableReferenceKind.Handle || row.Reference.Kind == BuildTableReferenceKind.ObjectPointer && row.Reference.ComponentIndex is not null))
-                .ToList();
-            var visibleParts = allParts.Where(part => part.Reference.Kind == BuildTableReferenceKind.FileReference)
+            var allParts = _rows.Where(row => row.BuildRowIndex == rowIndex && (row.Reference.Kind is BuildTableReferenceKind.FileReference or BuildTableReferenceKind.Handle || row.Reference.Kind == BuildTableReferenceKind.ObjectPointer && row.Reference.ComponentIndex is not null))
                 .ToList();
             var selectorParts = allParts.Where(part =>
                 {
-                    if (part.Reference.Kind == BuildTableReferenceKind.Handle)
-                        return true;
-                    if (part.Reference.Kind != BuildTableReferenceKind.ObjectPointer)
-                        return false;
                     uint? localClass = _localPreviewResources
                         .GetValueOrDefault(part.Reference.Value)?.ClassHash;
                     return localClass == Mesh.ClassHash
@@ -276,6 +343,7 @@ public partial class BuildTableWindow : Window
                         || part.Resolved?.Type is "Mesh" or "LODSelector";
                 })
                 .ToList();
+            var linkedParts = allParts.Except(selectorParts).ToList();
             static List<string> NamesOf(IEnumerable<BuildTableReferenceRow> parts) => parts
                 .Where(part => part.Reference.Value != 0)
                 .Select(part => part.Resolved?.Name ?? part.Target)
@@ -283,28 +351,42 @@ public partial class BuildTableWindow : Window
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             var modelSelectors = NamesOf(selectorParts);
-            var linkedAssets = NamesOf(visibleParts);
-            BuildTableOptionMetadata? metadata = MetadataForTag(_table.Rows[rowIndex].Tag);
+            var linkedAssets = NamesOf(linkedParts);
+            BuildTableOptionMetadata? metadata = MetadataForRow(_table.Rows[rowIndex]);
             string display = metadata?.DisplayName
                 ?? modelSelectors.FirstOrDefault()
                 ?? linkedAssets.FirstOrDefault()
-                ?? $"BuildTable option · BuildTag 0x{_table.Rows[rowIndex].Tag:X8}";
-            BuildTableReferenceRow? primary = visibleParts.FirstOrDefault(part => part.Reference.Value != 0)
-                ?? selectorParts.FirstOrDefault(part => part.Reference.Value != 0)
+                ?? (selectionValue ? familyItem!.Title : $"Unidentified row {rowIndex + 1}");
+            BuildTableReferenceRow? primary = selectorParts.FirstOrDefault(part => part.Reference.Value != 0)
+                ?? linkedParts.FirstOrDefault(part => part.Reference.Value != 0)
                 ?? allParts.FirstOrDefault();
             var descriptions = new List<string>();
             if (metadata is not null)
                 descriptions.Add($"Gameplay record: {metadata.RecordName}");
             if (modelSelectors.Count > 0)
-                descriptions.Add($"Model selector: {string.Join(", ", modelSelectors)}");
+                descriptions.Add($"3D asset: {string.Join(", ", modelSelectors)}");
             if (linkedAssets.Count > 0)
                 descriptions.Add($"Linked assets: {string.Join(", ", linkedAssets)}");
+            if (selectionValue)
+                descriptions.Add("Selection value used by linked BuildTables");
+            if (metadata is null && modelSelectors.Count == 0 && linkedAssets.Count == 0)
+                descriptions.Add($"Technical BuildTag: 0x{_table.Rows[rowIndex].Tag:X8}");
             string internalName = descriptions.Count == 0
                 ? "No asset assigned"
                 : string.Join("  ·  ", descriptions);
             bool pendingRemoval = metadata is not null && _gunsmithRemovals.Contains(metadata.RecordId);
             bool pendingAddition = metadata is not null && _gunsmithAdditions.Contains(metadata.RecordId);
             bool hiddenFromGunsmith = pendingRemoval || metadata is not null && gunsmithLists.Count > 0 && gunsmithLists.All(list => list.IndexOf(metadata.RecordId) < 0);
+            var branchLabels = _table.Rows[rowIndex].PossibleTags
+                .Select(tag => MetadataForTag(tag)?.DisplayName)
+                .Where(label => !string.IsNullOrWhiteSpace(label))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            string rowLabel = selectionValue
+                ? "SELECTION VALUE"
+                : !weaponTable && branchLabels.Count == 1
+                ? $"{branchLabels[0]!.ToUpperInvariant()} · ROW {rowIndex + 1}"
+                : weaponTable ? $"OPTION {rowIndex + 1}" : $"ROW {rowIndex + 1}";
             string gunsmithBadge = pendingRemoval
                 ? "HIDE PENDING SAVE"
                 : pendingAddition
@@ -315,8 +397,10 @@ public partial class BuildTableWindow : Window
                 RowIndex = rowIndex,
                 Parts = allParts,
                 PrimaryPart = primary,
+                RowLabel = rowLabel,
                 DisplayName = display,
                 InternalName = internalName,
+                IsSelectionValue = selectionValue,
                 IsHiddenFromGunsmith = hiddenFromGunsmith,
                 GunsmithBadge = gunsmithBadge,
             });
@@ -328,10 +412,26 @@ public partial class BuildTableWindow : Window
         OptionList.SelectedIndex = wanted >= 0 ? wanted : options.Count > 0 ? 0 : -1;
     }
 
-    static bool IsWeaponSlot(BuildTableSlot slot) => slot is
+    static bool IsWeaponDisplaySlot(BuildTableSlot slot) => slot is
         BuildTableSlot.Barrel or BuildTableSlot.Magazine or BuildTableSlot.Optic
         or BuildTableSlot.Underbarrel or BuildTableSlot.Muzzle or BuildTableSlot.Stock
         or BuildTableSlot.SideRail or BuildTableSlot.Attachment;
+
+    IReadOnlyList<GunsmithAvailabilityList> TryGetAttachmentWriteSupport(out string label, out string reason)
+    {
+        if (_table.Id == MediumVestConfigurationTableId)
+        {
+            label = "Add vest";
+            reason = !_targetsResolved
+                ? "Wait until the installed game records have finished loading."
+                : "No installed vest with a complete configuration, gameplay and male/female model branch was verified.";
+            return [];
+        }
+
+        label = "Add attachment";
+        reason = "Adding assets is disabled until every registry and archive-copy target is selected without resource-name heuristics.";
+        return [];
+    }
 
     void Option_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -362,6 +462,24 @@ public partial class BuildTableWindow : Window
 
         ShowSelectedReference();
         ShowTargetResults();
+    }
+
+    void OptionPreview_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement
+            {
+                DataContext: BuildTableOptionItem
+                {
+                    PreviewModel: { } model,
+                } option,
+            })
+            return;
+
+        var preview = new BuildTableModelPreviewWindow(model, option.DisplayName,
+            option.PreviewDetails)
+        { Owner = this };
+        preview.Show();
+        e.Handled = true;
     }
 
     sealed record PreviewCandidate(
@@ -407,10 +525,12 @@ public partial class BuildTableWindow : Window
 
             if (candidates.Count == 0)
             {
-                if (!_targetsResolved && allCandidates.Any(candidate => candidate.ClassHash == 0))
+                if (option.IsSelectionValue)
+                    option.ShowPreviewStatus("No standalone model", "This value is referenced by linked BuildTables and does not directly name a Mesh or LODSelector.");
+                else if (!_targetsResolved && allCandidates.Any(candidate => candidate.ClassHash == 0))
                     option.ShowPreviewStatus("Resolving…", "Waiting for the referenced asset types.");
                 else
-                    option.ShowPreviewStatus("No mesh", "This BuildTable row has no reachable Mesh resource reference.");
+                    option.ShowPreviewStatus("No 3D preview", "This BuildTable row has no reachable Mesh or LODSelector reference. Other linked asset types remain editable in technical view.");
                 continue;
             }
 
@@ -562,6 +682,17 @@ public partial class BuildTableWindow : Window
     {
         if (FamilyList.SelectedItem is not BuildTableFamilyItem { IsOverview: false })
             return;
+        if (_table.Id == MediumVestConfigurationTableId)
+        {
+            await AddVest();
+            return;
+        }
+        IReadOnlyList<GunsmithAvailabilityList> gunsmithLists = TryGetAttachmentWriteSupport(out string addLabel, out string unsupportedReason);
+        if (gunsmithLists.Count == 0)
+        {
+            MessageBox.Show(this, unsupportedReason, addLabel, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         if (!_targetsResolved || _armoryIndex is null)
         {
             MessageBox.Show(this, "Wait until the installed gameplay records and asset types have finished loading.", "Add attachment", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -617,7 +748,6 @@ public partial class BuildTableWindow : Window
             if (_closed)
                 return;
 
-            var gunsmithLists = FindGunsmithLists();
             SetMetadataLoading(true, $"Building {draft.DisplayName} and validating its game resources…");
             var attempt = await Task.Run(() =>
             {
@@ -653,21 +783,11 @@ public partial class BuildTableWindow : Window
             if (plan.DatabaseChanges.Count > 0)
                 _armoryIndex.ApplyChanges(plan.DatabaseChanges);
 
-            foreach (BuildTableResourceChange change in plan.LocalChanges)
-            {
-                BuildTableDocument? document = _documents.FirstOrDefault(candidate => candidate.Source.ResourceIndex == change.ResourceIndex);
-                if (document is not null)
-                {
-                    document.SavedData = (byte[])change.Data.Clone();
-                    document.Table = BuildTable.Read(change.Data);
-                }
-                ulong resourceId = _localResourceIndexes.FirstOrDefault(pair => pair.Value == change.ResourceIndex).Key;
-                if (resourceId != 0 && _localPreviewResources.TryGetValue(resourceId, out Resource? localResource)) localResource.Data = (byte[])change.Data.Clone();
-            }
+            ApplyPreparedLocalChanges(plan.LocalChanges);
 
             _addedMetadata[plan.Metadata.BuildTag] = plan.Metadata;
             _addedGunsmithVisibility[plan.Metadata.RecordId] = plan.AddedToGunsmith;
-            _addedOwnersByRecordId[plan.Metadata.RecordId] = plan.OwnerNames;
+            _addedOwnerIdsByRecordId[plan.Metadata.RecordId] = plan.OwnerIds;
             _preparedIds.Add(plan.Metadata.NameStringId);
             foreach (ArmoryDatabaseResourceChange change in plan.DatabaseChanges)
                 _preparedResourceData[(change.ArchivePath, change.EntryIndex, change.ResourceIndex)] = (byte[])change.Data.Clone();
@@ -703,6 +823,145 @@ public partial class BuildTableWindow : Window
         finally
         {
             SetMetadataLoading(false);
+        }
+    }
+
+    async Task AddVest()
+    {
+        if (!_targetsResolved || _armoryIndex is null)
+        {
+            MessageBox.Show(this, "Wait until the installed gameplay records and asset types have finished loading.",
+                "Add vest", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (!_armoryIndex.MatchesArchives(_archivePaths))
+        {
+            MessageBox.Show(this, "The game archives changed after this editor was opened. Close and reopen the editor so its index can be rebuilt.",
+                "Armory index changed", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (_saveAttachment is null || string.IsNullOrWhiteSpace(_localArchivePath) || _localEntryIndex < 0)
+        {
+            MessageBox.Show(this, "This BuildTable was opened without an archive target for new character resources.",
+                "Add vest", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        IReadOnlyList<VestTemplate> verified = CharacterItemAddPipeline.FindVestTemplates(
+            _table, _localPreviewResources, MetadataForTag);
+        var templates = verified.Select(template => new AddAttachmentTemplate(
+            template.ConfigurationRowIndex, template.Metadata.DisplayName, template.Metadata.RecordName)).ToList();
+        if (templates.Count == 0)
+        {
+            MessageBox.Show(this, "No installed vest has a complete and unambiguous configuration, gameplay and male/female model branch.",
+                "Add vest", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var dialog = new AddAttachmentWindow("Player clothing · vests", templates, characterVest: true) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Draft is not { } draft)
+            return;
+
+        try
+        {
+            if (_addedMetadata.Values.Any(metadata => string.Equals(metadata.RecordName, draft.InternalName, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"A newly prepared vest named {draft.InternalName} already exists.");
+
+            SetMetadataLoading(true, $"Building {draft.DisplayName} and validating all character registrations…");
+            IProgress<string> progress = new Progress<string>(message =>
+            {
+                if (_closed)
+                    return;
+                MetadataLoadingText.Text = message;
+                SetStatus(message);
+            });
+            var attempt = await Task.Run(() =>
+            {
+                try
+                {
+                    return (Plan: CharacterItemAddPipeline.BuildVest(_armoryIndex, _table,
+                        draft.Template.RowIndex, draft, _gameMetadata.LanguagePackage, _archivePaths,
+                        _localPreviewResources, _localResourceIndexes, _localArchivePath,
+                        _localEntryIndex, _localEntryName, _preparedResourceData, _preparedIds,
+                        MetadataForTag, progress), Error: (Exception?)null);
+                }
+                catch (Exception ex)
+                {
+                    return (Plan: (CharacterItemAddPlan?)null, Error: ex);
+                }
+            });
+            if (_closed)
+                return;
+            if (attempt.Error is not null)
+                throw new InvalidOperationException(attempt.Error.Message, attempt.Error);
+
+            CharacterItemAddPlan plan = attempt.Plan!;
+            var localChanges = plan.LocalChanges.Append(new BuildTableResourceChange(
+                _currentDocument.Source.ResourceIndex, _currentDocument.Name, plan.BuildTableData)).ToList();
+            _saveAttachment(new AttachmentSaveChanges(draft.DisplayName, localChanges,
+                plan.DatabaseChanges, plan.ResourceAdditions, plan.EntryAdditions));
+            _armoryIndex.ApplyAdditions(plan.ResourceAdditions);
+            _armoryIndex.ApplyChanges(plan.DatabaseChanges);
+
+            ApplyPreparedLocalChanges(plan.LocalChanges);
+            _addedMetadata[plan.Metadata.BuildTag] = plan.Metadata;
+            _preparedIds.Add(plan.Metadata.NameStringId);
+            foreach (ArmoryDatabaseResourceChange change in plan.DatabaseChanges)
+                _preparedResourceData[(change.ArchivePath, change.EntryIndex, change.ResourceIndex)] = (byte[])change.Data.Clone();
+            foreach (ArmoryArchiveResourceAddition addition in plan.ResourceAdditions)
+                _preparedIds.Add(addition.ResourceId);
+            foreach (ArmoryArchiveEntryAddition addition in plan.EntryAdditions)
+                _preparedIds.Add(addition.EntryId);
+            foreach (Resource resource in plan.PreviewResources)
+                _localPreviewResources[resource.Id] = resource;
+            foreach ((ulong oldSelectorId, ulong newSelectorId) in plan.ModelSelectors)
+            {
+                Resource? selector = plan.PreviewResources.FirstOrDefault(resource => resource.Id == newSelectorId);
+                BuildTableTarget source = _targets.GetValueOrDefault(oldSelectorId)
+                    ?? new BuildTableTarget(oldSelectorId, $"0x{oldSelectorId:X12}", 0, "Asset", "", "");
+                _targets[newSelectorId] = new BuildTableTarget(newSelectorId,
+                    selector?.Name ?? draft.InternalName, selector?.ClassHash ?? source.ClassHash,
+                    ResourceTypes.NameOf(selector?.ClassHash ?? source.ClassHash), _localEntryName,
+                    Path.GetFileName(_localArchivePath));
+            }
+
+            _currentDocument.SavedData = (byte[])plan.BuildTableData.Clone();
+            _currentDocument.Table = BuildTable.Read(plan.BuildTableData);
+            _table = _currentDocument.Table;
+            int newRowIndex = draft.Template.RowIndex + 1;
+            RebuildRows(newRowIndex);
+            RebuildOptions(preferredRow: newRowIndex);
+            MarkDirty();
+            ShowSelectedReference();
+            ShowTargetResults();
+            SetStatus($"{draft.DisplayName} is queued as a distinct vest with male and female models, "
+                + $"{plan.ResourceAdditions.Count} new data resources and {plan.EntryAdditions.Count} new asset containers.");
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not add the vest: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "Could not add vest", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetMetadataLoading(false);
+        }
+    }
+
+    void ApplyPreparedLocalChanges(IReadOnlyList<BuildTableResourceChange> changes)
+    {
+        foreach (BuildTableResourceChange change in changes)
+        {
+            BuildTableDocument? document = _documents.FirstOrDefault(candidate =>
+                candidate.Source.ResourceIndex == change.ResourceIndex);
+            if (document is not null)
+            {
+                document.SavedData = (byte[])change.Data.Clone();
+                document.Table = BuildTable.Read(change.Data);
+            }
+            ulong resourceId = _localResourceIndexes.FirstOrDefault(pair => pair.Value == change.ResourceIndex).Key;
+            if (resourceId != 0 && _localPreviewResources.TryGetValue(resourceId, out Resource? localResource))
+                localResource.Data = (byte[])change.Data.Clone();
         }
     }
 
@@ -795,7 +1054,9 @@ public partial class BuildTableWindow : Window
             ulong? savedValue = saved.TryGetValue(reference.Path, out var values) && values.Count > 0
                 ? values.Dequeue()
                 : null;
-            _rows.Add(new BuildTableReferenceRow(index++, reference, _table.Id, _name, Resolve, savedValue));
+            bool containerLocal = IsContainerLocalReference(reference);
+            _rows.Add(new BuildTableReferenceRow(index++, reference, _table.Id, _name,
+                _localEntryName, containerLocal, Resolve, savedValue));
         }
 
         ShowReferences();
@@ -809,11 +1070,16 @@ public partial class BuildTableWindow : Window
             ReferenceList.SelectedIndex = 0;
     }
 
+    bool IsContainerLocalReference(BuildTableReference reference) => reference.IsContainerLocal
+        || reference.Kind == BuildTableReferenceKind.Handle
+        && _containerLocalReferenceIds.Contains(reference.Value);
+
     async void ResolveTargets(object sender, RoutedEventArgs e)
     {
         Loaded -= ResolveTargets;
         var wanted = _documents.SelectMany(document => document.Table.References)
-            .Where(reference => reference.Kind != BuildTableReferenceKind.TableIdentity)
+            .Where(reference => reference.Kind != BuildTableReferenceKind.TableIdentity
+                && !IsContainerLocalReference(reference))
             .Select(reference => reference.Value)
             .Where(value => value != 0 && value != _table.Id)
             .Distinct()
@@ -832,13 +1098,13 @@ public partial class BuildTableWindow : Window
         try
         {
             _ownerEntityIds = FindSameContainerEntityBuilderIds();
-            var targetTask = RunIndexing(() => BuildTableTargetResolver.Build(_archivePaths, _localTargets, wanted, progress, token), token);
+            var targetTask = RunIndexing(() => BuildTableTargetResolver.ResolveReferences(_archivePaths, _localTargets, wanted, progress, token), token);
             Task<IReadOnlyList<string>?> languageTask = _armoryIndex is null
                 ? RunIndexing(() => BuildTableGameMetadataResolver.FindAvailableLanguagePackages(_archivePaths, token), token)
                 : Task.FromResult<IReadOnlyList<string>?>(_armoryIndex.LanguagePackages);
             var metadataTask = RunIndexing(() => _armoryIndex is null
                 ? BuildTableGameMetadataResolver.Build(_archivePaths, _ownerEntityIds, progress, token, buildTags: FamilyBuildTags())
-                : BuildTableGameMetadataResolver.Build(_armoryIndex, _ownerEntityIds, cancellationToken: token, buildTags: FamilyBuildTags()), token);
+                : BuildTableGameMetadataResolver.Build(_armoryIndex, _ownerEntityIds, cancellationToken: token, buildTags: FamilyBuildTags(), progress: progress), token);
             await Task.WhenAll(targetTask, metadataTask, languageTask);
             if (_closed || targetTask.Result is not { } result || metadataTask.Result is not { } metadata || languageTask.Result is not { } languages)
                 return;
@@ -854,10 +1120,14 @@ public partial class BuildTableWindow : Window
             RefreshResolvedNames();
 
             int resolved = wanted.Count(id => _targets.ContainsKey(id));
-            string ownerStatus = _gameMetadata.OwnerRecords.Count == 0
-                ? "No exact same-container gameplay owner was found; labels remain unresolved."
-                : $"Gameplay owner: {string.Join(", ", _gameMetadata.OwnerRecords)} · labels: {_gameMetadata.LanguagePackage}.";
-            SetStatus($"Resolved {resolved} of {wanted.Count} referenced assets and {_gameMetadata.ByBuildTag.Count} labels linked by the game database. {ownerStatus}");
+            int localReferences = _documents.SelectMany(document => document.Table.References)
+                .Count(reference => reference.Value != 0 && IsContainerLocalReference(reference));
+            string ownerStatus = !_weaponFamily
+                ? $"Labels: {_gameMetadata.LanguagePackage}. Weapon availability is not applied to this BuildTable family."
+                : _gameMetadata.OwnerRecords.Count == 0
+                    ? "No exact same-container weapon owner was found; Gunsmith availability remains unavailable."
+                    : $"Weapon owner: {string.Join(", ", _gameMetadata.OwnerRecords)} · labels: {_gameMetadata.LanguagePackage}.";
+            SetStatus($"Resolved {resolved} of {wanted.Count} global assets, identified {localReferences} container-local references, and {_gameMetadata.ByBuildTag.Count} labels linked by the game database. {ownerStatus}");
         }
         catch (Exception ex)
         {
@@ -1001,7 +1271,7 @@ public partial class BuildTableWindow : Window
 
     IReadOnlyList<uint> FamilyBuildTags() => _documents
         .SelectMany(document => document.Table.Rows)
-        .Select(row => row.Tag)
+        .SelectMany(row => row.PossibleTags.Append(row.Tag))
         .Distinct()
         .ToList();
 
@@ -1043,6 +1313,7 @@ public partial class BuildTableWindow : Window
         "Variant choices" => row.Category == "Variant choice",
         "Built assets" => row.Category == "Built asset",
         "Related groups" => row.Category == "Related group",
+        "Container-local references" => row.Category == "Container-local reference",
         "Empty optional fields" => row.Category == "Empty optional field",
         "All fields (advanced)" => true,
         "Internal fields" => row.Category == "Internal field",
@@ -1067,7 +1338,7 @@ public partial class BuildTableWindow : Window
         if (ReferenceList.SelectedItem is not BuildTableReferenceRow row)
         {
             var option = OptionList.SelectedItem as BuildTableOptionItem;
-            ReferenceTitle.Text = option?.DisplayName ?? "Select an option";
+            ReferenceTitle.Text = option?.DisplayName ?? "Select a row";
             ReferenceMeta.Text = option?.InternalName ?? "";
             ReferenceMeta.ToolTip = null;
             ResolvedNameText.Text = "";
@@ -1077,20 +1348,20 @@ public partial class BuildTableWindow : Window
             TargetSearchBox.IsEnabled = false;
             ReplaceMatchingBox.IsEnabled = false;
             ApplyValueButton.IsEnabled = false;
-            string reason = "Select an option first";
+            string reason = "Select a row first";
             bool canDuplicateOption = option is not null && _table.CanDuplicateRow(option.RowIndex, out reason);
             DuplicateRowButton.IsEnabled = canDuplicateOption;
             DuplicateRowButton.ToolTip = canDuplicateOption
-                ? "Create another complete option with the same structure"
+                ? "Create another complete row with the same structure"
                 : reason;
             RemoveRowButton.IsEnabled = TechnicalModeBox.IsChecked == true && option is not null && _table.RowCount > 1;
             ShowGunsmithLinks(option, option is { RowIndex: var emptyOptionRow } && (uint)emptyOptionRow < (uint)_table.Rows.Count
-                ? MetadataForTag(_table.Rows[emptyOptionRow].Tag)
+                ? MetadataForRow(_table.Rows[emptyOptionRow])
                 : null);
             ClearFieldButton.Visibility = Visibility.Collapsed;
             TargetEmptyText.Text = option is null
-                ? "Select an option first."
-                : "This option has no visible asset to replace.";
+                ? "Select a row first."
+                : "This row has no resolved asset to replace. Its other fields remain available in Technical view.";
             TargetEmptyText.Visibility = Visibility.Visible;
             return;
         }
@@ -1100,14 +1371,14 @@ public partial class BuildTableWindow : Window
             ? row.Path
             : selectedOption?.DisplayName ?? row.Target;
         BuildTableOptionMetadata? optionMetadata = selectedOption is { RowIndex: var optionRow } && (uint)optionRow < (uint)_table.Rows.Count
-                ? MetadataForTag(_table.Rows[optionRow].Tag)
+                ? MetadataForRow(_table.Rows[optionRow])
                 : null;
         ShowGunsmithLinks(selectedOption, optionMetadata);
         ReferenceMeta.Text = TechnicalModeBox.IsChecked == true
             ? row.Category
             : optionMetadata is not null
-                ? "Game option"
-                : "Unresolved option";
+                ? "Resolved game record"
+                : "BuildTable row";
         ReferenceMeta.ToolTip = TechnicalModeBox.IsChecked == true
             ? $"Binary field: {row.Reference.Kind}, offset 0x{row.Offset:X}"
             : null;
@@ -1125,7 +1396,7 @@ public partial class BuildTableWindow : Window
         TargetSearchBox.IsEnabled = technicalEdit && ShowAllAssetsBox.IsChecked == true;
         ReplaceMatchingBox.IsEnabled = technicalEdit;
         ApplyValueButton.IsEnabled = technicalEdit;
-        string duplicateReason = "Select an option first";
+        string duplicateReason = "Select a row first";
         bool canDuplicate = row.BuildRowIndex is int buildRow && _table.CanDuplicateRow(buildRow, out duplicateReason);
         DuplicateRowButton.IsEnabled = technicalEdit && canDuplicate;
         DuplicateRowButton.Visibility = TechnicalModeBox.IsChecked == true
@@ -1138,8 +1409,10 @@ public partial class BuildTableWindow : Window
             ? Visibility.Visible : Visibility.Collapsed;
         RemoveRowButton.IsEnabled = technicalEdit && row.BuildRowIndex is not null && _table.RowCount > 1;
         RemoveRowButton.ToolTip = _table.RowCount > 1
-            ? "Technical operation: remove this BuildTable row. This does not change the Gunsmith list."
-            : "The last remaining option is kept so the table stays usable";
+            ? CurrentTableSupportsGunsmith()
+                ? "Technical operation: remove this BuildTable row. This does not change the Gunsmith list."
+                : "Technical operation: remove this exact BuildTable row. Referenced assets are not deleted."
+            : "The last remaining row is kept so the table stays usable";
         ClearFieldButton.Visibility = technicalEdit && row.BuildRowIndex is null
             && row.Reference.Value != 0 && row.Reference.Kind == BuildTableReferenceKind.FileReference
                 ? Visibility.Visible
@@ -1149,7 +1422,7 @@ public partial class BuildTableWindow : Window
 
     void ShowGunsmithLinks(BuildTableOptionItem? option, BuildTableOptionMetadata? metadata)
     {
-        if (TechnicalModeBox.IsChecked == true)
+        if (TechnicalModeBox.IsChecked == true || !CurrentTableSupportsGunsmith())
         {
             GunsmithAvailabilityNote.Visibility = Visibility.Collapsed;
             GunsmithLinkPanel.Visibility = Visibility.Collapsed;
@@ -1284,7 +1557,21 @@ public partial class BuildTableWindow : Window
 
     BuildTableOptionMetadata? MetadataForTag(uint tag) => _addedMetadata.GetValueOrDefault(tag) ?? _gameMetadata.ByBuildTag.GetValueOrDefault(tag);
 
-    IReadOnlyList<GunsmithAvailabilityList> FindGunsmithLists() => GunsmithAvailability.Find(_armoryIndex, _table, _gameMetadata, _addedMetadata, _addedOwnersByRecordId);
+    BuildTableOptionMetadata? MetadataForRow(BuildTableRow row)
+    {
+        BuildTableOptionMetadata? direct = MetadataForTag(row.Tag);
+        if (direct is not null)
+            return direct;
+        var linked = row.PossibleTags.Select(MetadataForTag).OfType<BuildTableOptionMetadata>()
+            .DistinctBy(metadata => metadata.RecordId).ToList();
+        return linked.Count == 1 ? linked[0] : null;
+    }
+
+    IReadOnlyList<GunsmithAvailabilityList> FindGunsmithLists() => GunsmithAvailability.Find(_armoryIndex, _table, _gameMetadata, _addedMetadata, _addedOwnerIdsByRecordId);
+
+    bool CurrentTableSupportsGunsmith() => _weaponFamily
+        && FamilyList.SelectedItem is BuildTableFamilyItem item
+        && IsWeaponDisplaySlot(item.Slot);
 
     void SearchMode_Changed(object sender, RoutedEventArgs e)
     {
@@ -1312,7 +1599,44 @@ public partial class BuildTableWindow : Window
 
     async Task EnrichTargetSearch(int version)
     {
-        await Task.CompletedTask;
+        if (_fullCatalogLoaded || ShowAllAssetsBox.IsChecked != true || TargetSearchBox.Text.Trim().Length < 2)
+            return;
+
+        SetStatus("Preparing the complete installed-asset search…");
+        TargetEmptyText.Text = "Preparing the complete installed-asset search…";
+        TargetEmptyText.Visibility = Visibility.Visible;
+        var progress = new Progress<string>(message =>
+        {
+            if (!_closed)
+            {
+                SetStatus(message);
+                TargetEmptyText.Text = message;
+            }
+        });
+
+        try
+        {
+            _fullCatalogTask ??= RunIndexing(() => BuildTableTargetResolver.Build(_archivePaths, _localTargets, [], progress, _stopResolving.Token), _stopResolving.Token);
+            BuildTableTargetCatalog? catalog = await _fullCatalogTask;
+            if (_closed || catalog is null)
+                return;
+
+            _catalog = catalog.Targets;
+            foreach (BuildTableTarget target in catalog.ById.Values)
+                _targets.TryAdd(target.Id, target);
+            _fullCatalogLoaded = true;
+            SetStatus($"Installed-asset search ready: {_catalog.Count:N0} assets.");
+            if (version == _searchVersion)
+                ShowTargetResults();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            _fullCatalogTask = null;
+            SetError($"Could not prepare the installed-asset search: {exception.Message}");
+        }
     }
 
     void ShowTargetResults()
@@ -1461,7 +1785,7 @@ public partial class BuildTableWindow : Window
         {
             if (row.BuildRowIndex is null)
                 return true;
-            SetError("An option cannot be emptied one field at a time. Use Remove this option so its selector and resources stay consistent.");
+            SetError("A BuildTable row cannot be emptied one field at a time. Remove the complete row so its references stay consistent.");
             return false;
         }
 
@@ -1502,12 +1826,14 @@ public partial class BuildTableWindow : Window
             MarkDirty();
             ShowSelectedReference();
             ShowTargetResults();
-            SetStatus($"Duplicated a technical BuildTable row. This does not add a Gunsmith option.");
+            SetStatus(CurrentTableSupportsGunsmith()
+                ? "Duplicated a technical BuildTable row. This does not add a Gunsmith option."
+                : "Duplicated the exact technical BuildTable row.");
         }
         catch (Exception ex)
         {
-            SetError($"Could not add the option: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "Add BuildTable option", MessageBoxButton.OK, MessageBoxImage.Error);
+            SetError($"Could not duplicate the BuildTable row: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "Duplicate BuildTable row", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -1518,9 +1844,11 @@ public partial class BuildTableWindow : Window
         if (!TryGetSelectedBuildRowIndex(out int rowIndex) || _table.RowCount <= 1)
             return;
 
+        string impact = CurrentTableSupportsGunsmith()
+            ? "This changes only this table's mapping. It does not remove, hide or alter the corresponding Gunsmith option in Game Bootstrap Settings."
+            : "This changes only this table's mapping. Referenced assets and other linked BuildTables are not deleted.";
         var answer = MessageBox.Show(this,
-            $"Remove technical BuildTable row {rowIndex + 1}?\n\n"
-            + "This changes only this table's mapping. It does not remove, hide or alter the corresponding Gunsmith option in Game Bootstrap Settings.",
+            $"Remove technical BuildTable row {rowIndex + 1}?\n\n{impact}",
             "Remove technical BuildTable row", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes)
             return;
@@ -1535,11 +1863,13 @@ public partial class BuildTableWindow : Window
             MarkDirty();
             ShowSelectedReference();
             ShowTargetResults();
-            SetStatus($"Removed technical BuildTable row {rowIndex + 1}. Gunsmith availability was not changed.");
+            SetStatus(CurrentTableSupportsGunsmith()
+                ? $"Removed technical BuildTable row {rowIndex + 1}. Gunsmith availability was not changed."
+                : $"Removed technical BuildTable row {rowIndex + 1}. Referenced assets were not deleted.");
         }
         catch (Exception ex)
         {
-            SetError($"Could not remove the option safely: {ex.Message}");
+            SetError($"Could not remove the BuildTable row safely: {ex.Message}");
             MessageBox.Show(this, ex.Message, "Remove technical BuildTable row", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -1613,7 +1943,7 @@ public partial class BuildTableWindow : Window
             RebuildOptions(preferredRow: selectedRow);
             MarkDirty();
             SetStatus(gunsmithChangeCount > 0
-                ? $"Saved {gunsmithChangeCount} confirmed Gunsmith change(s) to the change list. Apply changes, restart Wildlands, then reopen the Armory."
+                ? $"Saved {gunsmithChangeCount} confirmed Gunsmith change(s) to the change list. Apply changes, restart Wildlands, then reopen this BuildTable."
                 : $"Saved {changed.Count} {(changed.Count == 1 ? "table" : "tables")} "
                     + "to the main window's change list. Apply changes writes them into the archive.");
         }
@@ -1685,7 +2015,7 @@ public partial class BuildTableWindow : Window
         RebuildOptions();
         ShowSelectedReference();
         ShowTargetResults();
-        SetError("The selected option changed while the table was refreshed. Choose the option again before editing it.");
+        SetError("The selected row changed while the table was refreshed. Choose the row again before editing it.");
 
         return false;
     }
@@ -1751,14 +2081,15 @@ public partial class BuildTableWindow : Window
 
     void SetError(string text)
     {
+        StatusBar.Visibility = Visibility.Visible;
         StatusText.Text = text;
         StatusText.Foreground = (Brush)FindResource("Warning");
     }
 
-    void SetStatus(string text)
+    void SetStatus(string _)
     {
-        StatusText.Text = text;
-        StatusText.Foreground = (Brush)FindResource("TextDim");
+        StatusBar.Visibility = Visibility.Collapsed;
+        StatusText.Text = "";
     }
 }
 
@@ -1771,16 +2102,22 @@ public sealed class BuildTableReferenceRow : INotifyPropertyChanged
 {
     readonly ulong _tableId;
     readonly string _tableName;
+    readonly string _containerName;
+    readonly bool _containerLocal;
     readonly Func<ulong, BuildTableTarget?> _resolve;
     ulong _savedValue;
     bool _hasSavedValue;
 
-    public BuildTableReferenceRow(int index, BuildTableReference reference, ulong tableId, string tableName, Func<ulong, BuildTableTarget?> resolve, ulong? savedValue = null)
+    public BuildTableReferenceRow(int index, BuildTableReference reference, ulong tableId,
+        string tableName, string containerName, bool containerLocal,
+        Func<ulong, BuildTableTarget?> resolve, ulong? savedValue = null)
     {
         Index = index;
         Reference = reference;
         _tableId = tableId;
         _tableName = tableName;
+        _containerName = containerName;
+        _containerLocal = containerLocal;
         _resolve = resolve;
         _savedValue = savedValue ?? reference.Value;
         _hasSavedValue = savedValue.HasValue;
@@ -1794,7 +2131,7 @@ public sealed class BuildTableReferenceRow : INotifyPropertyChanged
     public BuildTableTarget? Resolved => _resolve(Reference.Value);
     public string ValueText => $"0x{Reference.Value:X}";
     public bool Internal => Reference.Value == _tableId;
-    public bool Editable => !Internal;
+    public bool Editable => !Internal && !_containerLocal;
     public bool Changed => !_hasSavedValue || Reference.Value != _savedValue;
     public string Mark => Changed ? "●" : "";
 
@@ -1806,6 +2143,8 @@ public sealed class BuildTableReferenceRow : INotifyPropertyChanged
                 return "Internal field";
             if (Reference.Value == 0)
                 return "Empty optional field";
+            if (_containerLocal)
+                return "Container-local reference";
 
             string type = Resolved?.Type ?? "";
             if (type == "LODSelector" || Reference.Kind == BuildTableReferenceKind.Handle)
@@ -1822,21 +2161,27 @@ public sealed class BuildTableReferenceRow : INotifyPropertyChanged
     {
         0 => "None",
         _ when Internal => $"This BuildTable · {_tableName}",
+        _ when _containerLocal => $"{LocalOwner} local reference · 0x{Reference.Value:X}",
         _ when Resolved is { } target => target.Name,
+        _ when Reference.Kind == BuildTableReferenceKind.Handle => $"Unresolved handle · 0x{Reference.Value:X}",
         _ => $"Unresolved asset · 0x{Reference.Value:X}",
     };
 
     public string TargetDetails => Reference.Value switch
     {
-        0 => "No asset is assigned to this slot.",
+        0 => "No asset is assigned to this field.",
         _ when Internal => "Internal owner link. It is kept read-only because changing it would detach the row or column from this BuildTable.",
+        _ when Reference.IsContainerLocal => $"Container-local reference owned by {LocalOwner} (tag 0x{Reference.ReferenceTag:X2}, global flag 0x{Reference.GlobalFlag:X2}). It is not an independently indexed Forge asset.",
+        _ when _containerLocal => $"Handle scoped to {LocalOwner} because the same ID is explicitly marked container-local elsewhere in this BuildTable family (tag 0x{Reference.ReferenceTag:X2}).",
         _ when Resolved is { } target => target.Details,
+        _ when Reference.Kind == BuildTableReferenceKind.Handle => "This handle did not resolve to an indexed resource or Forge entry. It may address an object owned by the surrounding container.",
         _ => "This ID was not found as a resource or forge entry in the installed archives.",
     };
 
     public string PartLabel => Reference.Kind switch
     {
-        BuildTableReferenceKind.FileReference when Resolved?.Type == "BuildTable" => "Linked armory slot",
+        _ when _containerLocal => "Container-local reference",
+        BuildTableReferenceKind.FileReference when Resolved?.Type == "BuildTable" => "Linked BuildTable",
         BuildTableReferenceKind.FileReference => "Visible asset",
         _ when Resolved?.Type is "Mesh" or "LODSelector" => "Variant behavior",
         BuildTableReferenceKind.Handle => "Variant behavior",
@@ -1857,14 +2202,15 @@ public sealed class BuildTableReferenceRow : INotifyPropertyChanged
                 if (path.Contains(" component ", StringComparison.Ordinal))
                     return category switch
                     {
-                        "Variant choice" => $"Option {shown} · variant choice",
-                        "Built asset" => $"Option {shown} · visible asset",
-                        "Related group" => $"Option {shown} · related asset group",
-                        "Empty optional field" => $"Option {shown} · optional asset",
-                        _ => $"Option {shown} · asset",
+                        "Variant choice" => $"Row {shown} · variant choice",
+                        "Built asset" => $"Row {shown} · visible asset",
+                        "Related group" => $"Row {shown} · related asset group",
+                        "Container-local reference" => $"Row {shown} · container-local reference",
+                        "Empty optional field" => $"Row {shown} · optional asset",
+                        _ => $"Row {shown} · asset",
                     };
                 if (path.EndsWith(" table", StringComparison.Ordinal))
-                    return $"Option {shown} · owning asset group";
+                    return $"Row {shown} · owning asset group";
             }
 
             if (parts[0] == "column")
@@ -1901,6 +2247,8 @@ public sealed class BuildTableReferenceRow : INotifyPropertyChanged
     static int ParseLast(string path) => int.TryParse(path.Split(' ', StringSplitOptions.RemoveEmptyEntries)[^1], out int value)
             ? value
             : 0;
+
+    string LocalOwner => _containerName.Length > 0 ? _containerName : _tableName;
 
     public void Accept()
     {

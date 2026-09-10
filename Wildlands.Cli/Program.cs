@@ -81,13 +81,32 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  find64 <folder|file.data> <id> [id...]  find exact little-endian 64-bit values in resources");
     Console.WriteLine("  copies <archive.forge> <id>  list every installed copy of one exact resource id");
     Console.WriteLine("  ids <archive.forge> <id> [id...]  resolve exact resource ids from the archive index");
+    Console.WriteLine("  prefetchrefs <archive.forge> <entry id> [id...]  inspect exact 64-bit references in one entry's prefetch block");
     Console.WriteLine("  where <game folder> <name> [--all]  which archives hold a resource, and which one the game loads last");
     Console.WriteLine("  handles <game folder> <archive.forge> [name prefix]  check that every BuildTable model handle reaches a Forge entry");
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
     Console.WriteLine("  armorymeta <game folder> <build tag> [build tag...]  resolve gameplay records for exact BuildTags");
+    Console.WriteLine("  armorylists <game folder> <record id>  group binary list candidates containing an exact record ID");
+    Console.WriteLine("  charactersmithcheck <game folder> <record id>  verify an in-memory CharacterSmith row insertion");
+    Console.WriteLine("  vestregistrycheck <game folder> <record id>  verify all currently proven vest registry insertions in memory");
+    Console.WriteLine("  vestaddcheck <game folder> <character archive> <model> <diffuse> <normal> <mask1> [row]  build a complete vest plan in memory");
+    Console.WriteLine("  vestpack <game folder> <character archive> <model> <diffuse> <normal> <mask1> <project folder> <package> [row]  build and validate an installable vest package");
+    Console.WriteLine("  vestrepair <game folder> <template record> <installed record name> <display name> <language> <project folder> <package>  repair an installed vest addon's UI metadata");
+    Console.WriteLine("  vestmodelrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  mirror an installed vest model branch into every character container");
+    Console.WriteLine("  vestbuilderrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  register an installed vest in sibling character builders");
+    Console.WriteLine("  vestselectorprobe <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  route an installed vest through its template selectors");
+    Console.WriteLine("  vesttagrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  complete an installed vest's global tag dictionaries");
+    Console.WriteLine("  vestentityrepair <game folder> <character archive> <template record> <installed record name> <display name> <male selector> <female selector> <project folder> <package>  register private vest tables in EntityBuilder and restore addon selectors");
+    Console.WriteLine("  vestorderrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  place an installed vest branch inside the primary BuildTable resource block");
+    Console.WriteLine("  vestidentityrepair <game folder> <character archive> <template record> <installed record name> <display name> <project folder> <package>  give an installed vest a unique internal gameplay identity");
+    Console.WriteLine("  tagmapcheck <game folder> <template tag> <new tag>  validate effective BuildTag column-map insertions in memory");
+    Console.WriteLine("  storeregistrycheck <game folder> <StoreObjectInfo id>  verify an in-memory StoreObjectInfo registry insertion");
+    Console.WriteLine("  storeobjectcheck <game folder> <StoreObjectInfo id> <record id>  verify an in-memory StoreObjectInfo clone");
+    Console.WriteLine("  targetresolvecheck <game folder> <asset id> [id...]  time targeted BuildTable reference resolution");
     Console.WriteLine("  duprowcheck <archive.forge> <container> <table> <row>  verify an in-memory row duplication");
+    Console.WriteLine("  taglistcheck <archive.forge> <container> <table> <row>  verify an in-memory BuildTags insertion");
     Console.WriteLine("  memwatch <process|pid> <u32:0xvalue|u64:0xvalue> [...]  compare exact values in two live process states");
     Console.WriteLine("  memfind <process|pid> <u32:0xvalue|u64:0xvalue> [...]  find exact values in a live process");
     Console.WriteLine("  memcontexts <process|pid> <locked value> <free value> [...]  compare nearby runtime records");
@@ -106,173 +125,221 @@ try
     {
         case "blobs":
             return ReadBlobs(args[1], null);
-    case "dump" when args.Length >= 3:
-        return ReadBlobs(args[1], args[2]);
-    case "list":
-        return ListForge(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20);
-    case "entry" when args.Length >= 4:
-        return WriteEntry(args[1], int.Parse(args[2]), args[3]);
-    case "res":
-        return ListResources(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20);
-    case "tex":
-        return ReadTextures(args[1]);
-    case "mips":
-        return ListMips(args[1], args.Length >= 3 ? args[2] : "", args.Length >= 4 ? int.Parse(args[3]) : 10);
-    case "get" when args.Length >= 4:
-        return GetResource(args[1], args[2], args[3]);
-    case "geometry":
-        return CheckGeometry(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
-    case "fbx" when args.Length >= 4:
-        return ExportFbx(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
-    case "ranges" when args.Length >= 3:
-        return ShowRanges(args[1], args[2]);
-    case "meshes":
-        return CensusMeshes(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
-    case "mesh" when args.Length >= 3:
-        return ShowMesh(args[1], args[2]);
-    case "sets":
-        return CheckTextureSets(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
-    case "mats":
-        return CheckMaterials(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
-    case "matinfo" when args.Length >= 4:
-        return ShowMaterialLinks(args[1], args[2], args[3]);
-    case "camo":
-        return MatchCamo(args[1..]);
-    case "params":
-        return CheckParameters(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue,
-            args.Length >= 4 ? args[3] : null);
-    case "objout" when args.Length >= 4:
-        return ExportObj(args[1], args[2], args[3]);
-    case "objin" when args.Length >= 5:
-        return ImportObj(args[1], args[2], args[3], args[4]);
-    case "objcycle":
-        return CheckObjRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
-    case "gltfout" when args.Length >= 4:
-        return ExportGltf(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
-    case "gltfin" when args.Length >= 5:
-        return ImportGltf(args[1], args[2], args[3], args[4]);
-    case "gltfcycle":
-        return CheckGltfRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
-    case "hash":
-        return HashNames(args[1..]);
-    case "hashscan" when args.Length >= 3:
-        return ScanHashes(args[1], args[2..]);
-    case "audit":
-        return Audit(args[1], args.Length >= 3 ? int.Parse(args[2]) : 500);
-    case "recode":
-        return Recode(args[1], args.Length >= 3 ? int.Parse(args[2]) : 200);
-    case "texcycle":
-        return TexCycle(args[1], args.Length >= 3 ? int.Parse(args[2]) : 200);
-    case "texhdr" when args.Length >= 3:
-        return ShowTextureHeaders(args[1], args[2]);
-    case "texout" when args.Length >= 4:
-        return ExportTextures(args[1], args[2], args[3]);
-    case "texin" when args.Length >= 3:
-        return ImportTextures(args[1], args[2]);
-    case "guess" when args.Length >= 2:
-        return GuessTypes(args[1], args[2..]);
-    case "skeletons":
-        return CheckSkeletons(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20000,
-            args.Length >= 4 ? args[3] : null);
-    case "skelcycle":
-        return CheckSkeletonRoundTrips(args[1]);
-    case "skelcheck":
-        return CheckSkeletonsAgainstDocs(args[1]);
-    case "buildcycle":
-        return CheckBuildTableRoundTrips(args[1]);
-    case "buildaudit":
-        return AuditForgeBuildTables(args[1], args.Length >= 3 ? args[2] : "");
-    case "meshcycle":
-        return CheckMeshRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
-    case "skelindex" when args.Length >= 3:
-        return BuildSkeletonIndex(args[1], args[2]);
-    case "pack" when args.Length >= 3:
-        return PackData(args[1], args[2]);
-    case "setres" when args.Length >= 5:
-        return SetResource(args[1], args[2], args[3], args[4]);
-    case "rebuild" when args.Length >= 3:
-        return RebuildArchive(args[1], args[2]);
-    case "putentry" when args.Length >= 4:
-        return PutEntry(args[1], int.Parse(args[2]), args[3], args.Length >= 5 ? args[4] : null);
-    case "timecycle" when args.Length >= 3:
-        return ShowTimeCycle(args[1], args[2], args.Length >= 4 ? args[3] : null);
-    case "settimecycle" when args.Length >= 5:
-        return ApplyTimeCycle(args[1], args[2], args[3], args[4]);
-    case "weather":
-        return CheckTimeCycles(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
-    case "weatherprops":
-        return CensusWeatherProperties(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
-    case "profileprops" when args.Length >= 3:
-        return ProfileWeatherProperties(args[1], args[2..]);
-    case "crackprops" when args.Length >= 3:
-        return CrackPropertyNames(args[1], args[2..]);
-    case "graphicsaudit" when args.Length >= 3:
-        return GraphicsAudit.Write(args[1], args[2]);
-    case "guessprops" when args.Length >= 2:
-        return PropertyGuesser.Run(args[1], args.Length >= 3 ? args[2] : null,
-            args.Length >= 4 ? int.Parse(args[3]) : 3);
-    case "graphicsprofile" when args.Length >= 4:
-        return ApplyGraphicsProfile(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
-    case "refs" when args.Length >= 3:
-        return FindReferences(args[1], args[2]);
-    case "refsforge" when args.Length >= 4:
-        return FindForgeReferences(args[1], args[2], args[3..]);
-    case "refs32forge" when args.Length >= 4:
-        return FindForge32BitValues(args[1], args[2], args[3..]);
-    case "namesforge" when args.Length >= 4:
-        return FindForgeResourceNames(args[1], args[2], args[3]);
-    case "hexdb" when args.Length >= 4:
-        return PrintDatabaseResource(args[1], args[2], args[3],
-            args.Length >= 5 ? ParseFlexibleInt32(args[4]) : int.MaxValue,
-            args.Length >= 6 ? ParseFlexibleInt32(args[5]) : 0);
-    case "tagmap" when args.Length >= 4:
-        return InspectBuildTagColumnMaps(args[1], args[2], args[3..]);
-    case "comparedb" when args.Length >= 5:
-        return CompareDatabaseResources(args[1], args[2], args[3], args[4..]);
-    case "locfind" when args.Length >= 3:
-        return FindLocalizedString(args[1], args[2]);
-    case "locstats" when args.Length >= 2:
-        return MeasureLocalizedStringIds(args[1]);
-    case "xrefall" when args.Length >= 3:
-        return ArchiveReferenceCensus.Run(args[1], args[2..]);
-    case "find64" when args.Length >= 3:
-        return Find64BitValues(args[1], args.Skip(2).ToArray());
-    case "copies" when args.Length >= 3:
-        return FindAssetCopies(args[1], args[2]);
-    case "ids" when args.Length >= 3:
-        return FindResourcesById(args[1], args[2..]);
-    case "where" when args.Length >= 3:
-        return WhereIsResource(args[1], args[2], args.Contains("--all"));
-    case "handles" when args.Length >= 3:
-        return CheckModelHandles(args[1], args[2], args.Length >= 4 ? args[3] : "");
-    case "lodsizes" when args.Length >= 3:
-        return CheckStreamedLodSizes(args[1], args[2], args.Length >= 4 ? args[3] : "");
-    case "agree" when args.Length >= 3:
-        return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
-    case "buildinfo" when args.Length >= 3:
-        return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
-    case "armorymeta" when args.Length >= 3:
-        return InspectArmoryMetadata(args[1], args[2..]);
-    case "duprowcheck" when args.Length >= 5:
-        return CheckDuplicatedBuildTable(args[1], args[2], args[3], int.Parse(args[4]));
-    case "memwatch" when args.Length >= 3:
-        return ProcessMemoryWatch.Run(args[1], args[2..]);
-    case "memfind" when args.Length >= 3:
-        return ProcessMemoryWatch.Find(args[1], args[2..]);
-    case "memcontexts" when args.Length >= 4:
-        return ProcessMemoryWatch.CompareContexts(args[1], args[2..]);
-    case "memsave" when args.Length >= 4:
-        return ProcessMemoryWatch.Save(args[1], args[2], args[3..]);
-    case "memdiff" when args.Length >= 3:
-        return ProcessMemoryWatch.Compare(args[1], args[2]);
-    case "memread" when args.Length >= 4:
-        return ProcessMemoryWatch.Read(args[1], args[2], args[3]);
-    case "memregion" when args.Length >= 4:
-        return ProcessMemoryWatch.SaveRegion(args[1], args[2], args[3]);
-    case "memtrace" when args.Length >= 3:
-        return ProcessMemoryTrace.Run(args[1], args[2..]);
-    case "memtraceprobe":
-        return ProcessMemoryTrace.Probe();
+        case "dump" when args.Length >= 3:
+            return ReadBlobs(args[1], args[2]);
+        case "list":
+            return ListForge(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20);
+        case "entry" when args.Length >= 4:
+            return WriteEntry(args[1], int.Parse(args[2]), args[3]);
+        case "res":
+            return ListResources(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20);
+        case "tex":
+            return ReadTextures(args[1]);
+        case "mips":
+            return ListMips(args[1], args.Length >= 3 ? args[2] : "", args.Length >= 4 ? int.Parse(args[3]) : 10);
+        case "get" when args.Length >= 4:
+            return GetResource(args[1], args[2], args[3]);
+        case "geometry":
+            return CheckGeometry(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
+        case "fbx" when args.Length >= 4:
+            return ExportFbx(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
+        case "ranges" when args.Length >= 3:
+            return ShowRanges(args[1], args[2]);
+        case "meshes":
+            return CensusMeshes(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
+        case "mesh" when args.Length >= 3:
+            return ShowMesh(args[1], args[2]);
+        case "sets":
+            return CheckTextureSets(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
+        case "mats":
+            return CheckMaterials(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
+        case "matinfo" when args.Length >= 4:
+            return ShowMaterialLinks(args[1], args[2], args[3]);
+        case "camo":
+            return MatchCamo(args[1..]);
+        case "params":
+            return CheckParameters(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue,
+                args.Length >= 4 ? args[3] : null);
+        case "objout" when args.Length >= 4:
+            return ExportObj(args[1], args[2], args[3]);
+        case "objin" when args.Length >= 5:
+            return ImportObj(args[1], args[2], args[3], args[4]);
+        case "objcycle":
+            return CheckObjRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
+        case "gltfout" when args.Length >= 4:
+            return ExportGltf(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
+        case "gltfin" when args.Length >= 5:
+            return ImportGltf(args[1], args[2], args[3], args[4]);
+        case "gltfcycle":
+            return CheckGltfRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
+        case "hash":
+            return HashNames(args[1..]);
+        case "hashscan" when args.Length >= 3:
+            return ScanHashes(args[1], args[2..]);
+        case "audit":
+            return Audit(args[1], args.Length >= 3 ? int.Parse(args[2]) : 500);
+        case "recode":
+            return Recode(args[1], args.Length >= 3 ? int.Parse(args[2]) : 200);
+        case "texcycle":
+            return TexCycle(args[1], args.Length >= 3 ? int.Parse(args[2]) : 200);
+        case "texhdr" when args.Length >= 3:
+            return ShowTextureHeaders(args[1], args[2]);
+        case "texout" when args.Length >= 4:
+            return ExportTextures(args[1], args[2], args[3]);
+        case "texin" when args.Length >= 3:
+            return ImportTextures(args[1], args[2]);
+        case "guess" when args.Length >= 2:
+            return GuessTypes(args[1], args[2..]);
+        case "skeletons":
+            return CheckSkeletons(args[1], args.Length >= 3 ? int.Parse(args[2]) : 20000,
+                args.Length >= 4 ? args[3] : null);
+        case "skelcycle":
+            return CheckSkeletonRoundTrips(args[1]);
+        case "skelcheck":
+            return CheckSkeletonsAgainstDocs(args[1]);
+        case "buildcycle":
+            return CheckBuildTableRoundTrips(args[1]);
+        case "buildaudit":
+            return AuditForgeBuildTables(args[1], args.Length >= 3 ? args[2] : "");
+        case "meshcycle":
+            return CheckMeshRoundTrips(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
+        case "skelindex" when args.Length >= 3:
+            return BuildSkeletonIndex(args[1], args[2]);
+        case "pack" when args.Length >= 3:
+            return PackData(args[1], args[2]);
+        case "setres" when args.Length >= 5:
+            return SetResource(args[1], args[2], args[3], args[4]);
+        case "rebuild" when args.Length >= 3:
+            return RebuildArchive(args[1], args[2]);
+        case "putentry" when args.Length >= 4:
+            return PutEntry(args[1], int.Parse(args[2]), args[3], args.Length >= 5 ? args[4] : null);
+        case "timecycle" when args.Length >= 3:
+            return ShowTimeCycle(args[1], args[2], args.Length >= 4 ? args[3] : null);
+        case "settimecycle" when args.Length >= 5:
+            return ApplyTimeCycle(args[1], args[2], args[3], args[4]);
+        case "weather":
+            return CheckTimeCycles(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
+        case "weatherprops":
+            return CensusWeatherProperties(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue);
+        case "profileprops" when args.Length >= 3:
+            return ProfileWeatherProperties(args[1], args[2..]);
+        case "crackprops" when args.Length >= 3:
+            return CrackPropertyNames(args[1], args[2..]);
+        case "graphicsaudit" when args.Length >= 3:
+            return GraphicsAudit.Write(args[1], args[2]);
+        case "guessprops" when args.Length >= 2:
+            return PropertyGuesser.Run(args[1], args.Length >= 3 ? args[2] : null,
+                args.Length >= 4 ? int.Parse(args[3]) : 3);
+        case "graphicsprofile" when args.Length >= 4:
+            return ApplyGraphicsProfile(args[1], args[2], args[3], args.Length >= 5 ? args[4] : null);
+        case "refs" when args.Length >= 3:
+            return FindReferences(args[1], args[2]);
+        case "refsforge" when args.Length >= 4:
+            return FindForgeReferences(args[1], args[2], args[3..]);
+        case "refs32forge" when args.Length >= 4:
+            return FindForge32BitValues(args[1], args[2], args[3..]);
+        case "namesforge" when args.Length >= 4:
+            return FindForgeResourceNames(args[1], args[2], args[3]);
+        case "hexdb" when args.Length >= 4:
+            return PrintDatabaseResource(args[1], args[2], args[3],
+                args.Length >= 5 ? ParseFlexibleInt32(args[4]) : int.MaxValue,
+                args.Length >= 6 ? ParseFlexibleInt32(args[5]) : 0);
+        case "tagmap" when args.Length >= 4:
+            return InspectBuildTagColumnMaps(args[1], args[2], args[3..]);
+        case "comparedb" when args.Length >= 5:
+            return CompareDatabaseResources(args[1], args[2], args[3], args[4..]);
+        case "locfind" when args.Length >= 3:
+            return FindLocalizedString(args[1], args[2]);
+        case "locstats" when args.Length >= 2:
+            return MeasureLocalizedStringIds(args[1]);
+        case "xrefall" when args.Length >= 3:
+            return ArchiveReferenceCensus.Run(args[1], args[2..]);
+        case "find64" when args.Length >= 3:
+            return Find64BitValues(args[1], args.Skip(2).ToArray());
+        case "copies" when args.Length >= 3:
+            return FindAssetCopies(args[1], args[2]);
+        case "ids" when args.Length >= 3:
+            return FindResourcesById(args[1], args[2..]);
+        case "prefetchrefs" when args.Length >= 3:
+            return InspectPrefetchReferences(args[1], args[2], args[3..]);
+        case "where" when args.Length >= 3:
+            return WhereIsResource(args[1], args[2], args.Contains("--all"));
+        case "handles" when args.Length >= 3:
+            return CheckModelHandles(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "lodsizes" when args.Length >= 3:
+            return CheckStreamedLodSizes(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "agree" when args.Length >= 3:
+            return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "buildinfo" when args.Length >= 3:
+            return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "armorymeta" when args.Length >= 3:
+            return InspectArmoryMetadata(args[1], args[2..]);
+        case "armorylists" when args.Length >= 3:
+            return InspectArmoryRegistries(args[1], args[2]);
+        case "charactersmithcheck" when args.Length >= 3:
+            return CheckCharacterSmithInsertion(args[1], args[2]);
+        case "vestregistrycheck" when args.Length >= 3:
+            return CheckVestRegistryInsertions(args[1], args[2]);
+        case "vestaddcheck" when args.Length >= 7:
+            return CheckVestAddPlan(args[1], args[2], args[3], args[4], args[5], args[6],
+                args.Length >= 8 ? int.Parse(args[7]) : 1);
+        case "vestpack" when args.Length >= 9:
+            return CreateVestPackage(args[1], args[2], args[3], args[4], args[5], args[6],
+                args[7], args[8], args.Length >= 10 ? int.Parse(args[9]) : 1);
+        case "vestrepair" when args.Length >= 8:
+            return CreateVestRepairPackage(args[1], args[2], args[3], args[4], args[5],
+                args[6], args[7]);
+        case "vestmodelrepair" when args.Length >= 8:
+            return CreateVestModelRepairPackage(args[1], args[2], args[3], args[4],
+                args[5], args[6], args[7]);
+        case "vestbuilderrepair" when args.Length >= 8:
+            return CreateVestBuilderRepairPackage(args[1], args[2], args[3], args[4],
+                args[5], args[6], args[7]);
+        case "vestselectorprobe" when args.Length >= 8:
+            return CreateVestSelectorProbePackage(args[1], args[2], args[3], args[4],
+                args[5], args[6], args[7]);
+        case "vesttagrepair" when args.Length >= 8:
+            return CreateVestTagRepairPackage(args[1], args[2], args[3], args[4],
+                args[5], args[6], args[7]);
+        case "vestentityrepair" when args.Length >= 10:
+            return CreateVestEntityRepairPackage(args[1], args[2], args[3],
+                args[4], args[5], args[6], args[7], args[8], args[9]);
+        case "vestorderrepair" when args.Length >= 8:
+            return CreateVestOrderRepairPackage(args[1], args[2], args[3],
+                args[4], args[5], args[6], args[7]);
+        case "vestidentityrepair" when args.Length >= 8:
+            return CreateVestIdentityRepairPackage(args[1], args[2], args[3],
+                args[4], args[5], args[6], args[7]);
+        case "tagmapcheck" when args.Length >= 4:
+            return CheckBuildTagColumnMaps(args[1], args[2], args[3]);
+        case "storeregistrycheck" when args.Length >= 3:
+            return CheckStoreRegistryInsertion(args[1], args[2]);
+        case "storeobjectcheck" when args.Length >= 4:
+            return CheckStoreObjectInfoClone(args[1], args[2], args[3]);
+        case "targetresolvecheck" when args.Length >= 3:
+            return CheckTargetResolution(args[1], args[2..]);
+        case "duprowcheck" when args.Length >= 5:
+            return CheckDuplicatedBuildTable(args[1], args[2], args[3], int.Parse(args[4]));
+        case "taglistcheck" when args.Length >= 5:
+            return CheckBuildTagInsertion(args[1], args[2], args[3], int.Parse(args[4]));
+        case "memwatch" when args.Length >= 3:
+            return ProcessMemoryWatch.Run(args[1], args[2..]);
+        case "memfind" when args.Length >= 3:
+            return ProcessMemoryWatch.Find(args[1], args[2..]);
+        case "memcontexts" when args.Length >= 4:
+            return ProcessMemoryWatch.CompareContexts(args[1], args[2..]);
+        case "memsave" when args.Length >= 4:
+            return ProcessMemoryWatch.Save(args[1], args[2], args[3..]);
+        case "memdiff" when args.Length >= 3:
+            return ProcessMemoryWatch.Compare(args[1], args[2]);
+        case "memread" when args.Length >= 4:
+            return ProcessMemoryWatch.Read(args[1], args[2], args[3]);
+        case "memregion" when args.Length >= 4:
+            return ProcessMemoryWatch.SaveRegion(args[1], args[2], args[3]);
+        case "memtrace" when args.Length >= 3:
+            return ProcessMemoryTrace.Run(args[1], args[2..]);
+        case "memtraceprobe":
+            return ProcessMemoryTrace.Probe();
         default:
             Console.WriteLine($"unknown command: {args[0]}");
             return 1;
@@ -611,13 +678,7 @@ static int PackData(string path, string output)
 static int SetResource(string path, string name, string input, string output)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no resource named " + name);
-        return 1;
-    }
+    Resource resource = RequireNamedResource(file, name);
 
     int before = resource.Data.Length;
     resource.Data = File.ReadAllBytes(input);
@@ -761,13 +822,7 @@ static int PutEntry(string forgePath, int index, string input, string? rebuiltPa
 static int GetResource(string path, string name, string output)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no resource named " + name);
-        return 1;
-    }
+    Resource resource = RequireNamedResource(file, name);
 
     File.WriteAllBytes(output, resource.Data);
     Console.WriteLine(ResourceTypes.NameOf(resource.ClassHash) + "  " + resource.Data.Length + " bytes -> " + output);
@@ -793,9 +848,8 @@ static int CensusMeshes(string forgePath, int limit)
         if (seen >= limit) break;
         if (entry.FileExtension != ".data") continue;
 
-        DataFile file;
-        try { using var s = new MemoryStream(archive.ReadEntry(entry)); file = DataFile.Read(s); }
-        catch { continue; }
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == Mesh.ClassHash))
         {
@@ -843,9 +897,8 @@ static int CheckGeometry(string forgePath, int limit)
         if (seen >= limit) break;
         if (entry.FileExtension != ".data") continue;
 
-        DataFile file;
-        try { using var s = new MemoryStream(archive.ReadEntry(entry)); file = DataFile.Read(s); }
-        catch { continue; }
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == Mesh.ClassHash))
         {
@@ -965,14 +1018,7 @@ static void Bump<T>(Dictionary<T, int> counter, T key) where T : notnull
 static int ShowMesh(string path, string name)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.ClassHash == Mesh.ClassHash
-        && r.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no mesh matching " + name);
-        return 1;
-    }
+    Resource resource = RequireMesh(file, name);
 
     var mesh = Mesh.Read(resource.Data);
 
@@ -1009,6 +1055,8 @@ static int ShowMesh(string path, string name)
     }
 
     Console.WriteLine("  materials " + string.Join(", ", mesh.Materials.Select(m => "0x" + m.MaterialId.ToString("X"))));
+    if (mesh.Bones.Count > 0)
+        Console.WriteLine("  bone ids  " + string.Join(", ", mesh.Bones.Select(b => "0x" + b.Name.ToString("X8"))));
     Console.WriteLine("  draws     " + mesh.Data.Standard.Count + " standard, " + mesh.Data.Shadow.Count + " shadow");
 
     foreach (var p in mesh.Data.Standard)
@@ -1205,9 +1253,8 @@ static int CheckParameters(string forgePath, int limit, string? dumpPath)
         if (seen >= limit) break;
         if (entry.FileExtension != ".data") continue;
 
-        DataFile file;
-        try { using var s = new MemoryStream(archive.ReadEntry(entry)); file = DataFile.Read(s); }
-        catch { continue; }
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == Material.ClassHash))
         {
@@ -1356,9 +1403,8 @@ static int CheckMaterials(string forgePath, int limit)
         if (seen >= limit) break;
         if (entry.FileExtension != ".data") continue;
 
-        DataFile file;
-        try { using var s = new MemoryStream(archive.ReadEntry(entry)); file = DataFile.Read(s); }
-        catch { continue; }
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
 
         // What this data file itself holds, which is where a mesh keeps its own
         // materials in nearly every case.
@@ -1465,14 +1511,7 @@ static string KindOf(string name)
 static int ExportFbx(string path, string name, string output, string? cachePath)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.ClassHash == Mesh.ClassHash
-        && r.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no mesh matching " + name);
-        return 1;
-    }
+    Resource resource = RequireMesh(file, name);
 
     var mesh = Mesh.Read(resource.Data);
     if (mesh.Geometry == GeometryKind.None)
@@ -1632,14 +1671,7 @@ static List<SkeletonBone>? FindSkeleton(
 static int ShowRanges(string path, string name)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.ClassHash == Mesh.ClassHash
-        && r.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no mesh matching " + name);
-        return 1;
-    }
+    Resource resource = RequireMesh(file, name);
 
     var mesh = Mesh.Read(resource.Data);
     int vertexCount = mesh.VertexStride > 0 ? mesh.VertexBuffer.Length / mesh.VertexStride : 0;
@@ -1812,16 +1844,8 @@ static int ListMips(string forgePath, string filter, int count)
         if (filter.Length > 0 && !entry.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
             continue;
 
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == TextureMap.ClassHash))
         {
@@ -1921,16 +1945,8 @@ static int ExportTextures(string forgePath, string filter, string outputFolder)
         if (!entry.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || entry.Name.Contains("_Mip"))
             continue;
 
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == TextureMap.ClassHash))
         {
@@ -2075,16 +2091,8 @@ static int TexCycle(string forgePath, int count)
         if (entry.FileExtension != ".data")
             continue;
 
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == TextureMap.ClassHash))
         {
@@ -2221,16 +2229,8 @@ static int Recode(string forgePath, int count)
         if (entry.FileExtension != ".data")
             continue;
 
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (var resource in file.Resources.Where(r => r.ClassHash == TextureMap.ClassHash))
         {
@@ -2489,13 +2489,7 @@ static int ReadBlobs(string path, string? outputDirectory)
 static int ShowTimeCycle(string path, string name, string? output)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no resource named " + name);
-        return 1;
-    }
+    Resource resource = RequireNamedResource(file, name);
 
     var cycle = TimeCycle.Read(resource.Data);
     string text = TimeCycleText.Write(cycle, name);
@@ -2516,13 +2510,7 @@ static int ShowTimeCycle(string path, string name, string? output)
 static int ApplyTimeCycle(string path, string name, string input, string output)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no resource named " + name);
-        return 1;
-    }
+    Resource resource = RequireNamedResource(file, name);
 
     var cycle = TimeCycle.Read(resource.Data);
     int changed = TimeCycleText.Apply(cycle, File.ReadAllLines(input));
@@ -3282,13 +3270,7 @@ static uint ParseHash(string text)
 static int ApplyGraphicsProfile(string path, string name, string profilePath, string? output)
 {
     var file = DataFile.Read(path);
-    var resource = file.Resources.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-
-    if (resource is null)
-    {
-        Console.WriteLine("no resource named " + name);
-        return 1;
-    }
+    Resource resource = RequireNamedResource(file, name);
 
     var cycle = TimeCycle.Read(resource.Data);
     var profile = GraphicsProfile.Load(profilePath);
@@ -3609,13 +3591,7 @@ static Dictionary<uint, (int Uses, Dictionary<CurveKind, int> Kinds, SortedSet<s
         if (entry.FileExtension != ".data")
             continue;
 
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
+        if (!TryReadDataFile(archive, entry, out DataFile file))
         {
             unreadable++;
             continue;
@@ -3939,16 +3915,8 @@ static int InspectBuildTables(string archivePath, string containerFilter, string
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (Resource resource in file.Resources.Where(resource =>
                      resource.ClassHash == BuildTable.ClassHash
@@ -3986,6 +3954,40 @@ static int InspectBuildTables(string archivePath, string containerFilter, string
     return found == 0 ? 1 : 0;
 }
 
+static bool TryReadDataFile(ForgeArchive archive, ForgeEntry entry, out DataFile file)
+{
+    if (ForgeDataFileReader.TryRead(archive, entry, out file, out string error))
+        return true;
+    Console.Error.WriteLine($"Could not read {Path.GetFileName(archive.FilePath)}/{entry.Name}{entry.FileExtension}: {error}");
+    return false;
+}
+
+static Resource RequireNamedResource(DataFile file, string name)
+{
+    List<Resource> matches = file.Resources
+        .Where(resource => resource.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    return matches.Count switch
+    {
+        1 => matches[0],
+        0 => throw new InvalidOperationException("No resource named " + name + "."),
+        _ => throw new InvalidOperationException($"Resource name {name} is ambiguous ({matches.Count} matches)."),
+    };
+}
+
+static Resource RequireMesh(DataFile file, string name)
+{
+    List<Resource> matches = file.Resources
+        .Where(resource => resource.ClassHash == Mesh.ClassHash && resource.Name.Contains(name, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    return matches.Count switch
+    {
+        1 => matches[0],
+        0 => throw new InvalidOperationException("No mesh matching " + name + "."),
+        _ => throw new InvalidOperationException($"Mesh filter {name} is ambiguous ({matches.Count} matches)."),
+    };
+}
+
 static int CheckDuplicatedBuildTable(string archivePath, string containerName,
     string tableName, int rowIndex)
 {
@@ -4019,16 +4021,8 @@ static int FindForgeReferences(string archivePath, string containerFilter,
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (Resource resource in file.Resources)
         {
@@ -4072,16 +4066,8 @@ static int FindForge32BitValues(string archivePath, string containerFilter,
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (Resource resource in file.Resources)
         {
@@ -4121,22 +4107,14 @@ static int FindForgeResourceNames(string archivePath, string containerFilter,
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (Resource resource in file.Resources.Where(resource =>
                      resource.Name.Contains(resourceFilter, StringComparison.OrdinalIgnoreCase)))
         {
             Console.WriteLine($"0x{resource.Id:X12}  {ResourceTypes.NameOf(resource.ClassHash),-32} "
-                + $"{resource.Name}  in {entry.Name}");
+                + $"{resource.Name}  in [{entry.Index}] {entry.Name}");
             found++;
         }
     }
@@ -4158,17 +4136,11 @@ static int CompareDatabaseResources(string archivePath, string containerFilter,
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            DataFile file = DataFile.Read(stream);
-            knownIds.UnionWith(file.Resources.Select(resource => resource.Id));
-            foreach (Resource resource in file.Resources.Where(resource => wanted.Contains(resource.Id)))
-                resources[resource.Id] = resource;
-        }
-        catch
-        {
-        }
+        if (!TryReadDataFile(archive, entry, out DataFile file))
+            continue;
+        knownIds.UnionWith(file.Resources.Select(resource => resource.Id));
+        foreach (Resource resource in file.Resources.Where(resource => wanted.Contains(resource.Id)))
+            resources[resource.Id] = resource;
     }
 
     if (!resources.TryGetValue(baselineId, out Resource? baseline))
@@ -4217,16 +4189,8 @@ static int PrintDatabaseResource(string archivePath, string containerFilter, str
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         Resource? resource = file.Resources.FirstOrDefault(resource => resource.Id == id);
         if (resource is null)
@@ -4267,16 +4231,8 @@ static int InspectBuildTagColumnMaps(string archivePath, string containerFilter,
     foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"
                  && entry.Name.Contains(containerFilter, StringComparison.OrdinalIgnoreCase)))
     {
-        DataFile file;
-        try
-        {
-            using var stream = new MemoryStream(archive.ReadEntry(entry));
-            file = DataFile.Read(stream);
-        }
-        catch
-        {
+        if (!TryReadDataFile(archive, entry, out DataFile file))
             continue;
-        }
 
         foreach (Resource resource in file.Resources.Where(resource => resource.ClassHash == mapClassHash))
         {
@@ -4604,5 +4560,404 @@ static int InspectArmoryMetadata(string gameFolder, IReadOnlyList<string> values
             Console.WriteLine($"0x{tag:X8}  no localized gameplay record");
         }
     }
+    return 0;
+}
+
+static int InspectArmoryRegistries(string gameFolder, string value)
+{
+    ulong memberId = ParseResourceId(value);
+    var archivePaths = ArchiveLocator.Find(gameFolder);
+    if (archivePaths.Count == 0)
+    {
+        Console.WriteLine("no forge archives in " + gameFolder);
+        return 1;
+    }
+
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths) ?? ArmoryIndex.Build(archivePaths);
+    IReadOnlyList<ArmoryObjectListEvidence> characterSmith = index.FindCharacterSmithRegistryEvidence(memberId);
+    foreach (ArmoryObjectListEvidence list in characterSmith)
+        Console.WriteLine($"verified CharacterSmith: 0x{list.OwnerResourceId:X12} class 0x{list.OwnerClassHash:X8} {list.OwnerName} | "
+            + $"{Path.GetFileName(list.ArchivePath)}/{list.EntryName} resource {list.ResourceIndex} | list header 0x{list.HeaderOffset:X}, "
+            + $"count offset 0x{list.CountOffset:X}, {list.Count} objects of class 0x{list.EntryClassHash:X8}");
+
+    IReadOnlyList<ArmoryRegistryEvidence> vests = index.FindVestRegistryEvidence(memberId);
+    foreach (ArmoryRegistryEvidence list in vests)
+        Console.WriteLine($"verified vests: 0x{list.OwnerResourceId:X12} class 0x{list.OwnerClassHash:X8} {list.OwnerName} | "
+            + $"{Path.GetFileName(list.ArchivePath)}/{list.EntryName} resource {list.ResourceIndex} | count offset 0x{list.CountOffset:X}, "
+            + $"{list.Members.Count} rows, layout {list.EntryStride}/+{list.ValueOffset}");
+
+    IReadOnlyList<ArmoryRegistryEvidence> unlockables = index.FindUnlockableRegistryEvidence(memberId);
+    foreach (ArmoryRegistryEvidence list in unlockables)
+        Console.WriteLine($"verified unlockables: 0x{list.OwnerResourceId:X12} class 0x{list.OwnerClassHash:X8} {list.OwnerName} | "
+            + $"{Path.GetFileName(list.ArchivePath)}/{list.EntryName} resource {list.ResourceIndex} | count offset 0x{list.CountOffset:X}, "
+            + $"{list.Members.Count} rows, layout {list.EntryStride}/+{list.ValueOffset}");
+
+    ReportVerifiedRegistry("database container", index.FindDatabaseContainerRegistryEvidence(memberId));
+    ReportVerifiedRegistry("loot", index.FindLootRegistryEvidence(memberId));
+    IReadOnlyList<ArmoryRegistryEvidence> store = index.FindStoreRegistryEvidence(memberId);
+    ReportVerifiedRegistry("store-object", store);
+
+    IReadOnlyList<ArmoryRegistryEvidence> evidence = index.FindRegistryEvidence(memberId);
+    foreach (var group in evidence.GroupBy(list => (list.OwnerResourceId, list.OwnerClassHash, list.OwnerName, list.ArchivePath, list.EntryIndex,
+                 list.EntryName, list.ResourceIndex)))
+    {
+        var candidates = group.ToList();
+        string layouts = string.Join(", ", candidates.Select(list => $"{list.EntryStride}/+{list.ValueOffset}").Distinct());
+        Console.WriteLine($"0x{group.Key.OwnerResourceId:X12} class 0x{group.Key.OwnerClassHash:X8} {group.Key.OwnerName} | "
+            + $"{Path.GetFileName(group.Key.ArchivePath)}/{group.Key.EntryName} resource {group.Key.ResourceIndex} | "
+            + $"{candidates.Count} candidate(s), layouts {layouts}, counts {candidates.Min(list => list.Members.Count)}-{candidates.Max(list => list.Members.Count)}");
+    }
+    Console.WriteLine($"{characterSmith.Count} verified CharacterSmith list(s), {vests.Count} verified vests table(s), {unlockables.Count} verified unlockables table(s), "
+        + $"{store.Count} verified store-object table(s), and "
+        + $"{evidence.Count} unverified binary list candidate(s) contain 0x{memberId:X12}");
+    return characterSmith.Count == 0 && vests.Count == 0 && unlockables.Count == 0 && store.Count == 0 && evidence.Count == 0 ? 1 : 0;
+
+    static void ReportVerifiedRegistry(string role, IReadOnlyList<ArmoryRegistryEvidence> lists)
+    {
+        foreach (ArmoryRegistryEvidence list in lists)
+            Console.WriteLine($"verified {role}: 0x{list.OwnerResourceId:X12} class 0x{list.OwnerClassHash:X8} {list.OwnerName} | "
+                + $"{Path.GetFileName(list.ArchivePath)}/{list.EntryName} resource {list.ResourceIndex} | count offset 0x{list.CountOffset:X}, "
+                + $"{list.Members.Count} rows, layout {list.EntryStride}/+{list.ValueOffset}");
+    }
+}
+
+static int CheckCharacterSmithInsertion(string gameFolder, string value)
+{
+    ulong templateRecordId = ParseResourceId(value);
+    var archivePaths = ArchiveLocator.Find(gameFolder);
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths) ?? ArmoryIndex.Build(archivePaths);
+    ulong newRecordId = 0x00FFFF000001;
+
+    ArmoryDatabaseResourceChange change = index.CreateCharacterSmithInsertion(templateRecordId, newRecordId);
+    Console.WriteLine($"0x{templateRecordId:X12} -> 0x{newRecordId:X12}: CharacterSmith insertion is structurally stable in memory; "
+        + $"{change.Data.Length:N0} bytes, no archive written");
+    return 0;
+}
+
+static int CheckVestRegistryInsertions(string gameFolder, string value)
+{
+    ulong templateRecordId = ParseResourceId(value);
+    var archivePaths = ArchiveLocator.Find(gameFolder);
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths) ?? ArmoryIndex.Build(archivePaths);
+    const ulong newRecordId = 0x00FFFF000001;
+    IReadOnlyList<ArmoryDatabaseResourceChange> changes = index.CreateVestRegistryInsertions(templateRecordId, newRecordId);
+    foreach (ArmoryDatabaseResourceChange change in changes)
+        Console.WriteLine($"verified in memory: {Path.GetFileName(change.ArchivePath)}/{change.EntryName} resource {change.ResourceIndex} {change.ResourceName}, {change.Data.Length:N0} bytes");
+    Console.WriteLine($"{changes.Count} proven registry resources accept 0x{newRecordId:X12}; no archive written");
+    return 0;
+}
+
+static int CheckVestAddPlan(string gameFolder, string archivePath, string modelPath,
+    string diffusePath, string normalPath, string mask1Path, int rowIndex)
+{
+    CharacterVestAddValidationResult result = CharacterVestAddValidator.Validate(gameFolder,
+        archivePath, rowIndex, "Virtus validation vest", "CODEX_VirtusValidation", modelPath,
+        new AttachmentTextureDraft(diffusePath, normalPath, "", mask1Path));
+    Console.WriteLine($"complete in-memory vest plan: {result.ConfigurationRows} configuration rows, "
+        + $"{result.LocalChanges} local compatibility changes, {result.DatabaseChanges} database changes, "
+        + $"{result.ResourceAdditions} data resources, {result.EntryAdditions} asset containers, "
+        + $"BuildTag 0x{result.GameplayTag:X8}, record 0x{result.GameplayRecordId:X12}; no archive written");
+    return 0;
+}
+
+static int InspectPrefetchReferences(string archivePath, string entryText,
+    IReadOnlyList<string> referenceTexts)
+{
+    ulong entryId = ParseResourceId(entryText);
+    ulong[] references = referenceTexts.Select(ParseResourceId).Distinct().ToArray();
+    using var archive = ForgeArchive.Open(archivePath);
+    ForgeEntry entry = archive.Entries.Single(candidate => candidate.Id == entryId);
+    ForgeEntry prefetchEntry = archive.Entries.Single(candidate =>
+        candidate is { Id: 145, Name: "PrefetchingFileInfos" });
+    byte[] prefetch = archive.ReadEntry(prefetchEntry);
+    byte[] block = PrefetchingFileInfos.ReadObjectBlock(prefetch, entryId);
+    Console.WriteLine($"{Path.GetFileName(archivePath)} | {entry.Name} | "
+        + $"0x{entry.Id:X12} | {block.Length} prefetch bytes");
+    foreach (ulong reference in references)
+    {
+        byte[] encoded = BitConverter.GetBytes(reference);
+        int count = 0;
+        for (int offset = 0; offset <= block.Length - encoded.Length; offset++)
+        {
+            if (!block.AsSpan(offset, encoded.Length).SequenceEqual(encoded))
+                continue;
+            count++;
+            offset += encoded.Length - 1;
+        }
+        Console.WriteLine($"  0x{reference:X12}: {count} exact occurrence(s)");
+    }
+    return 0;
+}
+
+static int CreateVestPackage(string gameFolder, string archivePath, string modelPath,
+    string diffusePath, string normalPath, string mask1Path, string projectFolder,
+    string packagePath, int rowIndex)
+{
+    CharacterVestPackageResult result = CharacterVestAddValidator.CreatePackage(gameFolder,
+        archivePath, rowIndex, "Virtus Vest", "VirtusVest", modelPath,
+        new AttachmentTextureDraft(diffusePath, normalPath, "", mask1Path),
+        projectFolder, packagePath, "Wildlands Toolkit", "1.0.0", "German");
+    CharacterVestAddValidationResult validation = result.Validation;
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to {result.PlannedChanges} changes in "
+        + $"{result.Archives} archives; {validation.ConfigurationRows} vest rows, "
+        + $"BuildTag 0x{validation.GameplayTag:X8}, record 0x{validation.GameplayRecordId:X12}; nothing installed");
+    return 0;
+}
+
+static int CreateVestRepairPackage(string gameFolder, string templateRecordValue,
+    string installedRecordName, string displayName, string languagePackage,
+    string projectFolder, string packagePath)
+{
+    CharacterVestRepairPackageResult result =
+        CharacterVestAddValidator.CreateInstalledItemRepairPackage(gameFolder,
+            ParseResourceId(templateRecordValue), installedRecordName, displayName,
+            languagePackage, projectFolder, packagePath, "Wildlands Toolkit", "1.0.1");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to {result.PlannedChanges} changes in "
+        + $"{result.Archives} archives; record 0x{result.GameplayRecordId:X12}, "
+        + $"string 0x{result.DisplayStringId:X8}, StoreObjectInfo 0x{result.StoreObjectInfoId:X12}, "
+        + $"loot configuration 0x{result.LootConfigurationId:X12}; nothing installed");
+    return 0;
+}
+
+static int CreateVestModelRepairPackage(string gameFolder, string characterArchivePath,
+    string templateRecordValue, string installedRecordName, string displayName,
+    string projectFolder, string packagePath)
+{
+    CharacterVestModelMirrorPackageResult result =
+        CharacterVestAddValidator.CreateInstalledModelMirrorPackage(gameFolder,
+            characterArchivePath, ParseResourceId(templateRecordValue),
+            installedRecordName, displayName, projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.2");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to {result.PlannedChanges} changes in "
+        + $"{result.Archives} archives; mirrored {result.MirroredContainers} character container(s) "
+        + $"and {result.MirroredBranchResources} private branch resources for record "
+        + $"0x{result.GameplayRecordId:X12}, BuildTag 0x{result.GameplayTag:X8}; nothing installed");
+    return 0;
+}
+
+static int CreateVestBuilderRepairPackage(string gameFolder,
+    string characterArchivePath, string templateRecordValue,
+    string installedRecordName, string displayName, string projectFolder,
+    string packagePath)
+{
+    CharacterVestBuilderTagPackageResult result =
+        CharacterVestAddValidator.CreateInstalledBuilderTagPackage(gameFolder,
+            characterArchivePath, ParseResourceId(templateRecordValue),
+            installedRecordName, displayName, projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.3");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to {result.PlannedChanges} changes in "
+        + $"{result.Archives} archives; {result.TargetBuilders} structurally matched sibling builder(s), "
+        + $"record 0x{result.GameplayRecordId:X12}, configuration BuildTag "
+        + $"0x{result.ConfigurationTag:X8}, gameplay BuildTag 0x{result.GameplayTag:X8}; nothing installed");
+    return 0;
+}
+
+static int CreateVestSelectorProbePackage(string gameFolder,
+    string characterArchivePath, string templateRecordValue,
+    string installedRecordName, string displayName, string projectFolder,
+    string packagePath)
+{
+    CharacterVestSelectorProbePackageResult result =
+        CharacterVestAddValidator.CreateInstalledSelectorIsolationPackage(
+            gameFolder, characterArchivePath,
+            ParseResourceId(templateRecordValue), installedRecordName,
+            displayName, projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.4");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to "
+        + $"{result.PlannedChanges} changes in {result.Archives} archives; "
+        + $"record 0x{result.GameplayRecordId:X12} now uses verified selectors "
+        + $"0x{result.MaleSelectorId:X12} and 0x{result.FemaleSelectorId:X12}; nothing installed");
+    return 0;
+}
+
+static int CreateVestTagRepairPackage(string gameFolder,
+    string characterArchivePath, string templateRecordValue,
+    string installedRecordName, string displayName, string projectFolder,
+    string packagePath)
+{
+    CharacterVestTagDictionaryPackageResult result =
+        CharacterVestAddValidator.CreateInstalledTagDictionaryPackage(
+            gameFolder, characterArchivePath,
+            ParseResourceId(templateRecordValue), installedRecordName,
+            displayName, projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.5");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to "
+        + $"{result.PlannedChanges} changes in {result.Archives} archives; "
+        + $"completed configuration BuildTag 0x{result.ConfigurationTag:X8} "
+        + $"and gameplay BuildTag 0x{result.GameplayTag:X8} for record "
+        + $"0x{result.GameplayRecordId:X12}; nothing installed");
+    return 0;
+}
+
+static int CreateVestEntityRepairPackage(string gameFolder,
+    string characterArchivePath, string templateRecordValue,
+    string installedRecordName, string displayName, string maleSelectorValue,
+    string femaleSelectorValue, string projectFolder, string packagePath)
+{
+    CharacterVestEntityBuilderPackageResult result =
+        CharacterVestAddValidator.CreateInstalledEntityBuilderReferencePackage(
+            gameFolder, characterArchivePath,
+            ParseResourceId(templateRecordValue), installedRecordName,
+            displayName, ParseResourceId(maleSelectorValue),
+            ParseResourceId(femaleSelectorValue), projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.6");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to "
+        + $"{result.PlannedChanges} changes in {result.Archives} archives; "
+        + $"registered {result.RegisteredContainers} character container(s) and restored "
+        + $"{result.RestoredModelTables} model table(s) for record "
+        + $"0x{result.GameplayRecordId:X12} with selectors "
+        + $"0x{result.MaleSelectorId:X12}/0x{result.FemaleSelectorId:X12}; nothing installed");
+    return 0;
+}
+
+static int CreateVestOrderRepairPackage(string gameFolder,
+    string characterArchivePath, string templateRecordValue,
+    string installedRecordName, string displayName, string projectFolder,
+    string packagePath)
+{
+    CharacterVestResourceOrderPackageResult result =
+        CharacterVestAddValidator.CreateInstalledOrderedBranchPackage(
+            gameFolder, characterArchivePath,
+            ParseResourceId(templateRecordValue), installedRecordName,
+            displayName, projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.7");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to "
+        + $"{result.PlannedChanges} changes in {result.Archives} archive; "
+        + $"record 0x{result.GameplayRecordId:X12} now routes through ordered "
+        + $"BuildTables 0x{result.ItemTableId:X12}/0x{result.TagTableId:X12}/"
+        + $"0x{result.ModelTableId:X12}; nothing installed");
+    return 0;
+}
+
+static int CreateVestIdentityRepairPackage(string gameFolder,
+    string characterArchivePath, string templateRecordValue,
+    string installedRecordName, string displayName, string projectFolder,
+    string packagePath)
+{
+    CharacterVestGameplayIdentityPackageResult result =
+        CharacterVestAddValidator.CreateInstalledGameplayIdentityPackage(
+            gameFolder, characterArchivePath,
+            ParseResourceId(templateRecordValue), installedRecordName,
+            displayName, projectFolder, packagePath,
+            "Wildlands Toolkit", "1.0.8");
+    Console.WriteLine($"created {result.PackagePath}");
+    Console.WriteLine($"project: {result.ProjectPath}");
+    Console.WriteLine($"{result.Operations} package operations compile to "
+        + $"{result.PlannedChanges} changes in {result.Archives} archives; "
+        + $"record 0x{result.GameplayRecordId:X12} changes its internal identity "
+        + $"from {result.PreviousInternalName} to {result.InternalName} in "
+        + $"{result.TargetCopies} installed copies; nothing installed");
+    return 0;
+}
+
+static int CheckBuildTagColumnMaps(string gameFolder, string templateValue, string newValue)
+{
+    IReadOnlyList<string> archivePaths = ArchiveLocator.Find(gameFolder);
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths)
+        ?? ArmoryIndex.Build(archivePaths);
+    uint templateTag = checked((uint)ParseResourceId(templateValue));
+    uint newTag = checked((uint)ParseResourceId(newValue));
+    IReadOnlyList<ArmoryDatabaseResourceChange> changes = index.CreateBuildTagColumnMapInsertions(templateTag, newTag);
+    foreach (ArmoryDatabaseResourceChange change in changes)
+        Console.WriteLine($"verified {Path.GetFileName(change.ArchivePath)}/{change.EntryName} resource {change.ResourceIndex} {change.ResourceName}");
+    return 0;
+}
+
+static int CheckStoreRegistryInsertion(string gameFolder, string value)
+{
+    ulong templateInfoId = ParseResourceId(value);
+    var archivePaths = ArchiveLocator.Find(gameFolder);
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths) ?? ArmoryIndex.Build(archivePaths);
+    const ulong newInfoId = 0x00FFFF000002;
+    ArmoryDatabaseResourceChange change = index.CreateStoreRegistryInsertion(templateInfoId, newInfoId);
+    Console.WriteLine($"0x{templateInfoId:X12} -> 0x{newInfoId:X12}: StoreObjectInfo registry insertion is structurally stable in memory; "
+        + $"{change.Data.Length:N0} bytes, no archive written");
+    return 0;
+}
+
+static int CheckStoreObjectInfoClone(string gameFolder, string infoValue, string recordValue)
+{
+    ulong templateInfoId = ParseResourceId(infoValue);
+    ulong templateRecordId = ParseResourceId(recordValue);
+    var archivePaths = ArchiveLocator.Find(gameFolder);
+    ArmoryIndex index = ArmoryIndex.Load(AppSettings.ArmoryCachePath, archivePaths) ?? ArmoryIndex.Build(archivePaths);
+    const ulong newInfoId = 0x00FFFF000002;
+    const ulong newRecordId = 0x00FFFF000001;
+    byte[] data = index.CreateStoreObjectInfoClone(templateInfoId, newInfoId, templateRecordId, newRecordId, "CodexStoreObjectInfoProbe");
+    Console.WriteLine($"0x{templateInfoId:X12}/0x{templateRecordId:X12} -> 0x{newInfoId:X12}/0x{newRecordId:X12}: "
+        + $"StoreObjectInfo clone is structurally stable in memory; {data.Length:N0} bytes, no archive written");
+    return 0;
+}
+
+static int CheckTargetResolution(string gameFolder, IReadOnlyList<string> values)
+{
+    IReadOnlyList<string> archivePaths = ArchiveLocator.Find(gameFolder);
+    ulong[] ids = values.Select(ParseResourceId).Distinct().ToArray();
+    var timer = Stopwatch.StartNew();
+    var progress = new Progress<string>(Console.WriteLine);
+    BuildTableTargetCatalog catalog = BuildTableTargetResolver.ResolveReferences(archivePaths, [], ids, progress);
+    timer.Stop();
+
+    foreach (ulong id in ids)
+        Console.WriteLine(catalog.ById.TryGetValue(id, out BuildTableTarget? target)
+            ? $"0x{id:X12}: {target.Name} ({target.Type}) in {target.Location}"
+            : $"0x{id:X12}: unresolved");
+    Console.WriteLine($"Resolved {catalog.ById.Count} of {ids.Length} requested assets across {archivePaths.Count} archives in {timer.Elapsed.TotalSeconds:0.000} s.");
+    return catalog.ById.Count == ids.Length ? 0 : 1;
+}
+
+static int CheckBuildTagInsertion(string archivePath, string containerName, string tableName, int rowIndex)
+{
+    using var archive = ForgeArchive.Open(archivePath);
+    ForgeEntry entry = archive.Entries.Single(entry => entry.FileExtension == ".data"
+        && string.Equals(entry.Name, containerName, StringComparison.OrdinalIgnoreCase));
+    using var stream = new MemoryStream(archive.ReadEntry(entry));
+    Resource resource = DataFile.Read(stream).Resources.Single(resource => resource.ClassHash == BuildTable.ClassHash
+        && string.Equals(resource.Name, tableName, StringComparison.OrdinalIgnoreCase));
+    BuildTableAsset original = BuildTable.Read(resource.Data);
+    BuildTableRow row = original.Rows[rowIndex];
+    BuildTableTagEntry template = row.PossibleTagEntries.LastOrDefault()
+        ?? throw new InvalidDataException($"Row {rowIndex} has no PossibleTags entry to clone.");
+    var used = original.BuildTagLists.SelectMany(list => list.Entries).Select(tag => tag.Value).Concat(original.Rows.Select(row => row.Tag)).ToHashSet();
+    uint newTag = 0x80000000;
+    while (!used.Add(newTag))
+        newTag++;
+
+    BuildTableAsset replacement = BuildTable.Read(resource.Data);
+    replacement.ReplacePossibleTag(rowIndex, template.Value, newTag);
+    BuildTableAsset replaced = BuildTable.Read(replacement.Write());
+    if (replaced.Rows[rowIndex].PossibleTagEntries.Count(entry => entry.Value == newTag) != 1
+        || replaced.Rows[rowIndex].PossibleTagEntries.Any(entry => entry.Value == template.Value))
+        throw new InvalidDataException("The exact PossibleTags replacement was not retained after parsing.");
+
+    do
+        newTag++;
+    while (!used.Add(newTag));
+    byte[] added = original.AddPossibleTag(rowIndex, row.PossibleTagEntries.Count - 1, newTag);
+    BuildTableAsset parsed = BuildTable.Read(added);
+    if (parsed.Id != original.Id || parsed.RowCount != original.RowCount || parsed.BuildTagLists.Sum(list => list.Entries.Count) != original.BuildTagLists.Sum(list => list.Entries.Count) + 1)
+        throw new InvalidDataException("The in-memory BuildTags insertion changed unrelated BuildTable structure.");
+    if (!parsed.BuildTagLists.SelectMany(list => list.Entries).Any(tag => tag.Value == newTag))
+        throw new InvalidDataException("The inserted BuildTag was not retained after parsing.");
+    if (!parsed.Write().AsSpan().SequenceEqual(added))
+        throw new InvalidDataException("The edited BuildTable changed during its second write.");
+
+    Console.WriteLine($"0x{resource.Id:X12} {resource.Name}: exact replacement and insertion after 0x{template.Value:X8} are parse/write/parse stable");
     return 0;
 }

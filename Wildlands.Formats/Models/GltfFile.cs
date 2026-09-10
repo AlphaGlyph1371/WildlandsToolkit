@@ -233,15 +233,7 @@ public static class GltfFile
             Put(binary, tangent.X); Put(binary, tangent.Y); Put(binary, tangent.Z); Put(binary, sign);
         }
 
-        accessors.Add(new JsonObject
-        {
-            ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = Float,
-            ["count"] = used.Count,
-            ["type"] = "VEC4",
-        });
-
-        return accessors.Count - 1;
+        return AddAccessor(binary, views, accessors, start, Float, used.Count, "VEC4");
     }
 
     static int Pairs(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices, Func<MeshVertex, Vector2> pick)
@@ -254,15 +246,7 @@ public static class GltfFile
             Put(binary, value.X); Put(binary, value.Y);
         }
 
-        accessors.Add(new JsonObject
-        {
-            ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = Float,
-            ["count"] = used.Count,
-            ["type"] = "VEC2",
-        });
-
-        return accessors.Count - 1;
+        return AddAccessor(binary, views, accessors, start, Float, used.Count, "VEC2");
     }
 
     static int Colours(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices)
@@ -278,16 +262,7 @@ public static class GltfFile
             binary.WriteByte((byte)(colour >> 24 & 0xFF));
         }
 
-        accessors.Add(new JsonObject
-        {
-            ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = Byte,
-            ["normalized"] = true,
-            ["count"] = used.Count,
-            ["type"] = "VEC4",
-        });
-
-        return accessors.Count - 1;
+        return AddAccessor(binary, views, accessors, start, Byte, used.Count, "VEC4", normalized: true);
     }
 
     static int Joints(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices, int from)
@@ -301,15 +276,7 @@ public static class GltfFile
                 binary.WriteByte(from + i < joints.Length ? joints[from + i] : (byte)0);
         }
 
-        accessors.Add(new JsonObject
-        {
-            ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = Byte,
-            ["count"] = used.Count,
-            ["type"] = "VEC4",
-        });
-
-        return accessors.Count - 1;
+        return AddAccessor(binary, views, accessors, start, Byte, used.Count, "VEC4");
     }
 
     static int Weights(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices, int from)
@@ -323,15 +290,7 @@ public static class GltfFile
                 Put(binary, from + i < weights.Length ? weights[from + i] / 255f : 0f);
         }
 
-        accessors.Add(new JsonObject
-        {
-            ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = Float,
-            ["count"] = used.Count,
-            ["type"] = "VEC4",
-        });
-
-        return accessors.Count - 1;
+        return AddAccessor(binary, views, accessors, start, Float, used.Count, "VEC4");
     }
 
     static int BindMatrices(MemoryStream binary, JsonArray views, JsonArray accessors, List<MeshBone> bones)
@@ -347,15 +306,7 @@ public static class GltfFile
             Put(binary, m.M41); Put(binary, m.M42); Put(binary, m.M43); Put(binary, m.M44);
         }
 
-        accessors.Add(new JsonObject
-        {
-            ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = Float,
-            ["count"] = bones.Count,
-            ["type"] = "MAT4",
-        });
-
-        return accessors.Count - 1;
+        return AddAccessor(binary, views, accessors, start, Float, bones.Count, "MAT4");
     }
 
     static int Indices(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> indices)
@@ -365,14 +316,21 @@ public static class GltfFile
         foreach (int index in indices)
             Put(binary, (uint)index);
 
-        accessors.Add(new JsonObject
+        return AddAccessor(binary, views, accessors, start, UnsignedInt, indices.Count, "SCALAR");
+    }
+
+    static int AddAccessor(MemoryStream binary, JsonArray views, JsonArray accessors, int start, int componentType, int count, string type, bool normalized = false)
+    {
+        var accessor = new JsonObject
         {
             ["bufferView"] = AddView(views, start, (int)binary.Length - start),
-            ["componentType"] = UnsignedInt,
-            ["count"] = indices.Count,
-            ["type"] = "SCALAR",
-        });
-
+            ["componentType"] = componentType,
+            ["count"] = count,
+            ["type"] = type,
+        };
+        if (normalized)
+            accessor["normalized"] = true;
+        accessors.Add(accessor);
         return accessors.Count - 1;
     }
 

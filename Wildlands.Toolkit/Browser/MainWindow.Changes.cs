@@ -415,8 +415,61 @@ public partial class MainWindow
         ChangeListButton.IsEnabled = !_loading && !_applying;
         int count = OperationCount();
         ChangeListButton.Content = count == 0 ? "Changes" : $"Changes ({count})";
+        RefreshQueuedAssetMarks();
         _changeListWindow?.Refresh();
         UpdateProjectUi();
+    }
+
+    void RefreshQueuedAssetMarks()
+    {
+        if (_showing is null)
+        {
+            foreach (BrowserItem item in _shown)
+                item.SetChangeMark(null);
+            return;
+        }
+
+        List<PendingChange> archiveChanges = _changes.Changes
+            .Where(change => change.ArchivePath.Equals(_showing.ArchivePath,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (BrowserItem item in _shown)
+            item.SetChangeMark(_showing.IsArchiveRoot
+                ? ContainerChangeMark(item, archiveChanges)
+                : ResourceChangeMark(item, archiveChanges, _showing.EntryIndex));
+    }
+
+    static string? ContainerChangeMark(BrowserItem item,
+        IReadOnlyList<PendingChange> archiveChanges)
+    {
+        if (archiveChanges.Any(change => change.EntryRemoval is { } removal
+                && (change.EntryIndex == item.Index || removal.Id == item.Id)))
+            return "REMOVED";
+
+        return archiveChanges.Any(change => change.EntryAddition is null
+                && change.EntryIndex == item.Index)
+            ? "EDITED"
+            : null;
+    }
+
+    static string? ResourceChangeMark(BrowserItem item,
+        IReadOnlyList<PendingChange> archiveChanges, int entryIndex)
+    {
+        IEnumerable<PendingChange> resourceChanges = archiveChanges.Where(change =>
+            change.EntryIndex == entryIndex
+            && change.EntryAddition is null
+            && change.EntryRemoval is null);
+
+        if (resourceChanges.Any(change => change.Removal is { } removal
+                && (change.ResourceIndex == item.Index || removal.Id == item.Id)))
+            return "REMOVED";
+
+        return resourceChanges.Any(change => change.Addition is null
+                && change.Removal is null
+                && change.ResourceIndex == item.Index)
+            ? "EDITED"
+            : null;
     }
 
     int OperationCount(bool pendingOnly = false)

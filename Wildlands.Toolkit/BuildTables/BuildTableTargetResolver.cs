@@ -281,6 +281,69 @@ public static class BuildTableTargetResolver
         return catalog;
     }
 
+    public static BuildTableTargetCatalog ResolveReferences(
+        IReadOnlyList<string> archivePaths,
+        IReadOnlyList<BuildTableTarget> localTargets,
+        IReadOnlyCollection<ulong> wantedIds,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var catalog = new BuildTableTargetCatalog();
+        foreach (BuildTableTarget target in localTargets.Where(target => target.Id != 0))
+            catalog.ById[target.Id] = target;
+
+        var unresolved = wantedIds
+            .Where(id => id != 0 && !catalog.ById.ContainsKey(id))
+            .ToHashSet();
+        for (int archiveIndex = 0; archiveIndex < archivePaths.Count && unresolved.Count > 0; archiveIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string path = archivePaths[archiveIndex];
+            progress?.Report($"Resolving referenced assets in {Path.GetFileName(path)} ({archiveIndex + 1} of {archivePaths.Count})…");
+
+            try
+            {
+                using var archive = ForgeArchive.Open(path);
+                string archiveName = Path.GetFileName(path);
+                var matches = unresolved
+                    .Select(id =>
+                    {
+                        ForgeEntry? exact = archive.FindById(id);
+                        return (Id: id, Entry: exact ?? archive.FindContaining(id), Exact: exact is not null);
+                    })
+                    .Where(match => match.Entry is not null)
+                    .GroupBy(match => match.Entry!.Index)
+                    .ToList();
+
+                foreach (var group in matches)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ForgeEntry entry = group.First().Entry!;
+                    var ids = group.Select(match => match.Id).ToHashSet();
+                    foreach (var match in group.Where(match => match.Exact))
+                        catalog.ById[match.Id] = new BuildTableTarget(match.Id, entry.Name, 0, "", entry.Name, archiveName);
+                    TryReadTargets(archive, entry, ids, catalog, archiveName);
+                    unresolved.RemoveWhere(catalog.ById.ContainsKey);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                throw new InvalidDataException($"Could not resolve BuildTable references from {path}.", exception);
+            }
+        }
+
+        catalog.Targets = catalog.ById.Values
+            .OrderBy(target => target.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(target => target.Id)
+            .ToList();
+        progress?.Report($"Resolved {catalog.ById.Count} referenced and local assets; {unresolved.Count} unresolved.");
+        return catalog;
+    }
+
     static InstalledIndex Installed(IReadOnlyList<string> archivePaths, IProgress<string>? progress, CancellationToken cancellationToken)
     {
         string key = CacheKey(archivePaths);
@@ -293,7 +356,7 @@ public static class BuildTableTargetResolver
         {
             cancellationToken.ThrowIfCancellationRequested();
             string path = archivePaths[archiveIndex];
-            progress?.Report($"Indexing asset names, {archiveIndex + 1} of {archivePaths.Count} archives…");
+            progress?.Report($"Indexing all assets in {Path.GetFileName(path)} ({archiveIndex + 1} of {archivePaths.Count})…");
 
             try
             {
@@ -316,6 +379,7 @@ public static class BuildTableTargetResolver
             }
         }
 
+        progress?.Report($"Sorting {built.ById.Count:N0} installed asset names…");
         built.Targets.AddRange(built.ById.Values
             .OrderBy(target => target.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(target => target.Id));

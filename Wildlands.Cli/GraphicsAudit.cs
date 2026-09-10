@@ -22,16 +22,10 @@ internal static class GraphicsAudit
             if (entry.FileExtension != ".data")
                 continue;
 
-            DataFile file;
-            try
-            {
-                using var stream = new MemoryStream(archive.ReadEntry(entry));
-                file = DataFile.Read(stream);
-            }
-            catch (Exception ex)
+            if (!ForgeDataFileReader.TryRead(archive, entry, out DataFile file, out string error))
             {
                 report.UnreadableDataFiles.Add(new AuditProblem(entry.Index,
-                    entry.Name + entry.FileExtension, ex.Message));
+                    entry.Name + entry.FileExtension, error));
                 continue;
             }
 

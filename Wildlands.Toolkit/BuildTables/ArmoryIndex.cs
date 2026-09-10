@@ -25,6 +25,163 @@ public sealed class ArmoryIndex
     internal IReadOnlyList<IndexedResource> DatabaseResources => _databaseResources;
     internal IReadOnlyList<AvailabilityListCandidate> AvailabilityLists => _availabilityLists;
 
+    public IReadOnlyList<ArmoryRegistryEvidence> FindRegistryEvidence(ulong memberId)
+    {
+        return _availabilityLists
+        .Where(list => list.RecordIds.Contains(memberId))
+        .Select(list =>
+        {
+            IndexedResource owner = _databaseResources[list.OwnerResourceIndex];
+            return new ArmoryRegistryEvidence(owner.Id, owner.Name, owner.ClassHash, owner.ArchivePath, owner.EntryIndex, owner.EntryName,
+                owner.ResourceIndex, list.CountOffset, list.EntryStride, list.ValueOffset, list.RecordIds);
+        })
+        .OrderBy(evidence => evidence.ArchivePath, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(evidence => evidence.EntryIndex)
+        .ThenBy(evidence => evidence.ResourceIndex)
+        .ThenBy(evidence => evidence.CountOffset)
+        .ToList();
+    }
+
+    public IReadOnlyList<ArmoryRegistryEvidence> FindUnlockableRegistryEvidence(ulong memberId)
+    {
+        return GunsmithAvailability.FindUnlockRegistries(this, memberId)
+            .Select(list => new ArmoryRegistryEvidence(list.Owner.Id, list.Owner.Name, list.Owner.ClassHash, list.Owner.ArchivePath, list.Owner.EntryIndex,
+                list.Owner.EntryName, list.Owner.ResourceIndex, list.CountOffset, list.EntryStride, list.ValueOffset, list.RecordIds))
+            .ToList();
+    }
+
+    public IReadOnlyList<ArmoryRegistryEvidence> FindVestRegistryEvidence(ulong memberId)
+    {
+        return GunsmithAvailability.FindVestRegistries(this, memberId)
+            .Select(list => new ArmoryRegistryEvidence(list.Owner.Id, list.Owner.Name, list.Owner.ClassHash, list.Owner.ArchivePath, list.Owner.EntryIndex,
+                list.Owner.EntryName, list.Owner.ResourceIndex, list.CountOffset, list.EntryStride, list.ValueOffset, list.RecordIds))
+            .ToList();
+    }
+
+    public IReadOnlyList<ArmoryObjectListEvidence> FindCharacterSmithRegistryEvidence(ulong memberId)
+    {
+        return CharacterSmithRegistry.Find(this, memberId)
+            .Select(list => new ArmoryObjectListEvidence(list.Owner.Id, list.Owner.Name, list.Owner.ClassHash, list.Owner.ArchivePath, list.Owner.EntryIndex,
+                list.Owner.EntryName, list.Owner.ResourceIndex, list.HeaderOffset, list.CountOffset, list.Entries.Count,
+                CharacterSmithRegistry.StructuredEntryClassHash))
+            .ToList();
+    }
+
+    public ArmoryDatabaseResourceChange CreateCharacterSmithInsertion(ulong templateRecordId, ulong newRecordId)
+    {
+        if (newRecordId == 0 || _databaseResources.Any(resource => resource.Id == newRecordId))
+            throw new InvalidOperationException($"CharacterSmith record ID 0x{newRecordId:X12} is zero or already used.");
+        CharacterSmithRegistryList list = CharacterSmithRegistry.Find(this, templateRecordId).Single();
+        byte[] data = CharacterSmithRegistry.InsertAfter(list, templateRecordId, newRecordId);
+        return new ArmoryDatabaseResourceChange(list.Owner.ArchivePath, list.Owner.EntryIndex, list.Owner.EntryName, list.Owner.ResourceIndex, list.Owner.Name, data);
+    }
+
+    public IReadOnlyList<ArmoryDatabaseResourceChange> CreateVestRegistryInsertions(ulong templateRecordId, ulong newRecordId)
+    {
+        if (newRecordId == 0 || _databaseResources.Any(resource => resource.Id == newRecordId))
+            throw new InvalidOperationException($"Vest record ID 0x{newRecordId:X12} is zero or already used.");
+
+        GunsmithAvailabilityList vests = GunsmithAvailability.FindVestRegistries(this, templateRecordId).Single();
+        GunsmithAvailabilityList databaseContainer = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateRecordId).Single();
+        GunsmithAvailabilityList unlockables = GunsmithAvailability.FindUnlockRegistries(this, templateRecordId).Single();
+        var changes = new List<ArmoryDatabaseResourceChange> { CreateCharacterSmithInsertion(templateRecordId, newRecordId) };
+        changes.AddRange(GunsmithAvailability.InsertAfterTemplates([(vests, templateRecordId, newRecordId)]));
+        changes.AddRange(GunsmithAvailability.InsertAfterTemplates([(databaseContainer, templateRecordId, newRecordId)]));
+        changes.AddRange(GunsmithAvailability.InsertAfterTemplates([(unlockables, templateRecordId, newRecordId)]));
+
+        if (changes.Count != 4 || changes.Select(change => (change.ArchivePath, change.EntryIndex, change.ResourceIndex)).Distinct().Count() != changes.Count)
+            throw new InvalidDataException("The vest registry insertion did not produce four independent resource changes.");
+        return changes;
+    }
+
+    internal IReadOnlyList<ArmoryDatabaseResourceChange> CreateVestRegistryInsertions(
+        ulong templateRecordId, ulong newRecordId, ulong templateLootId, ulong newLootId)
+    {
+        if (newRecordId == 0 || newLootId == 0
+            || _databaseResources.Any(resource => resource.Id == newRecordId || resource.Id == newLootId))
+            throw new InvalidOperationException("The new vest record or loot-configuration ID is zero or already used.");
+
+        GunsmithAvailabilityList vests = GunsmithAvailability.FindVestRegistries(this, templateRecordId).Single();
+        GunsmithAvailabilityList recordDatabase = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateRecordId).Single();
+        GunsmithAvailabilityList lootDatabase = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateLootId).Single();
+        GunsmithAvailabilityList unlockables = GunsmithAvailability.FindUnlockRegistries(this, templateRecordId).Single();
+        var insertions = new List<(GunsmithAvailabilityList List, ulong TemplateId, ulong NewId)>
+        {
+            (vests, templateRecordId, newRecordId),
+            (recordDatabase, templateRecordId, newRecordId),
+            (lootDatabase, templateLootId, newLootId),
+            (unlockables, templateRecordId, newRecordId),
+        };
+
+        var changes = new List<ArmoryDatabaseResourceChange>
+        {
+            CreateCharacterSmithInsertion(templateRecordId, newRecordId),
+        };
+        changes.AddRange(GunsmithAvailability.InsertAfterTemplates(insertions));
+        if (changes.Select(change => (change.ArchivePath, change.EntryIndex, change.ResourceIndex)).Distinct().Count() != changes.Count)
+            throw new InvalidDataException("The complete vest registry insertion produced overlapping resource changes.");
+        return changes;
+    }
+
+    public ArmoryDatabaseResourceChange CreateStoreRegistryInsertion(ulong templateInfoId, ulong newInfoId)
+    {
+        if (newInfoId == 0 || _databaseResources.Any(resource => resource.Id == newInfoId))
+            throw new InvalidOperationException($"StoreObjectInfo ID 0x{newInfoId:X12} is zero or already used.");
+        GunsmithAvailabilityList store = GunsmithAvailability.FindStoreRegistries(this, templateInfoId).Single();
+        return GunsmithAvailability.InsertAfterTemplates([(store, templateInfoId, newInfoId)]).Single();
+    }
+
+    internal ArmoryDatabaseResourceChange CreateDatabaseContainerInsertion(ulong templateId, ulong newId)
+    {
+        if (newId == 0 || _databaseResources.Any(resource => resource.Id == newId))
+            throw new InvalidOperationException($"Database resource ID 0x{newId:X12} is zero or already used.");
+        GunsmithAvailabilityList container = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateId).Single();
+        return GunsmithAvailability.InsertAfterTemplates([(container, templateId, newId)]).Single();
+    }
+
+    internal ArmoryDatabaseResourceChange CreateStoreRegistryReplacement(ulong oldInfoId, ulong newInfoId)
+    {
+        if (newInfoId == 0 || _databaseResources.Any(resource => resource.Id == newInfoId))
+            throw new InvalidOperationException($"StoreObjectInfo ID 0x{newInfoId:X12} is zero or already used.");
+        GunsmithAvailabilityList store = GunsmithAvailability.FindStoreRegistries(this, oldInfoId).Single();
+        var members = store.RecordIds.Select(id => id == oldInfoId ? newInfoId : id).ToList();
+        if (members.Count(id => id == newInfoId) != 1 || members.Contains(oldInfoId))
+            throw new InvalidDataException("The StoreDB replacement did not produce exactly one corrected StoreObjectInfo reference.");
+        byte[] data = GunsmithAvailability.RewriteMembers(store, members);
+        return new ArmoryDatabaseResourceChange(store.Owner.ArchivePath, store.Owner.EntryIndex,
+            store.Owner.EntryName, store.Owner.ResourceIndex, store.Owner.Name, data);
+    }
+
+    public IReadOnlyList<ArmoryDatabaseResourceChange> CreateBuildTagColumnMapInsertions(uint templateTag, uint newTag)
+        => AttachmentAddPipeline.BuildTagColumnMapChanges(this, templateTag, newTag);
+
+    public byte[] CreateStoreObjectInfoClone(ulong templateInfoId, ulong newInfoId, ulong expectedTemplateRecordId, ulong newRecordId, string newName)
+    {
+        if (newInfoId == 0 || _databaseResources.Any(resource => resource.Id == newInfoId))
+            throw new InvalidOperationException($"StoreObjectInfo ID 0x{newInfoId:X12} is zero or already used.");
+        if (newRecordId == 0 || _databaseResources.Any(resource => resource.Id == newRecordId))
+            throw new InvalidOperationException($"Gameplay-record ID 0x{newRecordId:X12} is zero or already used.");
+
+        IndexedResource template = _databaseResources.LastOrDefault(resource => resource.Id == templateInfoId && resource.ClassHash == StoreObjectInfo.ClassHash)
+            ?? throw new InvalidOperationException($"StoreObjectInfo 0x{templateInfoId:X12} was not found in the indexed game database.");
+        StoreObjectInfo info = StoreObjectInfo.Parse(template.Data, templateInfoId);
+        if (info.RecordId != expectedTemplateRecordId)
+            throw new InvalidDataException($"StoreObjectInfo 0x{templateInfoId:X12} references 0x{info.RecordId:X12}, not 0x{expectedTemplateRecordId:X12}.");
+        return info.Rewrite(template.Data, newInfoId, newRecordId, newName);
+    }
+
+    public IReadOnlyList<ArmoryRegistryEvidence> FindDatabaseContainerRegistryEvidence(ulong memberId) => ToRegistryEvidence(GunsmithAvailability.FindDatabaseContainerRegistries(this, memberId));
+
+    public IReadOnlyList<ArmoryRegistryEvidence> FindLootRegistryEvidence(ulong memberId) => ToRegistryEvidence(GunsmithAvailability.FindLootRegistries(this, memberId));
+
+    public IReadOnlyList<ArmoryRegistryEvidence> FindStoreRegistryEvidence(ulong storeObjectInfoId) => ToRegistryEvidence(GunsmithAvailability.FindStoreRegistries(this, storeObjectInfoId));
+
+    static IReadOnlyList<ArmoryRegistryEvidence> ToRegistryEvidence(IEnumerable<GunsmithAvailabilityList> lists)
+    {
+        return lists.Select(list => new ArmoryRegistryEvidence(list.Owner.Id, list.Owner.Name, list.Owner.ClassHash, list.Owner.ArchivePath, list.Owner.EntryIndex,
+            list.Owner.EntryName, list.Owner.ResourceIndex, list.CountOffset, list.EntryStride, list.ValueOffset, list.RecordIds)).ToList();
+    }
+
     public static ArmoryIndex Build(IReadOnlyList<string> archivePaths, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         var index = new ArmoryIndex { Fingerprint = CreateFingerprint(archivePaths) };
@@ -69,9 +226,9 @@ public sealed class ArmoryIndex
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
-                // A missing optional archive must not make the installed game unusable
+                throw new InvalidDataException($"Could not index armory data from {archivePath}.", ex);
             }
         }
 
@@ -87,9 +244,9 @@ public sealed class ArmoryIndex
                     if (wantedStrings.Contains(pair.Key))
                         strings[pair.Key] = pair.Value;
             }
-            catch
+            catch (Exception ex)
             {
-                // Keep the remaining intact language packages available
+                throw new InvalidDataException($"Could not parse the installed {package} localization package.", ex);
             }
         }
 
@@ -353,6 +510,32 @@ public sealed record ArmoryDatabaseResourceChange(
     string ResourceName,
     byte[] Data);
 
+public sealed record ArmoryRegistryEvidence(
+    ulong OwnerResourceId,
+    string OwnerName,
+    uint OwnerClassHash,
+    string ArchivePath,
+    int EntryIndex,
+    string EntryName,
+    int ResourceIndex,
+    int CountOffset,
+    int EntryStride,
+    int ValueOffset,
+    IReadOnlyList<ulong> Members);
+
+public sealed record ArmoryObjectListEvidence(
+    ulong OwnerResourceId,
+    string OwnerName,
+    uint OwnerClassHash,
+    string ArchivePath,
+    int EntryIndex,
+    string EntryName,
+    int ResourceIndex,
+    int HeaderOffset,
+    int CountOffset,
+    int Count,
+    uint EntryClassHash);
+
 public sealed record ArmoryArchiveResourceAddition(
     string ArchivePath,
     int EntryIndex,
@@ -361,7 +544,8 @@ public sealed record ArmoryArchiveResourceAddition(
     uint ClassHash,
     string ResourceName,
     byte[] Header,
-    byte[] Data);
+    byte[] Data,
+    ulong InsertAfterResourceId = 0);
 
 public sealed record ArmoryArchiveEntryAddition(
     string ArchivePath,

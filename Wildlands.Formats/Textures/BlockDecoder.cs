@@ -170,8 +170,8 @@ public static class BlockDecoder
         ushort c1 = (ushort)(block[2] | (block[3] << 8));
 
         Span<byte> colors = stackalloc byte[16];
-        WriteRgb565(colors, 0, c0);
-        WriteRgb565(colors, 1, c1);
+        Rgb565.WriteBgra(colors, 0, c0);
+        Rgb565.WriteBgra(colors, 1, c1);
 
         bool fourColor = c0 > c1 || !allowTransparency;
 
@@ -207,16 +207,4 @@ public static class BlockDecoder
         }
     }
 
-    // Writes one RGB565 colour as BGRA at slot * 4
-    static void WriteRgb565(Span<byte> target, int slot, ushort value)
-    {
-        int r = (value >> 11) & 0x1F;
-        int g = (value >> 5) & 0x3F;
-        int b = value & 0x1F;
-
-        target[slot * 4 + 0] = (byte)((b << 3) | (b >> 2));
-        target[slot * 4 + 1] = (byte)((g << 2) | (g >> 4));
-        target[slot * 4 + 2] = (byte)((r << 3) | (r >> 2));
-        target[slot * 4 + 3] = 255;
-    }
 }

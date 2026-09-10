@@ -224,6 +224,7 @@ public sealed partial class ModProject
             operation.Kind = ModOperationKind.AddResource;
             operation.ResourceId = addition.Id;
             operation.ResourceClassHash = addition.ClassHash;
+            operation.InsertAfterResourceId = addition.InsertAfterResourceId;
             SetOrUpdate(operation, change.Data, addition.Header, null, null);
             return operation.Key;
         }
@@ -465,6 +466,7 @@ public sealed partial class ModProject
         EntryName = source.EntryName,
         ResourceId = source.ResourceId,
         ResourceClassHash = source.ResourceClassHash,
+        InsertAfterResourceId = source.InsertAfterResourceId,
         ResourceName = source.ResourceName,
         BaseSha256 = source.BaseSha256,
         DeployedSha256 = source.DeployedSha256,
