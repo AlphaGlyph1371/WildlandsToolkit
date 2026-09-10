@@ -333,7 +333,7 @@
                         <GridViewColumn Header="Name" Width="290">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
-                                    <Grid Width="270">
+                                    <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="24"/>
                                             <ColumnDefinition Width="*"/>
