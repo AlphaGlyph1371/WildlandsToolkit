@@ -102,8 +102,6 @@ internal static class CharacterItemAddPipeline
         IReadOnlyList<string>? localizationPackages = null)
     {
         ArgumentNullException.ThrowIfNull(index);
-        if (!draft.ImportModel)
-            throw new InvalidOperationException("A new vest needs an imported model. The original game vest remains untouched.");
         if (index.DatabaseResources.Any(resource => string.Equals(resource.Name, draft.InternalName, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A gameplay resource named {draft.InternalName} already exists.");
 
@@ -138,7 +136,7 @@ internal static class CharacterItemAddPipeline
         var previewResources = new List<Resource>();
         var selectorMap = new Dictionary<ulong, ulong>();
         var sharedTextureIds = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
-        for (int branch = 0; branch < template.ModelSelectorIds.Count; branch++)
+        for (int branch = 0; draft.ImportModel && branch < template.ModelSelectorIds.Count; branch++)
         {
             progress?.Report(branch == 0
                 ? "Building the male model, materials and textures…"
@@ -2155,8 +2153,10 @@ public static class CharacterVestAddValidator
         BuildTableGameMetadata metadata = BuildTableGameMetadataResolver.Build(index, [],
             preferredLanguagePackage: languagePackage, buildTags: tags);
         var draft = new AddAttachmentDraft(displayName, internalName,
-            new AddAttachmentTemplate(templateRowIndex, displayName, internalName), true, modelPath,
-            true, false, false, true, textures);
+            new AddAttachmentTemplate(templateRowIndex, displayName, internalName),
+            modelPath.Length > 0, modelPath,
+            true, false, false, true,
+            modelPath.Length > 0 ? textures : new AttachmentTextureDraft("", "", "", ""));
         CharacterItemAddPlan plan = CharacterItemAddPipeline.BuildVest(index, configuration,
             templateRowIndex, draft, metadata.LanguagePackage, archivePaths, localResources,
             localIndexes, characterArchivePath, entry.Index, entry.Name,
