@@ -1269,9 +1269,10 @@ internal static class AttachmentAddPipeline
         var customResources = new List<Resource>();
         var customMaterialIds = new List<ulong>();
         ulong customResourceOwner = 0;
+        var clonedTextureIds = new Dictionary<ulong, ulong>();
         if (draft.Textures.Any)
         {
-            customResources = CloneSurfaceResources(draft, geometry, files, archivePaths, localArchivePath, usedIds, sharedTextureIds, additions, out customMaterialIds, out customResourceOwner);
+            customResources = CloneSurfaceResources(draft, geometry, files, archivePaths, localArchivePath, usedIds, sharedTextureIds, additions, clonedTextureIds, out customMaterialIds, out customResourceOwner);
         }
 
         var meshes = new Dictionary<ulong, ClonedMesh>();
@@ -1356,8 +1357,11 @@ internal static class AttachmentAddPipeline
             rebuilt.Write(output);
             byte[] info = (byte[])file.Info.Clone();
             BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4), Candidate64("forge-entry:" + draft.InternalName + ":" + file.EntryName, 0));
+            var prefetchMap = new Dictionary<ulong, ulong>(map);
+            foreach (var pair in clonedTextureIds)
+                prefetchMap[pair.Key] = pair.Value;
             additions.Add(new ArmoryArchiveEntryAddition(localArchivePath, newEntryId, Rename(file.EntryName, source.EntryName, draft.InternalName),
-                rebuilt.Resources[0].ClassHash, info, output.ToArray(), file.PrefetchBlock));
+                rebuilt.Resources[0].ClassHash, info, output.ToArray(), RemapResourceIds(file.PrefetchBlock, prefetchMap)));
         }
 
         return new ModelClonePlan(map[root.Id], additions, resources);
@@ -1365,7 +1369,8 @@ internal static class AttachmentAddPipeline
 
     static List<Resource> CloneSurfaceResources(AddAttachmentDraft draft, ImportedGeometry geometry, IReadOnlyList<ModelFile> files,
         IReadOnlyList<string> archivePaths, string localArchivePath, HashSet<ulong> usedIds, IDictionary<string, ulong> sharedTextureIds,
-        List<ArmoryArchiveEntryAddition> additions, out List<ulong> materialIds, out ulong resourceOwner)
+        List<ArmoryArchiveEntryAddition> additions, IDictionary<ulong, ulong> clonedTextureIds,
+        out List<ulong> materialIds, out ulong resourceOwner)
     {
         var sourceResources = files.SelectMany(file => file.File.Resources).ToList();
         ModelFile owner = files.FirstOrDefault(file => file.File.Resources.Any(resource => resource.ClassHash == Material.ClassHash))
@@ -1409,6 +1414,7 @@ internal static class AttachmentAddPipeline
                     sharedTextureIds[key] = textureId;
                 }
                 textureMap[templateTextureId] = textureId;
+                clonedTextureIds[templateTextureId] = textureId;
             }
 
             ulong setId = Allocate64($"texture-set:{draft.InternalName}:{range}", usedIds);
@@ -1491,7 +1497,7 @@ internal static class AttachmentAddPipeline
             byte[] info = (byte[])file.Info.Clone();
             BinaryPrimitives.WriteUInt64LittleEndian(info.AsSpan(4), Candidate64($"forge-entry:{internalName}:{slot}:{file.EntryName}", 0));
             additions.Add(new ArmoryArchiveEntryAddition(targetArchivePath, newEntryId, Rename(file.EntryName, source.EntryName, newRootName),
-                rebuilt.Resources[0].ClassHash, info, output.ToArray(), file.PrefetchBlock));
+                rebuilt.Resources[0].ClassHash, info, output.ToArray(), RemapResourceIds(file.PrefetchBlock, map)));
         }
         return map[templateTextureId];
     }
