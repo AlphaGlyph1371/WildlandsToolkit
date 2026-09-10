@@ -144,7 +144,6 @@ BuildTable resources can still be inspected, extracted and replaced as raw resou
 - Editor for `TimeOfDayPropertyControllerData` and `WeatherPropertyControllerData`
 - Day curves with their control points: editable, filterable, resettable
 - The same curves as editable text, out and back in without losing a byte
-- External JSON graphics profiles can be previewed on the exact open controller before they join the change list
 
 ### Command line
 
