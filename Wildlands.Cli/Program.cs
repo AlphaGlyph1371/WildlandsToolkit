@@ -4807,6 +4807,12 @@ static int CreateVestPackage(string gameFolder, string archivePath, string model
 {
     if (modelPath == "-")
         modelPath = "";
+    if (diffusePath == "-")
+        diffusePath = "";
+    if (normalPath == "-")
+        normalPath = "";
+    if (mask1Path == "-")
+        mask1Path = "";
     CharacterVestPackageResult result = CharacterVestAddValidator.CreatePackage(gameFolder,
         archivePath, rowIndex, displayName, internalName, modelPath,
         new AttachmentTextureDraft(diffusePath, normalPath, "", mask1Path),
