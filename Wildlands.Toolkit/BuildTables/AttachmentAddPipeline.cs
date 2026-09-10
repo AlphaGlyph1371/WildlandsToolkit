@@ -1330,8 +1330,10 @@ internal static class AttachmentAddPipeline
 
             if (customResources.Count > 0)
             {
+                bool carriedSurfaces = rebuilt.Resources.Any(resource =>
+                    resource.ClassHash == Material.ClassHash || resource.ClassHash == TextureSet.ClassHash);
                 rebuilt.Resources.RemoveAll(resource => resource.ClassHash == Material.ClassHash || resource.ClassHash == TextureSet.ClassHash);
-                if (file.EntryId == customResourceOwner)
+                if (carriedSurfaces)
                 {
                     rebuilt.Resources.AddRange(customResources.Select(resource => new Resource
                     {
@@ -1341,7 +1343,8 @@ internal static class AttachmentAddPipeline
                         Header = (byte[])resource.Header.Clone(),
                         Data = (byte[])resource.Data.Clone(),
                     }));
-                    resources.AddRange(customResources);
+                    if (file.EntryId == customResourceOwner)
+                        resources.AddRange(customResources);
                 }
             }
 
