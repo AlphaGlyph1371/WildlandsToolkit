@@ -280,7 +280,8 @@ internal static class CharacterItemAddPipeline
         databaseChanges.Add(index.CreateStoreRegistryInsertion(infoSource.Id, infoId));
         databaseChanges.AddRange(AttachmentAddPipeline.BuildTagDictionaryChanges(index,
             [(template.ConfigurationTag, configurationTag),
-                (template.GameplayTag, gameplayTag)]));
+                (template.GameplayTag, gameplayTag),
+                .. rowTagMap.Select(pair => (pair.Key, pair.Value))]));
 
         progress?.Report("Adding the in-game display label and validating the completed plan…");
         IReadOnlyList<string> requestedPackages = localizationPackages
