@@ -93,6 +93,8 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  animinfo <file.data> [filter]  what an animation holds, track by track");
     Console.WriteLine("  animcycle <folder|file.data>  read and rewrite every Animation byte for byte");
     Console.WriteLine("  animvalues <folder with .data>  check decoded rotations, key times and smoothness");
+    Console.WriteLine("  skycycle <folder with .data>  read and rewrite every LayeredSky byte for byte");
+    Console.WriteLine("  skyout <file.data> <outdir>  write every sky layer as a dds file");
     Console.WriteLine("  classdump <folder with .data> <class> <outdir> [count]  write resources of one class to disk");
     Console.WriteLine("  classcensus <folder with .data>  count every resource class and how many bytes it holds");
     Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
@@ -287,6 +289,10 @@ try
             return ShowAnimation(args[1], args.Length >= 3 ? args[2] : "");
         case "animcycle" when args.Length >= 2:
             return CycleAnimations(args[1]);
+        case "skycycle" when args.Length >= 2:
+            return CycleLayeredSkies(args[1]);
+        case "skyout" when args.Length >= 3:
+            return ExportLayeredSky(args[1], args[2]);
         case "animpose" when args.Length >= 2:
             return PoseAnimation(args[1], args.Length >= 3 ? args[2] : "");
         case "animvalues" when args.Length >= 2:
