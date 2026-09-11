@@ -90,3 +90,5 @@ public sealed class ForgeEntry
 }
 
 public sealed record ForgeEntryAddition(ulong Id, string Name, uint Extension, byte[] InfoTemplate, byte[] Data, byte[] PrefetchBlock);
+
+public sealed record ForgeNewEntry(ulong Id, string Name, uint Extension, ulong Umac, byte[] Data, byte[] PrefetchBlock);

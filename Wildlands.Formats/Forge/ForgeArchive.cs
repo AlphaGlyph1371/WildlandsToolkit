@@ -12,6 +12,13 @@ public sealed class ForgeArchive : IDisposable
     const string Magic = "scimitar";
     const int SupportedVersion = 27;
     const long FileAlignment = 32768;
+    const int HeaderSize = 1050;
+    const long FileSetOffset = 1094;
+    const int FileSetSize = 48;
+    const int LocationSize = 20;
+    const int TrailingSetSize = 176;
+    const ulong PrefetchEntryId = 145;
+    const string LostAndFound = "_Lost&Found";
 
     readonly Stream _stream;
     readonly BinaryReader _reader;
@@ -46,6 +53,114 @@ public sealed class ForgeArchive : IDisposable
         var archive = new ForgeArchive(stream, path);
         archive.ReadHeader();
         return archive;
+    }
+
+    public static void Create(string path, IReadOnlyList<ForgeNewEntry> entries,
+        string identity, uint timestamp)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity);
+        if (entries.Count == 0)
+            throw new InvalidDataException("A new Forge archive needs at least one entry.");
+        var all = entries.ToList();
+        all.Add(new ForgeNewEntry(GlobalMetaFile.EntryId, "GlobalMetaFile", 0,
+            Umac(GlobalMetaFile.EntryId, identity), GlobalMetaFile.CreatePatch(identity), [0, 0, 0, 0]));
+        all.Add(new ForgeNewEntry(PrefetchEntryId, "PrefetchingFileInfos", 0,
+            Umac(PrefetchEntryId, identity),
+            PrefetchingFileInfos.Create(all.Select(entry => (entry.Id, entry.PrefetchBlock)).ToList()),
+            [0, 0, 0, 0]));
+        if (all.Select(entry => entry.Id).Distinct().Count() != all.Count)
+            throw new InvalidDataException("A new Forge archive would hold the same entry id twice.");
+
+        int count = all.Count;
+        int limit = count + 1;
+        long locationTable = FileSetOffset + FileSetSize;
+        long infoTable = locationTable + (long)limit * LocationSize;
+        long infoEnd = infoTable + (long)limit * ForgeEntry.InfoSize;
+        long dataStart = infoEnd + (long)limit * TrailingSetSize + 1;
+
+        byte[] prefix = new byte[dataStart];
+        Encoding.ASCII.GetBytes(Magic).CopyTo(prefix, 0);
+        WriteUInt32(prefix, 9, SupportedVersion);
+        WriteInt64(prefix, 13, HeaderSize);
+        WriteInt32(prefix, 21, 16);
+        WriteInt32(prefix, 29, 1);
+
+        WriteInt32(prefix, HeaderSize, count);
+        WriteInt32(prefix, HeaderSize + 4, 2);
+        WriteInt64(prefix, HeaderSize + 20, -1);
+        WriteInt32(prefix, HeaderSize + 28, limit);
+        WriteInt32(prefix, HeaderSize + 32, 1);
+        WriteInt64(prefix, HeaderSize + 36, FileSetOffset);
+
+        WriteInt32(prefix, FileSetOffset, count);
+        WriteInt32(prefix, FileSetOffset + 4, 2);
+        WriteInt64(prefix, FileSetOffset + 8, locationTable);
+        WriteInt64(prefix, FileSetOffset + 16, -1);
+        WriteInt32(prefix, FileSetOffset + 28, count);
+        WriteInt64(prefix, FileSetOffset + 32, infoTable);
+        WriteInt64(prefix, FileSetOffset + 40, infoEnd);
+
+        WriteTrailingSets(prefix, infoEnd, count);
+
+        using var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20);
+        output.Position = dataStart;
+        for (int index = 0; index < count; index++)
+        {
+            ForgeNewEntry entry = all[index];
+            if (entry.Id == 0 || entry.Data.Length == 0 || entry.PrefetchBlock.Length == 0)
+                throw new InvalidDataException($"New Forge entry {entry.Name} is incomplete.");
+
+            long offset = output.Position;
+            output.Write(entry.Data, 0, entry.Data.Length);
+
+            long location = locationTable + (long)index * LocationSize;
+            WriteInt64(prefix, location, offset);
+            WriteUInt64(prefix, location + 8, entry.Id);
+            WriteInt32(prefix, location + 16, entry.Data.Length);
+
+            long info = infoTable + (long)index * ForgeEntry.InfoSize;
+            WriteInt32(prefix, info, entry.Data.Length);
+            WriteUInt64(prefix, info + 4, entry.Umac);
+            WriteUInt32(prefix, info + 16, entry.Extension);
+            WriteInt32(prefix, info + 28, index + 1 < count ? index + 1 : -1);
+            WriteInt32(prefix, info + 32, index - 1);
+            WriteUInt32(prefix, info + 40, timestamp);
+            byte[] name = Encoding.UTF8.GetBytes(entry.Name);
+            if (name.Length >= 128)
+                throw new InvalidDataException($"The name {entry.Name} does not fit a Forge entry.");
+            name.CopyTo(prefix, info + 44);
+            WriteInt32(prefix, info + 172, 4);
+            WriteInt32(prefix, info + 184, 4);
+        }
+
+        output.SetLength(Align(output.Position));
+        output.Position = 0;
+        output.Write(prefix, 0, prefix.Length);
+    }
+
+    static void WriteTrailingSets(byte[] prefix, long offset, int count)
+    {
+        WriteInt32(prefix, offset, count - 1);
+        WriteInt32(prefix, offset + 4, 1);
+        prefix.AsSpan((int)offset + 8, 12).Fill(0xFF);
+        WriteInt32(prefix, offset + 148, 13);
+        WriteInt32(prefix, offset + 168, 4);
+        WriteInt32(prefix, offset + 172, 1);
+        prefix.AsSpan((int)offset + 176, 16).Fill(0xFF);
+        Encoding.ASCII.GetBytes(LostAndFound).CopyTo(prefix, (int)offset + 196);
+        WriteInt32(prefix, offset + 324, 14);
+        WriteInt32(prefix, offset + 332, 13);
+        WriteInt32(prefix, offset + 344, 4);
+        WriteInt32(prefix, offset + 348, 1);
+    }
+
+    static ulong Umac(ulong id, string identity)
+    {
+        ulong hash = 14695981039346656037UL;
+        foreach (byte item in Encoding.UTF8.GetBytes(identity + ":" + id.ToString("X16")))
+            hash = (hash ^ item) * 1099511628211UL;
+        return hash;
     }
 
     public void ReplaceEntry(ForgeEntry entry, byte[] data)

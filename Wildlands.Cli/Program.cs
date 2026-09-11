@@ -91,7 +91,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
     Console.WriteLine("  prefetchcycle <game folder>  read and rewrite every prefetch block byte for byte");
     Console.WriteLine("  metacycle <game folder>  read and rewrite every GlobalMetaFile byte for byte");
-    Console.WriteLine("  makepatch <skeleton.forge> <source.forge> <out.forge> <entry name|prefix*>...  build a patch archive from entries of another archive");
+    Console.WriteLine("  makepatch <source.forge> <out.forge> <entry name|prefix*>...  write a new patch archive holding those entries");
     Console.WriteLine("  dblists <archive.forge> <container filter> <resource id> [id...]  find counted id lists in one database resource");
     Console.WriteLine("  handlelists <archive.forge> <container filter> [table filter] [id...]  show the BuildTable handle lists that own sub-tables");
     Console.WriteLine("  armorymeta <game folder> <build tag> [build tag...]  resolve gameplay records for exact BuildTags");
@@ -288,8 +288,8 @@ try
                 args.Length >= 4 && args[3] == "dump");
         case "metacycle" when args.Length >= 2:
             return CycleGlobalMetaFiles(args[1]);
-        case "makepatch" when args.Length >= 5:
-            return CreatePatchArchive(args[1], args[2], args[3], args[4..]);
+        case "makepatch" when args.Length >= 4:
+            return CreatePatchArchive(args[1], args[2], args[3..]);
         case "dblists" when args.Length >= 4:
             return InspectDatabaseLists(args[1], args[2], ParseResourceId(args[3]),
                 args.Length >= 5 ? args[4..].Select(ParseResourceId).ToList() : []);
@@ -4082,38 +4082,27 @@ static int InspectDatabaseLists(string archivePath, string containerFilter, ulon
     return 0;
 }
 
-static int CreatePatchArchive(string skeletonPath, string sourcePath, string outputPath,
-    IReadOnlyList<string> entryNames)
+static int CreatePatchArchive(string sourcePath, string outputPath, IReadOnlyList<string> entryNames)
 {
-    string strippedPath = outputPath + ".skeleton";
-    using (var skeleton = ForgeArchive.Open(skeletonPath))
-    {
-        var removals = skeleton.Entries.Where(entry => entry.Id is not (16 or 145))
-            .Select(entry => entry.Index).ToList();
-        skeleton.Rebuild(strippedPath, new Dictionary<int, byte[]>(), [], removals);
-    }
-
-    var additions = new List<ForgeEntryAddition>();
+    var entries = new List<ForgeNewEntry>();
     using (var source = ForgeArchive.Open(sourcePath))
     {
         ForgeEntry prefetchEntry = source.Entries.Single(entry => entry.Id == 145);
         byte[] prefetch = source.ReadEntry(prefetchEntry);
-        var wanted = source.Entries.Where(entry => entryNames.Any(name =>
-                name.EndsWith('*')
+        var wanted = source.Entries.Where(entry => entry.Id is not (16 or 145)
+                && entryNames.Any(name => name.EndsWith('*')
                     ? entry.Name.StartsWith(name[..^1], StringComparison.OrdinalIgnoreCase)
                     : entry.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
             .ToList();
         if (wanted.Count == 0)
             throw new InvalidOperationException("No entry in the source archive matched.");
         foreach (ForgeEntry entry in wanted)
-            additions.Add(new ForgeEntryAddition(entry.Id, entry.Name, entry.Extension,
-                source.ReadEntryInfo(entry), source.ReadEntry(entry),
-                PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
+            entries.Add(new ForgeNewEntry(entry.Id, entry.Name, entry.Extension, entry.UmacHash,
+                source.ReadEntry(entry), PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
     }
 
-    using (var stripped = ForgeArchive.Open(strippedPath))
-        stripped.Rebuild(outputPath, new Dictionary<int, byte[]>(), additions);
-    File.Delete(strippedPath);
+    ForgeArchive.Create(outputPath, entries, Guid.NewGuid().ToString(),
+        (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
     using var written = ForgeArchive.Open(outputPath);
     Console.WriteLine($"{Path.GetFileName(outputPath)}: {written.Entries.Count} entries, "
