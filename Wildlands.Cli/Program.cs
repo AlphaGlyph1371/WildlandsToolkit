@@ -88,6 +88,8 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  objects <file.data> [resource filter]  list the embedded objects of each resource by class");
+    Console.WriteLine("  objectcheck <folder with .data>  hold the object scanner against the BuildTable parser");
     Console.WriteLine("  classdump <folder with .data> <class> <outdir> [count]  write resources of one class to disk");
     Console.WriteLine("  classcensus <folder with .data>  count every resource class and how many bytes it holds");
     Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
@@ -274,6 +276,10 @@ try
             return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
         case "buildinfo" when args.Length >= 3:
             return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "objects" when args.Length >= 2:
+            return ListAnvilObjects(args[1], args.Length >= 3 ? args[2] : "");
+        case "objectcheck" when args.Length >= 2:
+            return CheckAnvilObjects(args[1]);
         case "classdump" when args.Length >= 4:
             return DumpResourceClass(args[1], (uint)ParseResourceId(args[2]), args[3],
                 args.Length >= 5 ? int.Parse(args[4]) : 20);

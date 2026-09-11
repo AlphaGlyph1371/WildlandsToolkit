@@ -798,6 +798,87 @@ static partial class Commands
         }
     }
 
+    internal static int ListAnvilObjects(string path, string nameFilter)
+    {
+        using var stream = File.OpenRead(path);
+        DataFile file = DataFile.Read(stream);
+        int shown = 0;
+        foreach (Resource resource in file.Resources.Where(item =>
+                     item.Name.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)))
+        {
+            IReadOnlyList<AnvilObject> objects = AnvilObjects.Scan(resource.Data, resource.Id);
+            if (objects.Count == 0)
+                continue;
+
+            shown++;
+            Console.WriteLine($"0x{resource.Id:X12} {resource.Name}  {ResourceTypes.NameOf(resource.ClassHash)}  "
+                + $"{resource.Data.Length:n0} B  {objects.Count} object(s)"
+                + (AnvilObjects.IsContiguous(objects) ? ", numbered without a gap" : ""));
+            foreach (IGrouping<uint, AnvilObject> group in objects.GroupBy(item => item.ClassHash)
+                         .OrderByDescending(group => group.Count()))
+                Console.WriteLine($"    {group.Count(),5} x 0x{group.Key:X8}  {ResourceTypes.NameOf(group.Key)}");
+        }
+
+        Console.WriteLine($"{shown} resource(s) with embedded objects");
+        return shown == 0 ? 1 : 0;
+    }
+
+    internal static int CheckAnvilObjects(string folder)
+    {
+        int tables = 0, agree = 0, differ = 0;
+        foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+        {
+            DataFile file;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources.Where(item =>
+                         item.ClassHash == BuildTable.ClassHash))
+            {
+                BuildTableAsset table;
+                try
+                {
+                    table = BuildTable.Read(resource.Data);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                tables++;
+                var parsed = table.Objects.Select(item => (item.Offset, item.Id, item.ClassHash))
+                    .OrderBy(item => item.Offset).ToList();
+                var scanned = AnvilObjects.Scan(resource.Data, resource.Id)
+                    .Select(item => (item.Offset, item.Id, item.ClassHash)).ToList();
+                if (parsed.SequenceEqual(scanned))
+                    agree++;
+                else
+                {
+                    differ++;
+                    if (differ <= 5)
+                    {
+                        Console.WriteLine($"0x{resource.Id:X12} {resource.Name}: parser found {parsed.Count}, "
+                            + $"scanner found {scanned.Count}");
+                        foreach (var only in parsed.Where(item => !scanned.Contains(item)).Take(4))
+                            Console.WriteLine($"    only the parser: 0x{only.Offset:X} id 0x{only.Id:X16} class 0x{only.ClassHash:X8}");
+                        foreach (var only in scanned.Where(item => !parsed.Contains(item)).Take(4))
+                            Console.WriteLine($"    only the scanner: 0x{only.Offset:X} id 0x{only.Id:X16} class 0x{only.ClassHash:X8}");
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine($"{tables:n0} BuildTable(s), {agree:n0} where the scanner matches the parser, {differ:n0} where it does not");
+        return differ == 0 ? 0 : 1;
+    }
+
     internal static int DumpResourceClass(string folder, uint classHash, string outputDirectory, int limit)
     {
         Directory.CreateDirectory(outputDirectory);
