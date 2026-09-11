@@ -161,6 +161,19 @@ public partial class MainWindow
             SetApplying(false);
         }
 
+        string modeSummary = installingPackage is null
+            ? $"{Amount(OperationCount(pendingOnly: true), "pending change")} in {Amount(plans.Count, "archive")}."
+            : $"{installingPackage} changes {Amount(plans.Count, "archive")}.";
+        InstallMode? chosen = InstallModeWindow.Ask(dialogOwner, plans, modeSummary);
+        if (chosen is null)
+        {
+            SetStatus(installingPackage is null ? "Nothing written" : $"Installation of {installingPackage} cancelled; nothing was written");
+            return ApplyResult.Cancelled;
+        }
+
+        if (chosen == InstallMode.Addon)
+            return await WriteAddonAsync(plans, installingPackage, dialogOwner);
+
         var fresh = plans.Where(x => !ArchiveBackup.Exists(x.Path)).ToList();
         var rebuilds = plans.Where(x => x.NeedsRebuild).ToList();
         int deletions = _changes.Changes.Count(change => change.Removal is not null || change.EntryRemoval is not null);
@@ -343,6 +356,77 @@ public partial class MainWindow
             SetApplying(false);
             UpdateChangeButtons();
         }
+        return written ? ApplyResult.Applied : ApplyResult.FailedDuringWrite;
+    }
+
+    async Task<ApplyResult> WriteAddonAsync(IReadOnlyList<ArchiveWork> plans,
+        string? installingPackage, Window dialogOwner)
+    {
+        Location? place = _showing;
+        SetApplying(true, "Writing the addon archive…");
+        _archives?.Dispose();
+        _archive?.Dispose();
+        _archive = null;
+        _archives = null;
+
+        var progress = new Progress<string>(SetApplyProgress);
+        var watch = Stopwatch.StartNew();
+        bool written = false;
+        try
+        {
+            IReadOnlyList<string> files = await Task.Run(() =>
+                _changes.WriteAddon(plans, Guid.NewGuid().ToString(), progress));
+            written = true;
+
+            string? warning = null;
+            if (_project is not null)
+            {
+                try { _project.MarkDeployed(); }
+                catch (Exception ex) { warning = ex.Message; }
+            }
+
+            if (_armoryIndex is not null)
+            {
+                try
+                {
+                    string gameFolder = _settings.GamePath;
+                    SetApplyProgress("Refreshing the Armory index from the new archive…");
+                    ArmoryIndex refreshed = await Task.Run(() =>
+                        ArmoryIndex.Build(ArchiveLocator.Find(gameFolder), progress));
+                    refreshed.Save(AppSettings.ArmoryCachePath);
+                    _armoryIndex = refreshed;
+                    UpdateArmoryIndexButton();
+                }
+                catch (Exception ex)
+                {
+                    _armoryIndex = null;
+                    UpdateArmoryIndexButton();
+                    warning ??= ex.Message;
+                }
+            }
+
+            watch.Stop();
+            if (place is not null)
+                await Navigate(place);
+
+            string names = string.Join(", ", files.Select(System.IO.Path.GetFileName));
+            string what = installingPackage is null ? "Wrote" : $"Installed {installingPackage} as";
+            SetStatus(warning is null
+                ? $"{what} {names} in {watch.Elapsed.TotalSeconds:0.0} s"
+                : $"{what} {names} in {watch.Elapsed.TotalSeconds:0.0} s, but: {warning}");
+        }
+        catch (Exception ex)
+        {
+            ShowError("Could not write the addon archive", ex, dialogOwner);
+            if (place is not null)
+                await Navigate(place);
+        }
+        finally
+        {
+            SetApplying(false);
+            UpdateChangeButtons();
+        }
+
         return written ? ApplyResult.Applied : ApplyResult.FailedDuringWrite;
     }
 

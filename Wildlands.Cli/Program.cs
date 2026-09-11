@@ -91,6 +91,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
     Console.WriteLine("  prefetchcycle <game folder>  read and rewrite every prefetch block byte for byte");
     Console.WriteLine("  metacycle <game folder>  read and rewrite every GlobalMetaFile byte for byte");
+    Console.WriteLine("  installaddon <game folder> <package.wlmod>  install a mod package as its own addon archive");
     Console.WriteLine("  makepatch <source.forge> <out.forge> <entry name|prefix*>...  write a new patch archive holding those entries");
     Console.WriteLine("  dblists <archive.forge> <container filter> <resource id> [id...]  find counted id lists in one database resource");
     Console.WriteLine("  handlelists <archive.forge> <container filter> [table filter] [id...]  show the BuildTable handle lists that own sub-tables");
@@ -280,6 +281,8 @@ try
                 args.Length >= 4 && args[3] == "dump");
         case "metacycle" when args.Length >= 2:
             return CycleGlobalMetaFiles(args[1]);
+        case "installaddon" when args.Length >= 3:
+            return InstallPackageAsAddon(args[1], args[2]);
         case "makepatch" when args.Length >= 4:
             return CreatePatchArchive(args[1], args[2], args[3..]);
         case "dblists" when args.Length >= 4:
@@ -4048,6 +4051,49 @@ static int InspectDatabaseLists(string archivePath, string containerFilter, ulon
         }
     }
     return 0;
+}
+
+static int InstallPackageAsAddon(string gameFolder, string packagePath)
+{
+    string staging = Path.Combine(Path.GetTempPath(), "wlcli-addon-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        ModProject project = ModProject.ImportPackage(packagePath, staging);
+        ModCompileResult compiled = project.Compile(gameFolder);
+        if (compiled.Problems.Count != 0)
+        {
+            Console.Error.WriteLine("The package does not compile against this installation:");
+            foreach (string problem in compiled.Problems)
+                Console.Error.WriteLine("  " + problem);
+            return 1;
+        }
+
+        List<ArchiveWork> plans = ArchiveChangePlanner.Plan(compiled.Changes);
+        if (plans.Count == 0)
+        {
+            Console.WriteLine("Nothing to write; every change is already installed.");
+            return 0;
+        }
+
+        if (!AddonArchiveService.CanWrite(plans, out string reason))
+        {
+            Console.Error.WriteLine(reason);
+            return 1;
+        }
+
+        Console.WriteLine($"{compiled.Changes.Count} change(s) in {plans.Count} archive(s), "
+            + $"{AddonArchiveService.EstimateSize(plans) / (1024.0 * 1024.0):0.0} MB of entries");
+        var progress = new Progress<string>(Console.WriteLine);
+        IReadOnlyList<string> written = AddonArchiveService.Write(plans, Guid.NewGuid().ToString(), progress);
+        foreach (string path in written)
+            Console.WriteLine($"wrote {path} ({new FileInfo(path).Length / (1024.0 * 1024.0):0.0} MB)");
+        return 0;
+    }
+    finally
+    {
+        try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); }
+        catch (IOException) { }
+    }
 }
 
 static int CreatePatchArchive(string sourcePath, string outputPath, IReadOnlyList<string> entryNames)

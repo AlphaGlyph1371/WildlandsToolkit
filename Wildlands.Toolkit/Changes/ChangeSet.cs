@@ -63,4 +63,12 @@ public sealed class ChangeSet
         ArchiveWriteService.Write(plans, progress);
         _changes.Clear();
     }
+
+    public IReadOnlyList<string> WriteAddon(IReadOnlyList<ArchiveWork> plans, string identity,
+        IProgress<string>? progress = null)
+    {
+        IReadOnlyList<string> written = AddonArchiveService.Write(plans, identity, progress);
+        _changes.Clear();
+        return written;
+    }
 }
