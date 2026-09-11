@@ -4265,9 +4265,14 @@ static int CycleGlobalMetaFiles(string gameFolder)
             else
                 failed++;
             GlobalMetaField? identity = asset.Find(GlobalMetaFile.IdentityTag);
+            string synthesised = "";
+            if (identity is { Kind: GlobalMetaFieldKind.Text } && asset.Fields.Count == 20)
+                synthesised = GlobalMetaFile.CreatePatch(identity.Text).AsSpan().SequenceEqual(data)
+                    ? "  synthesised exactly"
+                    : "  SYNTHESIS DIFFERS";
             Console.WriteLine($"{Path.GetFileName(path),-44} {data.Length,9:n0} B  {asset.Fields.Count,3} fields  "
                 + (same ? "byte for byte" : $"DIFFERS ({written.Length:n0} B)")
-                + (identity is { Kind: GlobalMetaFieldKind.Text } ? "  " + identity.Text : ""));
+                + (identity is { Kind: GlobalMetaFieldKind.Text } ? "  " + identity.Text : "") + synthesised);
         }
         catch (Exception exception)
         {

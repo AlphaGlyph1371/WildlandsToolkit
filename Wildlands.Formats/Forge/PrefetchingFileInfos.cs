@@ -7,6 +7,9 @@ public static class PrefetchingFileInfos
 {
     const ulong Magic = 0x1004FA9957FBAA33;
     const int RecordSize = 16;
+    const short Version = 1;
+    const byte Algorithm = 0;
+    const int BlockSize = 32768;
 
     public static byte[] ReadObjectBlock(byte[] data, ulong id)
     {
@@ -14,6 +17,42 @@ public static class PrefetchingFileInfos
         PrefetchFile file = Read(data);
         PrefetchObject item = file.Objects.SingleOrDefault(item => item.Id == id) ?? throw new InvalidDataException($"PrefetchingFileInfos has no object for Forge entry 0x{id:X16}.");
         return file.BlockData.AsSpan(item.Offset, item.Size).ToArray();
+    }
+
+    public static byte[] Create(IReadOnlyList<(ulong Id, byte[] Block)> objects)
+    {
+        ArgumentNullException.ThrowIfNull(objects);
+        if (objects.Select(item => item.Id).Distinct().Count() != objects.Count)
+            throw new InvalidDataException("A new PrefetchingFileInfos would hold the same object twice.");
+
+        using var blocks = new MemoryStream();
+        var placed = new List<PrefetchObject>(objects.Count);
+        foreach ((ulong id, byte[] block) in objects)
+        {
+            if (id == 0 || block is null || block.Length == 0)
+                throw new InvalidDataException("A new PrefetchingFileInfos object is incomplete.");
+            int offset = checked((int)blocks.Position);
+            blocks.Write(block);
+            placed.Add(new PrefetchObject(id, block.Length, offset));
+        }
+
+        using var decompressed = new MemoryStream();
+        using (var writer = new BinaryWriter(decompressed, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(placed.Count);
+            foreach (PrefetchObject item in placed)
+            {
+                writer.Write(item.Id);
+                writer.Write(item.Size);
+                writer.Write(item.Offset);
+            }
+
+            byte[] blockData = blocks.ToArray();
+            writer.Write(blockData.Length);
+            writer.Write(blockData);
+        }
+
+        return Write(Version, Algorithm, BlockSize, decompressed.ToArray());
     }
 
     public static IReadOnlyList<(ulong Id, byte[] Block)> ReadObjects(byte[] data)

@@ -129,6 +129,38 @@ public static class GlobalMetaFile
         return stream.ToArray();
     }
 
+    public static byte[] CreatePatch(string identity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity);
+        var asset = new GlobalMetaFileAsset();
+        void Number(uint tag, ulong value) =>
+            asset.Fields.Add(new GlobalMetaField(tag, GlobalMetaFieldKind.Number, value, "", []));
+        void Text(uint tag, string value) =>
+            asset.Fields.Add(new GlobalMetaField(tag, GlobalMetaFieldKind.Text, 0, value, []));
+
+        asset.Fields.Add(new GlobalMetaField(1, GlobalMetaFieldKind.LongNumber, 1, "", []));
+        Text(5, "");
+        Text(3, "");
+        Text(1, "");
+        Number(2, 0x0BE4A3);
+        Text(7, "");
+        Text(16, "");
+        Number(10, 0);
+        Text(11, "");
+        Number(12, 0x9626F6);
+        Number(13, 0xA586);
+        Number(14, 0x85);
+        Number(32, 0);
+        Number(15, 1);
+        Number(999, 0);
+        Number(30, 0);
+        Text(IdentityTag, identity);
+        Number(24, 0);
+        Number(31, 0);
+        asset.Fields.Add(new GlobalMetaField(35, GlobalMetaFieldKind.Block, 0, "", new byte[4]));
+        return Write(asset);
+    }
+
     public static byte[] CreatePatchMetaFile(byte[] template, string identity)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(identity);
