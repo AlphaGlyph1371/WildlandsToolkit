@@ -26,7 +26,37 @@ public static class AnvilObjects
         return found;
     }
 
+    public static IReadOnlyList<AnvilObject> ScanSequence(byte[] data, int start)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        var found = new List<AnvilObject>();
+        int offset = start;
+        for (ulong id = FirstLocalId; offset + 12 <= data.Length; id++)
+        {
+            int at = found.Count == 0
+                ? (BinaryPrimitives.ReadUInt64LittleEndian(data.AsSpan(offset)) == id ? offset : -1)
+                : Find(data, offset, id);
+            if (at < 0)
+                break;
+            found.Add(new AnvilObject(at, id,
+                BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(at + 8))));
+            offset = at + 12;
+        }
+
+        return found;
+    }
+
     public static bool IsLocalId(ulong id) => id is >= FirstLocalId and <= LastLocalId;
+
+    static int Find(byte[] data, int from, ulong id)
+    {
+        Span<byte> wanted = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt64LittleEndian(wanted, id);
+        for (int offset = from; offset + 12 <= data.Length; offset++)
+            if (data.AsSpan(offset, 8).SequenceEqual(wanted))
+                return offset;
+        return -1;
+    }
 
     public static bool IsContiguous(IReadOnlyList<AnvilObject> objects)
     {
