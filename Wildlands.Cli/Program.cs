@@ -87,6 +87,8 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  metacycle <game folder>  read and rewrite every GlobalMetaFile byte for byte");
+    Console.WriteLine("  makepatch <skeleton.forge> <source.forge> <out.forge> <entry name|prefix*>...  build a patch archive from entries of another archive");
     Console.WriteLine("  dblists <archive.forge> <container filter> <resource id> [id...]  find counted id lists in one database resource");
     Console.WriteLine("  handlelists <archive.forge> <container filter> [table filter] [id...]  show the BuildTable handle lists that own sub-tables");
     Console.WriteLine("  armorymeta <game folder> <build tag> [build tag...]  resolve gameplay records for exact BuildTags");
@@ -274,6 +276,10 @@ try
             return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
         case "buildinfo" when args.Length >= 3:
             return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "metacycle" when args.Length >= 2:
+            return CycleGlobalMetaFiles(args[1]);
+        case "makepatch" when args.Length >= 5:
+            return CreatePatchArchive(args[1], args[2], args[3], args[4..]);
         case "dblists" when args.Length >= 4:
             return InspectDatabaseLists(args[1], args[2], ParseResourceId(args[3]),
                 args.Length >= 5 ? args[4..].Select(ParseResourceId).ToList() : []);
@@ -4064,6 +4070,95 @@ static int InspectDatabaseLists(string archivePath, string containerFilter, ulon
         }
     }
     return 0;
+}
+
+static int CreatePatchArchive(string skeletonPath, string sourcePath, string outputPath,
+    IReadOnlyList<string> entryNames)
+{
+    string strippedPath = outputPath + ".skeleton";
+    using (var skeleton = ForgeArchive.Open(skeletonPath))
+    {
+        var removals = skeleton.Entries.Where(entry => entry.Id is not (16 or 145))
+            .Select(entry => entry.Index).ToList();
+        skeleton.Rebuild(strippedPath, new Dictionary<int, byte[]>(), [], removals);
+    }
+
+    var additions = new List<ForgeEntryAddition>();
+    using (var source = ForgeArchive.Open(sourcePath))
+    {
+        ForgeEntry prefetchEntry = source.Entries.Single(entry => entry.Id == 145);
+        byte[] prefetch = source.ReadEntry(prefetchEntry);
+        var wanted = source.Entries.Where(entry => entryNames.Any(name =>
+                name.EndsWith('*')
+                    ? entry.Name.StartsWith(name[..^1], StringComparison.OrdinalIgnoreCase)
+                    : entry.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        if (wanted.Count == 0)
+            throw new InvalidOperationException("No entry in the source archive matched.");
+        foreach (ForgeEntry entry in wanted)
+            additions.Add(new ForgeEntryAddition(entry.Id, entry.Name, entry.Extension,
+                source.ReadEntryInfo(entry), source.ReadEntry(entry),
+                PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
+    }
+
+    using (var stripped = ForgeArchive.Open(strippedPath))
+        stripped.Rebuild(outputPath, new Dictionary<int, byte[]>(), additions);
+    File.Delete(strippedPath);
+
+    using var written = ForgeArchive.Open(outputPath);
+    Console.WriteLine($"{Path.GetFileName(outputPath)}: {written.Entries.Count} entries, "
+        + $"{new FileInfo(outputPath).Length / (1024.0 * 1024.0):0.0} MB");
+    foreach (ForgeEntry entry in written.Entries)
+        Console.WriteLine($"  {entry.Length,12:n0}  0x{entry.Id:X12}  {entry.Name}{entry.FileExtension}");
+    return 0;
+}
+
+static int CycleGlobalMetaFiles(string gameFolder)
+{
+    int read = 0, exact = 0, failed = 0;
+    foreach (string path in ArchiveLocator.Find(gameFolder))
+    {
+        ForgeEntry? entry;
+        byte[] data;
+        try
+        {
+            using var archive = ForgeArchive.Open(path);
+            entry = archive.Entries.FirstOrDefault(candidate => candidate.Id == GlobalMetaFile.EntryId);
+            if (entry is null)
+                continue;
+            data = archive.ReadEntry(entry);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"{Path.GetFileName(path)}: {exception.Message}");
+            failed++;
+            continue;
+        }
+
+        read++;
+        try
+        {
+            GlobalMetaFileAsset asset = GlobalMetaFile.Read(data);
+            byte[] written = GlobalMetaFile.Write(asset);
+            bool same = written.AsSpan().SequenceEqual(data);
+            if (same)
+                exact++;
+            else
+                failed++;
+            GlobalMetaField? identity = asset.Find(GlobalMetaFile.IdentityTag);
+            Console.WriteLine($"{Path.GetFileName(path),-44} {data.Length,9:n0} B  {asset.Fields.Count,3} fields  "
+                + (same ? "byte for byte" : $"DIFFERS ({written.Length:n0} B)")
+                + (identity is { Kind: GlobalMetaFieldKind.Text } ? "  " + identity.Text : ""));
+        }
+        catch (Exception exception)
+        {
+            failed++;
+            Console.WriteLine($"{Path.GetFileName(path),-44} {data.Length,9:n0} B  {exception.Message}");
+        }
+    }
+
+    Console.WriteLine($"{read} GlobalMetaFile(s), {exact} byte for byte, {failed} failure(s)");
+    return failed == 0 ? 0 : 1;
 }
 
 static bool TryReadDataFile(ForgeArchive archive, ForgeEntry entry, out DataFile file)
