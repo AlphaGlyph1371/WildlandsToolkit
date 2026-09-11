@@ -16,6 +16,56 @@ public static class PrefetchingFileInfos
         return file.BlockData.AsSpan(item.Offset, item.Size).ToArray();
     }
 
+    public static IReadOnlyList<(ulong Id, byte[] Block)> ReadObjects(byte[] data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        PrefetchFile file = Read(data);
+        return file.Objects
+            .Select(item => (item.Id, file.BlockData.AsSpan(item.Offset, item.Size).ToArray()))
+            .ToList();
+    }
+
+    public static PrefetchBlock ReadBlock(byte[] block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        if (block.Length < 4)
+            throw new InvalidDataException("A prefetch block is truncated.");
+
+        var result = new PrefetchBlock
+        {
+            Flags = BinaryPrimitives.ReadUInt16LittleEndian(block),
+        };
+        int count = BinaryPrimitives.ReadUInt16LittleEndian(block.AsSpan(2));
+        if (4 + (long)count * PrefetchReference.Size != block.Length)
+            throw new InvalidDataException($"A prefetch block of {block.Length} byte(s) does not hold {count} reference(s).");
+        for (int index = 0; index < count; index++)
+        {
+            int offset = 4 + index * PrefetchReference.Size;
+            result.References.Add(new PrefetchReference(
+                BinaryPrimitives.ReadUInt64LittleEndian(block.AsSpan(offset)),
+                block.AsSpan(offset + sizeof(ulong), PrefetchReference.TrailerSize).ToArray()));
+        }
+        return result;
+    }
+
+    public static byte[] WriteBlock(PrefetchBlock block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        byte[] result = new byte[4 + block.References.Count * PrefetchReference.Size];
+        BinaryPrimitives.WriteUInt16LittleEndian(result, block.Flags);
+        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(2), checked((ushort)block.References.Count));
+        for (int index = 0; index < block.References.Count; index++)
+        {
+            int offset = 4 + index * PrefetchReference.Size;
+            PrefetchReference reference = block.References[index];
+            if (reference.Trailer.Length != PrefetchReference.TrailerSize)
+                throw new InvalidDataException("A prefetch reference carries the wrong trailer length.");
+            BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(offset), reference.Id);
+            reference.Trailer.CopyTo(result.AsSpan(offset + sizeof(ulong)));
+        }
+        return result;
+    }
+
     public static byte[] AddObjects(byte[] data, IReadOnlyList<(ulong Id, byte[] Block)> additions)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -254,4 +304,16 @@ public static class PrefetchingFileInfos
 
     sealed record PrefetchFile(short Version, byte Algorithm, int BlockSize, List<PrefetchObject> Objects, byte[] BlockData);
     sealed record PrefetchObject(ulong Id, int Size, int Offset);
+}
+
+public sealed record PrefetchReference(ulong Id, byte[] Trailer)
+{
+    public const int TrailerSize = 3;
+    public const int Size = sizeof(ulong) + TrailerSize;
+}
+
+public sealed class PrefetchBlock
+{
+    public ushort Flags { get; set; }
+    public List<PrefetchReference> References { get; } = [];
 }

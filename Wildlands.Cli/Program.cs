@@ -87,6 +87,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  prefetchcycle <game folder>  read and rewrite every prefetch block byte for byte");
     Console.WriteLine("  metacycle <game folder>  read and rewrite every GlobalMetaFile byte for byte");
     Console.WriteLine("  makepatch <skeleton.forge> <source.forge> <out.forge> <entry name|prefix*>...  build a patch archive from entries of another archive");
     Console.WriteLine("  dblists <archive.forge> <container filter> <resource id> [id...]  find counted id lists in one database resource");
@@ -276,6 +277,9 @@ try
             return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
         case "buildinfo" when args.Length >= 3:
             return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "prefetchcycle" when args.Length >= 2:
+            return CyclePrefetchBlocks(args[1], args.Length >= 3 ? args[2] : "",
+                args.Length >= 4 && args[3] == "dump");
         case "metacycle" when args.Length >= 2:
             return CycleGlobalMetaFiles(args[1]);
         case "makepatch" when args.Length >= 5:
@@ -4111,6 +4115,66 @@ static int CreatePatchArchive(string skeletonPath, string sourcePath, string out
     foreach (ForgeEntry entry in written.Entries)
         Console.WriteLine($"  {entry.Length,12:n0}  0x{entry.Id:X12}  {entry.Name}{entry.FileExtension}");
     return 0;
+}
+
+static int CyclePrefetchBlocks(string gameFolder, string filter = "", bool dump = false)
+{
+    int archives = 0, blocks = 0, exact = 0, failed = 0, references = 0;
+    foreach (string path in ArchiveLocator.Find(gameFolder)
+                 .Where(path => Path.GetFileName(path).Contains(filter, StringComparison.OrdinalIgnoreCase)))
+    {
+        byte[] data;
+        try
+        {
+            using var archive = ForgeArchive.Open(path);
+            ForgeEntry? entry = archive.Entries.FirstOrDefault(candidate => candidate.Id == 145);
+            if (entry is null)
+                continue;
+            data = archive.ReadEntry(entry);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"{Path.GetFileName(path)}: {exception.Message}");
+            failed++;
+            continue;
+        }
+
+        archives++;
+        int archiveBlocks = 0, archiveExact = 0, archiveRefs = 0;
+        foreach ((ulong id, byte[] block) in PrefetchingFileInfos.ReadObjects(data))
+        {
+            archiveBlocks++;
+            try
+            {
+                PrefetchBlock parsed = PrefetchingFileInfos.ReadBlock(block);
+                archiveRefs += parsed.References.Count;
+                if (PrefetchingFileInfos.WriteBlock(parsed).AsSpan().SequenceEqual(block))
+                    archiveExact++;
+                else
+                    Console.WriteLine($"  0x{id:X12} in {Path.GetFileName(path)} differs after rewrite");
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"  0x{id:X12} in {Path.GetFileName(path)}: {exception.Message}");
+                if (dump)
+                {
+                    Console.WriteLine($"    flags 0x{BitConverter.ToUInt16(block, 0):X4} count {BitConverter.ToUInt16(block, 2)} length {block.Length}");
+                    Console.WriteLine("    " + Convert.ToHexString(block.AsSpan(0, Math.Min(64, block.Length))));
+                }
+            }
+        }
+
+        blocks += archiveBlocks;
+        exact += archiveExact;
+        references += archiveRefs;
+        failed += archiveBlocks - archiveExact;
+        Console.WriteLine($"{Path.GetFileName(path),-44} {archiveBlocks,7:n0} blocks  {archiveRefs,8:n0} references  "
+            + (archiveBlocks == archiveExact ? "byte for byte" : $"{archiveBlocks - archiveExact:n0} FAILED"));
+    }
+
+    Console.WriteLine($"{archives} archive(s), {blocks:n0} prefetch block(s) with {references:n0} reference(s), "
+        + $"{exact:n0} byte for byte, {failed:n0} failure(s)");
+    return failed == 0 ? 0 : 1;
 }
 
 static int CycleGlobalMetaFiles(string gameFolder)
