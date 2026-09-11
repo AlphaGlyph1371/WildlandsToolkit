@@ -40,9 +40,9 @@ public partial class SkyWindow : Window
 
         NameText.Text = name;
         LayeredSkyLayer first = sky.Layers[0];
-        DetailText.Text = $"{sky.Layers.Count} layer(s), each {first.Width} x {first.Height} x "
-            + $"{first.Depth} texels of RGBA16F";
-        SetStatus("Pick a layer, move the colour sliders, then bake and save.");
+        DetailText.Text = $"{sky.Layers.Count} moments across the day, each holding "
+            + $"{first.Width * first.Height * first.Depth} colours.";
+        SetStatus("Pick a time of day, move the sliders, press Apply, then Save.");
         RefreshLayers();
         LayerList.SelectedIndex = 0;
     }
@@ -70,13 +70,44 @@ public partial class SkyWindow : Window
     {
         LayeredSkyLayer layer = Current;
         int slices = SkyImage.SliceCount(layer);
-        SliceStrip.ItemsSource = Enumerable.Range(0, slices).Select(slice => new SkyTile
-        {
-            Thumbnail = SkyImage.Render(layer, slice, Adjust, 1),
-            Title = slice.ToString(),
-            Outline = slice == _slice ? (Brush)FindResource("Accent") : Brushes.Transparent,
-        }).ToList();
+        if (RawBox.IsChecked == true)
+            SliceStrip.ItemsSource = Enumerable.Range(0, slices).Select(slice => new SkyTile
+            {
+                Thumbnail = SkyImage.Render(layer, slice, Adjust, 1),
+                Title = slice.ToString(),
+                Outline = slice == _slice ? (Brush)FindResource("Accent") : Brushes.Transparent,
+            }).ToList();
         BigImage.Source = SkyImage.Render(layer, Math.Min(_slice, slices - 1), Adjust, 6);
+        PreviewCaption.Text = $"2. SEE WHAT IT LOOKS LIKE — {Current.Hour:0.#} h";
+    }
+
+    void Raw_Click(object sender, RoutedEventArgs e)
+    {
+        SliceStrip.Visibility = RawBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        RefreshSlices();
+    }
+
+    void Apply_Click(object sender, RoutedEventArgs e)
+    {
+        if (Adjust.IsNone)
+            return;
+
+        if (ScopeAll.IsChecked == true)
+        {
+            SkyAdjust adjust = Adjust;
+            foreach (LayeredSkyLayer layer in _sky.Layers)
+                SkyImage.Bake(layer, adjust);
+            SetStatus($"Written into all {_sky.Layers.Count} times of day.");
+        }
+        else
+        {
+            SkyImage.Bake(Current, Adjust);
+            SetStatus($"Written into the {Current.Hour:0.#} h sky.");
+        }
+
+        Reset_Click(this, e);
+        RefreshLayers();
+        MarkDirty();
     }
 
     public void SelectLayer(int index)
@@ -100,11 +131,12 @@ public partial class SkyWindow : Window
     {
         if (!IsLoaded || _loading)
             return;
-        ExposureLabel.Text = $"Exposure {ExposureSlider.Value:0.00}";
-        RedLabel.Text = $"Red {RedSlider.Value:0.00}";
-        GreenLabel.Text = $"Green {GreenSlider.Value:0.00}";
-        BlueLabel.Text = $"Blue {BlueSlider.Value:0.00}";
-        SaturationLabel.Text = $"Saturation {SaturationSlider.Value:0.00}";
+        ExposureLabel.Text = $"Brightness  {ExposureSlider.Value:0.00}";
+        RedLabel.Text = $"Red  {RedSlider.Value:0.00}";
+        GreenLabel.Text = $"Green  {GreenSlider.Value:0.00}";
+        BlueLabel.Text = $"Blue  {BlueSlider.Value:0.00}";
+        SaturationLabel.Text = $"Colour strength  {SaturationSlider.Value:0.00}";
+        ApplyButton.IsEnabled = !Adjust.IsNone;
         RefreshSlices();
     }
 
@@ -118,38 +150,6 @@ public partial class SkyWindow : Window
         SaturationSlider.Value = 1;
         _loading = false;
         Adjust_Changed(this, new RoutedPropertyChangedEventArgs<double>(1, 1));
-    }
-
-    void BakeLayer_Click(object sender, RoutedEventArgs e)
-    {
-        if (Adjust.IsNone)
-        {
-            SetStatus("Nothing to bake, the sliders are all at one.");
-            return;
-        }
-
-        SkyImage.Bake(Current, Adjust);
-        SetStatus($"Baked into the {Current.Hour:0.#} h layer.");
-        Reset_Click(this, e);
-        RefreshLayers();
-        MarkDirty();
-    }
-
-    void BakeAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (Adjust.IsNone)
-        {
-            SetStatus("Nothing to bake, the sliders are all at one.");
-            return;
-        }
-
-        SkyAdjust adjust = Adjust;
-        foreach (LayeredSkyLayer layer in _sky.Layers)
-            SkyImage.Bake(layer, adjust);
-        SetStatus($"Baked into all {_sky.Layers.Count} layers.");
-        Reset_Click(this, e);
-        RefreshLayers();
-        MarkDirty();
     }
 
     void Hour_Key(object sender, KeyEventArgs e)

@@ -1,11 +1,13 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using Microsoft.Win32;
 using Wildlands.Formats.Models;
 
 namespace Wildlands.Toolkit;
@@ -34,7 +36,7 @@ public sealed class SoftBodyRow : INotifyPropertyChanged
         get
         {
             string common = _field.Common.ToString("0.#####", CultureInfo.InvariantCulture);
-            return common == _text ? $"same as most ({common})" : $"most use {common}";
+            return common == _text ? $"the same, {common}" : $"almost all use {common}";
         }
     }
 
@@ -88,6 +90,7 @@ public partial class ClothWindow : Window
     readonly SoftBodySettingsAsset _settings;
     readonly List<SkeletonBone>? _bones;
     readonly Action<byte[]> _save;
+    readonly string _name;
     readonly OrbitCameraController? _camera;
     readonly DirectionalLight _light = new(Colors.White, new Vector3D(-0.4, -0.7, -0.6));
 
@@ -98,52 +101,188 @@ public partial class ClothWindow : Window
         _settings = settings;
         _bones = bones;
         _save = save;
+        _name = name;
 
-        NameText.Text = name;
-        DetailText.Text = cloth is null
-            ? $"{settings.Bones.Count} bone(s), {SoftBodySettings.Fields.Count} setting(s)"
-            : $"{cloth.Faces.Count()} face(s), {cloth.Links.Count()} link(s), "
-                + $"{cloth.Objects.Count} object(s) — {settings.Bones.Count} bone(s), "
-                + $"{SoftBodySettings.Fields.Count} setting(s)";
+        NameText.Text = cloth is null
+            ? name
+            : $"{name}  —  {cloth.Faces.Count()} faces, {cloth.Links.Count()} links";
 
         RefreshFields();
-        BoneList.ItemsSource = settings.Bones
-            .Select((hash, index) => $"{index,2}  0x{hash:X8}{Suffix(hash)}").ToList();
+        RefreshBones();
+        AddBoneButton.IsEnabled = bones is not null && bones.Count > 0;
 
         if (bones is null || bones.Count == 0)
         {
             NoSkeletonText.Visibility = Visibility.Visible;
-            BoneHint.Text = $"{settings.Bones.Count} bone name hash(es).";
         }
         else
         {
             _camera = new OrbitCameraController(Stage, Camera, _light);
             _camera.SetOrbit(-0.9, 0.12);
-            int known = settings.Bones.Count(hash => bones.Any(bone => bone.Name == hash));
-            BoneHint.Text = $"{known} of {settings.Bones.Count} found on this skeleton, drawn in colour.";
             RenderSkeleton(-1);
         }
 
-        SetStatus("Change a value, then Save to put it on the change list.");
+        SetStatus("Nothing changed yet.");
+    }
+
+    void RefreshBones()
+    {
+        int keep = BoneList.SelectedIndex;
+        BoneList.ItemsSource = _settings.Bones
+            .Select((hash, index) => $"{index,2}   0x{hash:X8}{Suffix(hash)}").ToList();
+        if (keep >= 0 && keep < _settings.Bones.Count)
+            BoneList.SelectedIndex = keep;
+        RemoveBoneButton.IsEnabled = BoneList.SelectedIndex >= 0;
+
+        if (_bones is not null && _bones.Count > 0)
+        {
+            int known = _settings.Bones.Count(hash => _bones.Any(bone => bone.Name == hash));
+            BoneHint.Text = $"{_settings.Bones.Count} bone(s), {known} of them on this skeleton. "
+                + "Blue is the whole list, orange is the one you picked.";
+        }
+
+        int differ = SoftBodySettings.Fields.Count(field => !IsCommon(field));
+        DiffText.Text = differ == 0
+            ? "Every value here is already the one almost all garments use."
+            : $"This garment goes its own way in {differ} of {SoftBodySettings.Fields.Count} values.";
+    }
+
+    bool IsCommon(SoftBodyField field)
+    {
+        double value = field.Kind switch
+        {
+            SoftBodyFieldKind.Float => _settings.GetFloat(field),
+            SoftBodyFieldKind.Byte => _settings.GetByte(field),
+            _ => _settings.GetUInt32(field),
+        };
+        return Math.Abs(value - field.Common) < 1e-6;
     }
 
     string Suffix(uint hash) => _bones is not null && _bones.Any(bone => bone.Name == hash)
-        ? "  (on this skeleton)"
-        : "";
+        ? ""
+        : "   (not on this skeleton)";
 
     void RefreshFields()
     {
         bool all = AllFieldsBox.IsChecked == true;
         FieldList.ItemsSource = SoftBodySettings.Fields
             .Where(field => all || field.Varies)
-            .Select(field => new SoftBodyRow(_settings, field, MarkDirty))
+            .Select(field => new SoftBodyRow(_settings, field, Changed))
             .ToList();
     }
 
+    void Raw_Toggled(object sender, RoutedEventArgs e) => RefreshFields();
+
     void AllFields_Click(object sender, RoutedEventArgs e) => RefreshFields();
 
-    void Bone_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
+    void Bone_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        RemoveBoneButton.IsEnabled = BoneList.SelectedIndex >= 0;
         RenderSkeleton(BoneList.SelectedIndex);
+    }
+
+    void RemoveBone_Click(object sender, RoutedEventArgs e)
+    {
+        int index = BoneList.SelectedIndex;
+        if (index < 0 || index >= _settings.Bones.Count)
+            return;
+
+        uint hash = _settings.Bones[index];
+        _settings.Bones.RemoveAt(index);
+        Changed();
+        RenderSkeleton(-1);
+        SetStatus($"Took bone 0x{hash:X8} out.");
+    }
+
+    void AddBone_Click(object sender, RoutedEventArgs e)
+    {
+        if (_bones is null)
+            return;
+
+        var pick = new ClothBonePicker(_bones, _settings.Bones) { Owner = this };
+        if (pick.ShowDialog() != true || pick.Chosen == 0)
+            return;
+
+        _settings.Bones.Add(pick.Chosen);
+        _settings.Bones.Sort();
+        Changed();
+        RenderSkeleton(-1);
+        SetStatus($"Added bone 0x{pick.Chosen:X8}.");
+    }
+
+    void ExportSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save these cloth settings",
+            Filter = "Cloth settings (*.softbody)|*.softbody",
+            FileName = _name + ".softbody",
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        File.WriteAllBytes(dialog.FileName, SoftBodySettings.Write(_settings));
+        SetStatus($"Wrote {Path.GetFileName(dialog.FileName)}.");
+    }
+
+    void ImportSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Load cloth settings",
+            Filter = "Cloth settings (*.softbody)|*.softbody|All files (*.*)|*.*",
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        SoftBodySettingsAsset source;
+        try
+        {
+            source = SoftBodySettings.Read(File.ReadAllBytes(dialog.FileName));
+        }
+        catch (Exception error)
+        {
+            MessageBox.Show(this, error.Message, "Cloth", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        source.Fixed.CopyTo(_settings.Fixed, 0);
+        bool bones = WithBonesBox.IsChecked == true;
+        if (bones)
+        {
+            _settings.Bones.Clear();
+            _settings.Bones.AddRange(source.Bones);
+        }
+
+        RefreshFields();
+        Changed();
+        RenderSkeleton(-1);
+        SetStatus($"Took the behaviour from {Path.GetFileName(dialog.FileName)}"
+            + (bones ? ", bones and all." : "."));
+    }
+
+    void Defaults_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (SoftBodyField field in SoftBodySettings.Fields)
+        {
+            switch (field.Kind)
+            {
+                case SoftBodyFieldKind.Float:
+                    _settings.SetFloat(field, (float)field.Common);
+                    break;
+                case SoftBodyFieldKind.Byte:
+                    _settings.SetByte(field, (byte)field.Common);
+                    break;
+                default:
+                    _settings.SetUInt32(field, (uint)field.Common);
+                    break;
+            }
+        }
+
+        RefreshFields();
+        Changed();
+        SetStatus("Every value is now the one almost all garments use.");
+    }
 
     void RenderSkeleton(int highlight)
     {
@@ -168,7 +307,7 @@ public partial class ClothWindow : Window
         var group = new Model3DGroup();
         group.Children.Add(new AmbientLight(Color.FromRgb(0x3A, 0x3A, 0x42)));
         group.Children.Add(_light);
-        Add(group, pose, index => !wanted.Contains(_bones[index].Name), 0x4A, 0x4A, 0x55);
+        Add(group, pose, index => !wanted.Contains(_bones[index].Name), 0x40, 0x40, 0x4A);
         Add(group, pose, index => wanted.Contains(_bones[index].Name)
             && _bones[index].Name != single, 0x5A, 0x9A, 0xE8);
         if (single != 0)
@@ -193,10 +332,10 @@ public partial class ClothWindow : Window
         SetStatus("On the change list. Apply in the main window writes it into the game.");
     }
 
-    void MarkDirty()
+    void Changed()
     {
         SaveButton.IsEnabled = true;
-        SetStatus("Edited. Save puts it on the change list.");
+        RefreshBones();
     }
 
     void SetStatus(string text) => StatusText.Text = text;

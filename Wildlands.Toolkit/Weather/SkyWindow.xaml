@@ -1,27 +1,27 @@
 <Window x:Class="Wildlands.Toolkit.SkyWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Layered sky" Height="800" Width="1200" MinHeight="600" MinWidth="900"
+        Title="Sky" Height="820" Width="1140" MinHeight="620" MinWidth="920"
         Background="{StaticResource Background}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
 
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="14,10">
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="16,12">
             <StackPanel>
-                <TextBlock x:Name="NameText" FontSize="16" FontWeight="SemiBold"
+                <TextBlock x:Name="NameText" FontSize="17" FontWeight="SemiBold"
                            TextTrimming="CharacterEllipsis"/>
-                <TextBlock x:Name="DetailText" Margin="0,2,0,0" FontSize="11"
-                           Foreground="{StaticResource TextDim}"/>
+                <TextBlock x:Name="DetailText" Margin="0,3,0,0" Foreground="{StaticResource TextDim}"
+                           TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
 
         <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}"
-                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="14,10">
+                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,12">
             <DockPanel>
-                <Button x:Name="SaveButton" DockPanel.Dock="Right" Content="Save" Width="96"
-                        Click="Save_Click" IsEnabled="False"
-                        ToolTip="Put the edited sky on the change list"/>
+                <Button x:Name="SaveButton" DockPanel.Dock="Right" Content="Save" Width="110"
+                        Click="Save_Click" IsEnabled="False" FontWeight="SemiBold"
+                        ToolTip="Put the changed sky on the change list"/>
                 <TextBlock x:Name="StatusText" VerticalAlignment="Center"
                            Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
@@ -29,24 +29,29 @@
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="210"/>
+                <ColumnDefinition Width="200"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="290"/>
+                <ColumnDefinition Width="310"/>
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="LAYERS BY TIME OF DAY" FontSize="10"
-                               FontWeight="SemiBold" Foreground="{StaticResource TextDisabled}"
-                               Margin="12,12,0,6"/>
+                    <StackPanel DockPanel.Dock="Top" Margin="14,14,14,8">
+                        <TextBlock Text="1. PICK A TIME OF DAY" FontWeight="SemiBold" FontSize="11"/>
+                        <TextBlock Text="This sky is stored as a handful of moments. The game blends between them."
+                                   FontSize="11" Foreground="{StaticResource TextDim}"
+                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
                     <ListBox x:Name="LayerList" SelectionChanged="Layer_Changed"
                              Background="Transparent" BorderThickness="0"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Margin="2">
-                                    <Image Source="{Binding Thumbnail}" Width="32" Height="64"
-                                           RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                <StackPanel Orientation="Horizontal" Margin="2,3">
+                                    <Border BorderBrush="{StaticResource Border}" BorderThickness="1">
+                                        <Image Source="{Binding Thumbnail}" Width="30" Height="60"
+                                               RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                    </Border>
                                     <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
                                         <TextBlock Text="{Binding Detail}" FontSize="11"
@@ -59,25 +64,26 @@
                 </DockPanel>
             </Border>
 
-            <Grid Grid.Column="1">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <Border Grid.Row="0" Padding="12,12,12,8">
+            <DockPanel Grid.Column="1" Margin="16,14,16,14">
+                <TextBlock DockPanel.Dock="Top" x:Name="PreviewCaption" FontWeight="SemiBold"
+                           FontSize="11" Text="2. SEE WHAT IT LOOKS LIKE"/>
+                <TextBlock DockPanel.Dock="Top" Margin="0,4,0,8" FontSize="11"
+                           Foreground="{StaticResource TextDim}" TextWrapping="Wrap"
+                           Text="These are the raw colours the game looks up for this moment. How it maps them onto the sky is not worked out, so read this for colour and brightness, not as a picture of the sky."/>
+                <Border DockPanel.Dock="Bottom" Margin="0,10,0,0">
                     <StackPanel>
-                        <TextBlock Text="SLICES OF THIS LAYER" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextDisabled}" Margin="0,0,0,6"/>
-                        <ItemsControl x:Name="SliceStrip">
+                        <CheckBox x:Name="RawBox" Content="Show the raw layers this is built from"
+                                  Click="Raw_Click"/>
+                        <ItemsControl x:Name="SliceStrip" Margin="0,8,0,0" Visibility="Collapsed">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border BorderBrush="{Binding Outline}" BorderThickness="2"
-                                            Margin="0,0,5,5" Padding="1">
+                                            Margin="0,0,4,4" Padding="1">
                                         <StackPanel>
-                                            <Image Source="{Binding Thumbnail}" Width="32" Height="64"
+                                            <Image Source="{Binding Thumbnail}" Width="24" Height="48"
                                                    RenderOptions.BitmapScalingMode="NearestNeighbor"/>
                                             <TextBlock Text="{Binding Title}" FontSize="9"
                                                        HorizontalAlignment="Center"
@@ -89,71 +95,68 @@
                         </ItemsControl>
                     </StackPanel>
                 </Border>
-                <Border Grid.Row="1" Background="#FF14141A" Margin="12,4,12,12"
-                        BorderBrush="{StaticResource Border}" BorderThickness="1">
+                <Border Background="#FF14141A" BorderBrush="{StaticResource Border}"
+                        BorderThickness="1">
                     <Image x:Name="BigImage" RenderOptions.BitmapScalingMode="NearestNeighbor"
-                           Stretch="Uniform" Margin="10"/>
+                           Stretch="Uniform" Margin="12"/>
                 </Border>
-            </Grid>
+            </DockPanel>
 
             <Border Grid.Column="2" BorderBrush="{StaticResource Border}" BorderThickness="1,0,0,0">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="14">
-                        <TextBlock Text="SELECTED LAYER" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextDisabled}"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <TextBlock Text="Hour" VerticalAlignment="Center" Width="70"/>
-                            <TextBox x:Name="HourBox" Width="72" KeyDown="Hour_Key"/>
-                            <Button Content="Set" Margin="6,0,0,0" Padding="12,3" Click="Hour_Click"/>
-                        </StackPanel>
-
-                        <Border Height="1" Background="{StaticResource Border}" Margin="0,14"/>
-
-                        <TextBlock Text="COLOUR" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextDisabled}"/>
-                        <TextBlock Text="Moves the preview live. Bake writes it into the data."
+                    <StackPanel Margin="16">
+                        <TextBlock Text="3. CHANGE THE COLOUR" FontWeight="SemiBold" FontSize="11"/>
+                        <TextBlock Text="These move the picture straight away. Nothing is written until you press Apply."
                                    FontSize="11" Foreground="{StaticResource TextDim}"
-                                   TextWrapping="Wrap" Margin="0,4,0,8"/>
+                                   TextWrapping="Wrap" Margin="0,4,0,10"/>
 
-                        <TextBlock x:Name="ExposureLabel" Text="Exposure 1.00"/>
+                        <TextBlock x:Name="ExposureLabel" Text="Brightness  1.00"/>
                         <Slider x:Name="ExposureSlider" Minimum="0.1" Maximum="4" Value="1"
                                 ValueChanged="Adjust_Changed"/>
-                        <TextBlock x:Name="RedLabel" Text="Red 1.00" Margin="0,6,0,0"/>
-                        <Slider x:Name="RedSlider" Minimum="0" Maximum="2" Value="1"
-                                ValueChanged="Adjust_Changed"/>
-                        <TextBlock x:Name="GreenLabel" Text="Green 1.00" Margin="0,6,0,0"/>
-                        <Slider x:Name="GreenSlider" Minimum="0" Maximum="2" Value="1"
-                                ValueChanged="Adjust_Changed"/>
-                        <TextBlock x:Name="BlueLabel" Text="Blue 1.00" Margin="0,6,0,0"/>
-                        <Slider x:Name="BlueSlider" Minimum="0" Maximum="2" Value="1"
-                                ValueChanged="Adjust_Changed"/>
-                        <TextBlock x:Name="SaturationLabel" Text="Saturation 1.00" Margin="0,6,0,0"/>
+                        <TextBlock x:Name="SaturationLabel" Text="Colour strength  1.00" Margin="0,8,0,0"/>
                         <Slider x:Name="SaturationSlider" Minimum="0" Maximum="3" Value="1"
                                 ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="RedLabel" Text="Red  1.00" Margin="0,8,0,0"/>
+                        <Slider x:Name="RedSlider" Minimum="0" Maximum="2" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="GreenLabel" Text="Green  1.00" Margin="0,6,0,0"/>
+                        <Slider x:Name="GreenSlider" Minimum="0" Maximum="2" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="BlueLabel" Text="Blue  1.00" Margin="0,6,0,0"/>
+                        <Slider x:Name="BlueSlider" Minimum="0" Maximum="2" Value="1"
+                                ValueChanged="Adjust_Changed"/>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="Reset" Click="Reset_Click" Padding="14,4"/>
-                            <Button Content="Bake into layer" Click="BakeLayer_Click"
-                                    Margin="6,0,0,0" Padding="12,4"
-                                    ToolTip="Write the current colour change into the selected layer"/>
-                        </StackPanel>
-                        <Button Content="Bake into every layer" Click="BakeAll_Click"
-                                Margin="0,6,0,0" Padding="12,4" HorizontalAlignment="Left"
-                                ToolTip="Write the current colour change into all 14 layers"/>
+                        <TextBlock Text="Apply to" Margin="0,14,0,4" FontWeight="SemiBold" FontSize="11"/>
+                        <RadioButton x:Name="ScopeOne" Content="only this time of day" IsChecked="True"/>
+                        <RadioButton x:Name="ScopeAll" Content="all times of day" Margin="0,4,0,0"/>
 
-                        <Border Height="1" Background="{StaticResource Border}" Margin="0,14"/>
+                        <Button x:Name="ApplyButton" Content="Apply" Click="Apply_Click"
+                                Margin="0,12,0,0" Padding="0,7" FontWeight="SemiBold"
+                                IsEnabled="False"/>
+                        <Button Content="Put the sliders back" Click="Reset_Click"
+                                Margin="0,6,0,0" Padding="0,5"/>
 
-                        <TextBlock Text="LAYER DATA" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextDisabled}"/>
-                        <Button Content="Export layer as dds…" Click="Export_Click"
-                                Margin="0,8,0,0" Padding="12,4" HorizontalAlignment="Left"/>
-                        <Button Content="Replace layer from dds…" Click="Import_Click"
-                                Margin="0,6,0,0" Padding="12,4" HorizontalAlignment="Left"
-                                ToolTip="Read a dds of the same size back into the selected layer"/>
-                        <Button x:Name="CopyButton" Content="Copy from another layer…"
-                                Click="Copy_Click" Margin="0,6,0,0" Padding="12,4"
-                                HorizontalAlignment="Left"
-                                ToolTip="Overwrite the selected layer with the texels of another one"/>
+                        <Border Height="1" Background="{StaticResource Border}" Margin="0,16"/>
+
+                        <Expander Header="Less common things">
+                            <StackPanel Margin="0,10,0,0">
+                                <TextBlock Text="Move this moment to another hour" FontSize="11"
+                                           Foreground="{StaticResource TextDim}" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <TextBox x:Name="HourBox" Width="70" KeyDown="Hour_Key"/>
+                                    <TextBlock Text="h" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                                    <Button Content="Move" Margin="8,0,0,0" Padding="12,3"
+                                            Click="Hour_Click"/>
+                                </StackPanel>
+
+                                <Button Content="Copy the colours of another time of day…"
+                                        Click="Copy_Click" Margin="0,12,0,0" Padding="0,5"/>
+                                <Button Content="Export this one as dds…" Click="Export_Click"
+                                        Margin="0,6,0,0" Padding="0,5"/>
+                                <Button Content="Replace this one from dds…" Click="Import_Click"
+                                        Margin="0,6,0,0" Padding="0,5"/>
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
