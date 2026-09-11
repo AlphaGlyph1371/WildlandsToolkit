@@ -72,6 +72,11 @@ public partial class MainWindow : Window
     BrowserItem? _previewSkyItem;
     Location? _previewSkyWhere;
 
+    SoftBodySettingsAsset? _previewSettings;
+    ClothAsset? _previewCloth;
+    BrowserItem? _previewSettingsItem;
+    Location? _previewSettingsWhere;
+
     BuildTableAsset? _previewBuildTable;
     byte[]? _previewBuildTableData;
     BrowserItem? _previewBuildTableItem;
@@ -732,10 +737,11 @@ public partial class MainWindow : Window
             : _previewMesh is not null ? "Open in mesh viewer"
             : _previewAnimation is not null ? "Open in animation viewer"
             : _previewSky is not null ? "Open in sky editor"
+            : _previewSettings is not null ? "Open in cloth editor"
             : "Open in texture viewer";
         MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null
             || _previewMesh is not null || _previewCycle is not null || _previewAnimation is not null
-            || _previewSky is not null
+            || _previewSky is not null || _previewSettings is not null
             || FeatureAvailability.BuildTableEditor && _previewBuildTable is not null));
 
         MenuExtract.IsEnabled = count > 0;
@@ -949,6 +955,10 @@ public partial class MainWindow : Window
         _previewSky = null;
         _previewSkyItem = null;
         _previewSkyWhere = null;
+        _previewSettings = null;
+        _previewCloth = null;
+        _previewSettingsItem = null;
+        _previewSettingsWhere = null;
         _previewBuildTable = null;
         _previewBuildTableData = null;
         _previewBuildTableItem = null;
@@ -966,6 +976,7 @@ public partial class MainWindow : Window
         OpenBuildTableButton.Visibility = Visibility.Collapsed;
         OpenAnimationButton.Visibility = Visibility.Collapsed;
         OpenSkyButton.Visibility = Visibility.Collapsed;
+        OpenClothButton.Visibility = Visibility.Collapsed;
 
         if (item is null)
         {
@@ -1013,6 +1024,14 @@ public partial class MainWindow : Window
         if (item.Resource?.ClassHash == LayeredSky.ClassHash)
         {
             ShowLayeredSky(item, lines);
+            PreviewInfo.Text = string.Join(Environment.NewLine, lines);
+            return;
+        }
+
+        if (item.Resource?.ClassHash == Cloth.ClassHash
+            || item.Resource?.ClassHash == SoftBodySettings.ClassHash)
+        {
+            ShowCloth(item, lines);
             PreviewInfo.Text = string.Join(Environment.NewLine, lines);
             return;
         }
@@ -1588,6 +1607,12 @@ public partial class MainWindow : Window
         if (_previewSky is not null)
         {
             OpenSkyEditor();
+            return;
+        }
+
+        if (_previewSettings is not null)
+        {
+            OpenClothEditor();
             return;
         }
 

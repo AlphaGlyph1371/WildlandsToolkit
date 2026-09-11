@@ -147,4 +147,80 @@ public partial class MainWindow
             UpdateChangeButtons();
         }).Show();
     }
+
+    void ShowCloth(BrowserItem item, List<string> lines)
+    {
+        if (item.Resource is null)
+            return;
+
+        try
+        {
+            if (item.Resource.ClassHash == Cloth.ClassHash)
+            {
+                _previewCloth = Cloth.Read(EffectiveData(item));
+                lines.Add($"faces      {_previewCloth.Faces.Count()}");
+                lines.Add($"links      {_previewCloth.Links.Count()}");
+                lines.Add($"objects    {_previewCloth.Objects.Count}");
+            }
+        }
+        catch (Exception ex)
+        {
+            lines.Add("");
+            lines.Add($"       cloth unreadable: {ex.Message}");
+        }
+
+        Resource? carrier = item.Resource.ClassHash == SoftBodySettings.ClassHash
+            ? item.Resource
+            : _previewSiblings.FirstOrDefault(sibling => sibling.ClassHash == SoftBodySettings.ClassHash);
+        if (carrier is null)
+        {
+            lines.Add("");
+            lines.Add("       no SoftBodySettings beside this cloth");
+            return;
+        }
+
+        try
+        {
+            _previewSettings = SoftBodySettings.Read(carrier.Data);
+        }
+        catch (Exception ex)
+        {
+            lines.Add("");
+            lines.Add($"       settings unreadable: {ex.Message}");
+            return;
+        }
+
+        _previewSettingsItem = FindItem(carrier) ?? item;
+        _previewSettingsWhere = _showing;
+        lines.Add($"settings   {carrier.Name}");
+        lines.Add($"bones      {_previewSettings.Bones.Count}");
+        OpenClothButton.Visibility = Visibility.Visible;
+    }
+
+    BrowserItem? FindItem(Resource resource) => ItemList.Items.OfType<BrowserItem>()
+        .FirstOrDefault(candidate => candidate.Resource is not null
+            && candidate.Resource.Id == resource.Id);
+
+    void OpenClothEditor()
+    {
+        if (_previewSettings is null || _previewSettingsItem is null || _previewSettingsWhere is null)
+            return;
+
+        SoftBodySettingsAsset settings = _previewSettings;
+        ClothAsset? cloth = _previewCloth;
+        BrowserItem item = _previewSettingsItem;
+        Location where = _previewSettingsWhere;
+        List<SkeletonBone>? bones = FindAnimationSkeleton(settings.Bones.ToHashSet(), out _);
+
+        new ClothWindow(settings, cloth, item.Name, bones, data =>
+        {
+            if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName,
+                    item.Index, item.Name, data, ResourceClassHash: SoftBodySettings.ClassHash)],
+                    $"Edit {item.Name}"))
+                return;
+
+            SetStatus($"{item.Name}: changes queued");
+            UpdateChangeButtons();
+        }).Show();
+    }
 }

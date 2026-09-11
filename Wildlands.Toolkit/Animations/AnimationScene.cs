@@ -12,13 +12,19 @@ public static class AnimationScene
     const double JointSize = 0.012;
     const double BoneWidth = 0.008;
 
-    public static MeshGeometry3D Build(IReadOnlyList<Matrix4x4> pose, List<SkeletonBone> bones)
+    public static MeshGeometry3D Build(IReadOnlyList<Matrix4x4> pose, List<SkeletonBone> bones) =>
+        Build(pose, bones, null);
+
+    public static MeshGeometry3D Build(IReadOnlyList<Matrix4x4> pose, List<SkeletonBone> bones,
+        Func<int, bool>? keep)
     {
         var positions = new Point3DCollection();
         var indices = new Int32Collection();
 
         for (int i = 0; i < pose.Count; i++)
         {
+            if (keep is not null && !keep(i))
+                continue;
             Vector3 point = pose[i].Translation;
             AddBox(positions, indices, point, point, JointSize);
             int parent = bones[i].ParentIndex;
