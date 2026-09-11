@@ -44,64 +44,6 @@ public static class LocalizationPackage
         ReadIndexedData(indexedBytes, result);
         return result;
     }
-
-    public static byte[] CreateSingleString(byte[] templateResource, ulong resourceId, uint stringId, string value)
-    {
-        ArgumentNullException.ThrowIfNull(templateResource);
-        ArgumentNullException.ThrowIfNull(value);
-        if (templateResource.Length < 41)
-            throw new InvalidDataException("The localization template is too short.");
-        if (value.Length == 0 || value.Length > ushort.MaxValue)
-            throw new InvalidDataException("The localized name must contain between 1 and 65,535 characters.");
-        if (value.Any(char.IsSurrogate) || value.Contains('\0'))
-            throw new InvalidDataException("The localized name contains a character this game package cannot encode safely.");
-
-        var characters = value.Distinct().ToList();
-        if (characters.Count > 254)
-            throw new InvalidDataException("The localized name contains too many distinct characters.");
-
-        int fragmentCount = characters.Count + 1;
-        int tableOffset = checked(4 + fragmentCount * 4);
-        int entriesOffset = checked(tableOffset + 2 + 12);
-        int textOffset = entriesOffset + 4;
-        var indexed = new byte[checked(textOffset + value.Length)];
-        WriteUInt16BigEndian(indexed, 0, 255);
-        WriteUInt16BigEndian(indexed, 2, (ushort)fragmentCount);
-        int at = 4;
-        at += 4; // Empty fragment: right=0, left=0.
-        var fragmentByCharacter = new Dictionary<char, byte>();
-        for (int index = 0; index < characters.Count; index++)
-        {
-            char character = characters[index];
-            WriteUInt16BigEndian(indexed, at, character);
-            WriteUInt16BigEndian(indexed, at + 2, 0);
-            at += 4;
-            fragmentByCharacter[character] = (byte)index;
-        }
-
-        WriteUInt16BigEndian(indexed, tableOffset, 1);
-        WriteUInt32BigEndian(indexed, tableOffset + 2, stringId);
-        WriteUInt32BigEndian(indexed, tableOffset + 6, (uint)textOffset);
-        WriteUInt32BigEndian(indexed, tableOffset + 10, (uint)entriesOffset);
-        WriteUInt16BigEndian(indexed, entriesOffset, 0);
-        WriteUInt16BigEndian(indexed, entriesOffset + 2, (ushort)value.Length);
-        for (int index = 0; index < value.Length; index++)
-            indexed[textOffset + index] = fragmentByCharacter[value[index]];
-
-        var result = new byte[checked(41 + indexed.Length)];
-        templateResource.AsSpan(0, 41).CopyTo(result);
-        BinaryPrimitives.WriteUInt64LittleEndian(result, resourceId);
-        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(8), ClassHash);
-        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(33), IndexedDataMarker);
-        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(37), indexed.Length);
-        indexed.CopyTo(result.AsSpan(41));
-
-        var checkedPackage = Read(result);
-        if (!checkedPackage.Strings.TryGetValue(stringId, out string? checkedValue) || !string.Equals(checkedValue, value, StringComparison.Ordinal))
-            throw new InvalidDataException("The generated localization package did not read back exactly.");
-        return result;
-    }
-
     public static byte[] AddOrReplaceString(byte[] resource, uint stringId, string value)
     {
         ArgumentNullException.ThrowIfNull(resource);

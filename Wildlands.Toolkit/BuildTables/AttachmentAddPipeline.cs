@@ -1157,38 +1157,6 @@ internal static class AttachmentAddPipeline
 
     readonly record struct GameplayNameField(int CountOffset, int TextOffset,
         int SuffixOffset, int ByteCount);
-
-    internal static uint ReadGameplayDisplayStringId(ReadOnlySpan<byte> data, ulong expectedId)
-    {
-        if (data.Length < 12 || BinaryPrimitives.ReadUInt64LittleEndian(data) != expectedId)
-            throw new InvalidDataException("The gameplay record does not start with its expected resource ID.");
-
-        int tag = IndexOfUInt32(data, BuildTagMarker, 12);
-        if (tag < 0 || tag + 8 > data.Length)
-            throw new InvalidDataException("The gameplay record has no readable BuildTag field.");
-        int localized = IndexOfUInt32(data, LocalizedValueMarker, tag + 8);
-        if (localized < 0 || localized + 8 > data.Length)
-            throw new InvalidDataException("The gameplay record has no localized display-name field after its BuildTag.");
-
-        uint stringId = BinaryPrimitives.ReadUInt32LittleEndian(data[(localized + 4)..]);
-        if (stringId == 0)
-            throw new InvalidDataException("The gameplay record has a zero display-name string ID.");
-        return stringId;
-    }
-
-    internal static uint ReadGameplayBuildTag(ReadOnlySpan<byte> data, ulong expectedId)
-    {
-        if (data.Length < 12 || BinaryPrimitives.ReadUInt64LittleEndian(data) != expectedId)
-            throw new InvalidDataException("The gameplay record does not start with its expected resource ID.");
-        int marker = IndexOfUInt32(data, BuildTagMarker, 12);
-        if (marker < 0 || marker + 8 > data.Length)
-            throw new InvalidDataException("The gameplay record has no readable BuildTag field.");
-        uint buildTag = BinaryPrimitives.ReadUInt32LittleEndian(data[(marker + 4)..]);
-        if (buildTag == 0)
-            throw new InvalidDataException("The gameplay record has a zero BuildTag.");
-        return buildTag;
-    }
-
     static byte[] CloneRecordInfo(byte[] source, ulong oldInfoId, ulong newInfoId, ulong oldRecordId, ulong newRecordId, string name)
     {
         StoreObjectInfo info = StoreObjectInfo.Parse(source, oldInfoId);

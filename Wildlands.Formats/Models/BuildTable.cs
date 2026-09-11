@@ -153,20 +153,6 @@ public sealed class BuildTableAsset
         }
         return result;
     }
-
-    public int ReplaceReference(ulong oldValue, ulong newValue)
-    {
-        int changed = 0;
-        foreach (var reference in References)
-        {
-            if (reference.Kind == BuildTableReferenceKind.TableIdentity || reference.Value != oldValue)
-                continue;
-            reference.Value = newValue;
-            changed++;
-        }
-        return changed;
-    }
-
     public byte[] DuplicateRow(int rowIndex)
     {
         if ((uint)rowIndex >= (uint)Rows.Count)
@@ -243,16 +229,6 @@ public sealed class BuildTableAsset
             throw new ArgumentOutOfRangeException(nameof(rowIndex));
         Rows[rowIndex].TagEntry.Value = tag;
     }
-
-    public void SetPossibleTag(int rowIndex, int tagIndex, uint tag)
-    {
-        if ((uint)rowIndex >= (uint)Rows.Count)
-            throw new ArgumentOutOfRangeException(nameof(rowIndex));
-        if ((uint)tagIndex >= (uint)Rows[rowIndex].PossibleTagEntries.Count)
-            throw new ArgumentOutOfRangeException(nameof(tagIndex));
-        Rows[rowIndex].PossibleTagEntries[tagIndex].Value = tag;
-    }
-
     public void ReplacePossibleTag(int rowIndex, uint oldTag, uint newTag)
     {
         if ((uint)rowIndex >= (uint)Rows.Count)

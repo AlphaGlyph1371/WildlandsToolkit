@@ -709,20 +709,6 @@ public sealed class ForgeArchive : IDisposable
         Array.Sort(sorted, (a, b) => a.Id.CompareTo(b.Id));
         return sorted;
     }
-
-    public void ExtractAll(string outputDirectory, IProgress<int>? progress = null)
-    {
-        Directory.CreateDirectory(outputDirectory);
-
-        for (int i = 0; i < Entries.Count; i++)
-        {
-            var entry = Entries[i];
-            string name = $"{entry.Index}_-_{Path.GetFileNameWithoutExtension(entry.Name)}{entry.FileExtension}";
-            File.WriteAllBytes(Path.Combine(outputDirectory, name), ReadEntry(entry));
-            progress?.Report(i + 1);
-        }
-    }
-
     string ReadNullTerminatedString()
     {
         var builder = new StringBuilder();

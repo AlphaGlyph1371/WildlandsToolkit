@@ -161,21 +161,6 @@ public static class GlobalMetaFile
         return Write(asset);
     }
 
-    public static byte[] CreatePatchMetaFile(byte[] template, string identity)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(identity);
-        GlobalMetaFileAsset asset = Read(template);
-        GlobalMetaField field = asset.Find(IdentityTag)
-            ?? throw new InvalidDataException("The template GlobalMetaFile carries no identity field.");
-        if (field.Kind != GlobalMetaFieldKind.Text || field.Text.Length != identity.Length)
-            throw new InvalidDataException("The template GlobalMetaFile identity is not a string of the expected length.");
-        field.Text = identity;
-        byte[] written = Write(asset);
-        if (written.Length != template.Length)
-            throw new InvalidDataException("The rewritten GlobalMetaFile changed length.");
-        return written;
-    }
-
     static byte[] ReadBlock(byte[] data, ref int offset)
     {
         int length = checked((int)ReadUInt32(data, ref offset));

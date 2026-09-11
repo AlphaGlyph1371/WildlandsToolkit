@@ -135,28 +135,6 @@ public sealed class ArmoryIndex
         GunsmithAvailabilityList store = GunsmithAvailability.FindStoreRegistries(this, templateInfoId).Single();
         return GunsmithAvailability.InsertAfterTemplates([(store, templateInfoId, newInfoId)]).Single();
     }
-
-    internal ArmoryDatabaseResourceChange CreateDatabaseContainerInsertion(ulong templateId, ulong newId)
-    {
-        if (newId == 0 || _databaseResources.Any(resource => resource.Id == newId))
-            throw new InvalidOperationException($"Database resource ID 0x{newId:X12} is zero or already used.");
-        GunsmithAvailabilityList container = GunsmithAvailability.FindDatabaseContainerRegistries(this, templateId).Single();
-        return GunsmithAvailability.InsertAfterTemplates([(container, templateId, newId)]).Single();
-    }
-
-    internal ArmoryDatabaseResourceChange CreateStoreRegistryReplacement(ulong oldInfoId, ulong newInfoId)
-    {
-        if (newInfoId == 0 || _databaseResources.Any(resource => resource.Id == newInfoId))
-            throw new InvalidOperationException($"StoreObjectInfo ID 0x{newInfoId:X12} is zero or already used.");
-        GunsmithAvailabilityList store = GunsmithAvailability.FindStoreRegistries(this, oldInfoId).Single();
-        var members = store.RecordIds.Select(id => id == oldInfoId ? newInfoId : id).ToList();
-        if (members.Count(id => id == newInfoId) != 1 || members.Contains(oldInfoId))
-            throw new InvalidDataException("The StoreDB replacement did not produce exactly one corrected StoreObjectInfo reference.");
-        byte[] data = GunsmithAvailability.RewriteMembers(store, members);
-        return new ArmoryDatabaseResourceChange(store.Owner.ArchivePath, store.Owner.EntryIndex,
-            store.Owner.EntryName, store.Owner.ResourceIndex, store.Owner.Name, data);
-    }
-
     public IReadOnlyList<ArmoryDatabaseResourceChange> CreateBuildTagColumnMapInsertions(uint templateTag, uint newTag)
         => AttachmentAddPipeline.BuildTagColumnMapChanges(this, templateTag, newTag);
 
@@ -446,9 +424,6 @@ public sealed class ArmoryIndex
             return null;
         }
     }
-
-    public static bool IsCurrent(string path, IReadOnlyList<string> archivePaths) => Load(path, archivePaths) is not null;
-
     public bool MatchesArchives(IReadOnlyList<string> archivePaths) => string.Equals(Fingerprint, CreateFingerprint(archivePaths), StringComparison.Ordinal);
 
     public static string PartialPath(string path) => path + ".partial";

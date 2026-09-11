@@ -89,10 +89,6 @@ public static class BuildTableTargetResolver
             return fallback;
         }
     }
-
-    public static Resource? LoadResource(IReadOnlyList<string> archivePaths, ulong id, CancellationToken cancellationToken = default)
-        => LoadResourceGroup(archivePaths, id, cancellationToken).FirstOrDefault(resource => resource.Id == id);
-
     public static IReadOnlyList<Resource> LoadResourceGroup(IReadOnlyList<string> archivePaths, ulong id, CancellationToken cancellationToken = default)
     {
         if (id == 0)
