@@ -55,4 +55,53 @@ static partial class Commands
             Console.WriteLine($"  x{count} {reason}");
         return same == read ? 0 : 1;
     }
+
+    internal static int CycleSoftBodySettings(string folder)
+    {
+        int read = 0, same = 0, differ = 0, broken = 0;
+        var bones = new Dictionary<uint, int>();
+        var reasons = new Dictionary<string, int>();
+
+        foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+        {
+            DataFile file;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources
+                         .Where(item => item.ClassHash == SoftBodySettings.ClassHash))
+            {
+                read++;
+                try
+                {
+                    SoftBodySettingsAsset asset = SoftBodySettings.Read(resource.Data);
+                    foreach (uint bone in asset.Bones)
+                        bones[bone] = bones.GetValueOrDefault(bone) + 1;
+                    if (SoftBodySettings.Write(asset).AsSpan().SequenceEqual(resource.Data))
+                        same++;
+                    else
+                        differ++;
+                }
+                catch (Exception error)
+                {
+                    broken++;
+                    reasons[error.Message] = reasons.GetValueOrDefault(error.Message) + 1;
+                }
+            }
+        }
+
+        Console.WriteLine($"{read} SoftBodySettings: {same} byte for byte, {differ} different, "
+            + $"{broken} unreadable");
+        Console.WriteLine($"{bones.Values.Sum()} bone reference(s), {bones.Count} distinct");
+        foreach ((string reason, int count) in reasons.OrderByDescending(pair => pair.Value).Take(5))
+            Console.WriteLine($"  x{count} {reason}");
+        return same == read ? 0 : 1;
+    }
 }

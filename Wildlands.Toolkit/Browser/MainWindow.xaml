@@ -275,6 +275,9 @@
                     <Button x:Name="OpenAnimationButton" Content="Open animation viewer"
                         Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
 
+                    <Button x:Name="OpenSkyButton" Content="Open sky editor"
+                        Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
+
                     <ScrollViewer VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto">
                         <TextBlock x:Name="PreviewInfo" FontFamily="Consolas" FontSize="12"
                                Foreground="{StaticResource TextDim}" TextWrapping="NoWrap"/>

@@ -1,0 +1,162 @@
+<Window x:Class="Wildlands.Toolkit.SkyWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Layered sky" Height="800" Width="1200" MinHeight="600" MinWidth="900"
+        Background="{StaticResource Background}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,0,0,1" Padding="14,10">
+            <StackPanel>
+                <TextBlock x:Name="NameText" FontSize="16" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="DetailText" Margin="0,2,0,0" FontSize="11"
+                           Foreground="{StaticResource TextDim}"/>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="14,10">
+            <DockPanel>
+                <Button x:Name="SaveButton" DockPanel.Dock="Right" Content="Save" Width="96"
+                        Click="Save_Click" IsEnabled="False"
+                        ToolTip="Put the edited sky on the change list"/>
+                <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+                           Foreground="{StaticResource TextDim}" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="290"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="LAYERS BY TIME OF DAY" FontSize="10"
+                               FontWeight="SemiBold" Foreground="{StaticResource TextDisabled}"
+                               Margin="12,12,0,6"/>
+                    <ListBox x:Name="LayerList" SelectionChanged="Layer_Changed"
+                             Background="Transparent" BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="2">
+                                    <Image Source="{Binding Thumbnail}" Width="32" Height="64"
+                                           RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Detail}" FontSize="11"
+                                                   Foreground="{StaticResource TextDim}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Padding="12,12,12,8">
+                    <StackPanel>
+                        <TextBlock Text="SLICES OF THIS LAYER" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="0,0,0,6"/>
+                        <ItemsControl x:Name="SliceStrip">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{Binding Outline}" BorderThickness="2"
+                                            Margin="0,0,5,5" Padding="1">
+                                        <StackPanel>
+                                            <Image Source="{Binding Thumbnail}" Width="32" Height="64"
+                                                   RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                            <TextBlock Text="{Binding Title}" FontSize="9"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="{StaticResource TextDim}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Background="#FF14141A" Margin="12,4,12,12"
+                        BorderBrush="{StaticResource Border}" BorderThickness="1">
+                    <Image x:Name="BigImage" RenderOptions.BitmapScalingMode="NearestNeighbor"
+                           Stretch="Uniform" Margin="10"/>
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="2" BorderBrush="{StaticResource Border}" BorderThickness="1,0,0,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="14">
+                        <TextBlock Text="SELECTED LAYER" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="Hour" VerticalAlignment="Center" Width="70"/>
+                            <TextBox x:Name="HourBox" Width="72" KeyDown="Hour_Key"/>
+                            <Button Content="Set" Margin="6,0,0,0" Padding="12,3" Click="Hour_Click"/>
+                        </StackPanel>
+
+                        <Border Height="1" Background="{StaticResource Border}" Margin="0,14"/>
+
+                        <TextBlock Text="COLOUR" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}"/>
+                        <TextBlock Text="Moves the preview live. Bake writes it into the data."
+                                   FontSize="11" Foreground="{StaticResource TextDim}"
+                                   TextWrapping="Wrap" Margin="0,4,0,8"/>
+
+                        <TextBlock x:Name="ExposureLabel" Text="Exposure 1.00"/>
+                        <Slider x:Name="ExposureSlider" Minimum="0.1" Maximum="4" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="RedLabel" Text="Red 1.00" Margin="0,6,0,0"/>
+                        <Slider x:Name="RedSlider" Minimum="0" Maximum="2" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="GreenLabel" Text="Green 1.00" Margin="0,6,0,0"/>
+                        <Slider x:Name="GreenSlider" Minimum="0" Maximum="2" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="BlueLabel" Text="Blue 1.00" Margin="0,6,0,0"/>
+                        <Slider x:Name="BlueSlider" Minimum="0" Maximum="2" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+                        <TextBlock x:Name="SaturationLabel" Text="Saturation 1.00" Margin="0,6,0,0"/>
+                        <Slider x:Name="SaturationSlider" Minimum="0" Maximum="3" Value="1"
+                                ValueChanged="Adjust_Changed"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Reset" Click="Reset_Click" Padding="14,4"/>
+                            <Button Content="Bake into layer" Click="BakeLayer_Click"
+                                    Margin="6,0,0,0" Padding="12,4"
+                                    ToolTip="Write the current colour change into the selected layer"/>
+                        </StackPanel>
+                        <Button Content="Bake into every layer" Click="BakeAll_Click"
+                                Margin="0,6,0,0" Padding="12,4" HorizontalAlignment="Left"
+                                ToolTip="Write the current colour change into all 14 layers"/>
+
+                        <Border Height="1" Background="{StaticResource Border}" Margin="0,14"/>
+
+                        <TextBlock Text="LAYER DATA" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}"/>
+                        <Button Content="Export layer as dds…" Click="Export_Click"
+                                Margin="0,8,0,0" Padding="12,4" HorizontalAlignment="Left"/>
+                        <Button Content="Replace layer from dds…" Click="Import_Click"
+                                Margin="0,6,0,0" Padding="12,4" HorizontalAlignment="Left"
+                                ToolTip="Read a dds of the same size back into the selected layer"/>
+                        <Button x:Name="CopyButton" Content="Copy from another layer…"
+                                Click="Copy_Click" Margin="0,6,0,0" Padding="12,4"
+                                HorizontalAlignment="Left"
+                                ToolTip="Overwrite the selected layer with the texels of another one"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

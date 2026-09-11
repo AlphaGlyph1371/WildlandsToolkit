@@ -68,6 +68,10 @@ public partial class MainWindow : Window
     AnimationAsset? _previewAnimation;
     string _previewAnimationName = "";
 
+    LayeredSkyAsset? _previewSky;
+    BrowserItem? _previewSkyItem;
+    Location? _previewSkyWhere;
+
     BuildTableAsset? _previewBuildTable;
     byte[]? _previewBuildTableData;
     BrowserItem? _previewBuildTableItem;
@@ -727,9 +731,11 @@ public partial class MainWindow : Window
             : FeatureAvailability.BuildTableEditor && _previewBuildTable is not null ? "Open in BuildTable editor"
             : _previewMesh is not null ? "Open in mesh viewer"
             : _previewAnimation is not null ? "Open in animation viewer"
+            : _previewSky is not null ? "Open in sky editor"
             : "Open in texture viewer";
         MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null
             || _previewMesh is not null || _previewCycle is not null || _previewAnimation is not null
+            || _previewSky is not null
             || FeatureAvailability.BuildTableEditor && _previewBuildTable is not null));
 
         MenuExtract.IsEnabled = count > 0;
@@ -940,6 +946,9 @@ public partial class MainWindow : Window
         _previewCycle = null;
         _previewAnimation = null;
         _previewAnimationName = "";
+        _previewSky = null;
+        _previewSkyItem = null;
+        _previewSkyWhere = null;
         _previewBuildTable = null;
         _previewBuildTableData = null;
         _previewBuildTableItem = null;
@@ -956,6 +965,7 @@ public partial class MainWindow : Window
         OpenCycleButton.Visibility = Visibility.Collapsed;
         OpenBuildTableButton.Visibility = Visibility.Collapsed;
         OpenAnimationButton.Visibility = Visibility.Collapsed;
+        OpenSkyButton.Visibility = Visibility.Collapsed;
 
         if (item is null)
         {
@@ -996,6 +1006,13 @@ public partial class MainWindow : Window
         if (item.Resource?.ClassHash == Animation.ClassHash)
         {
             ShowAnimation(item, lines);
+            PreviewInfo.Text = string.Join(Environment.NewLine, lines);
+            return;
+        }
+
+        if (item.Resource?.ClassHash == LayeredSky.ClassHash)
+        {
+            ShowLayeredSky(item, lines);
             PreviewInfo.Text = string.Join(Environment.NewLine, lines);
             return;
         }
@@ -1565,6 +1582,12 @@ public partial class MainWindow : Window
         if (_previewCycle is not null)
         {
             OpenCycleEditor();
+            return;
+        }
+
+        if (_previewSky is not null)
+        {
+            OpenSkyEditor();
             return;
         }
 

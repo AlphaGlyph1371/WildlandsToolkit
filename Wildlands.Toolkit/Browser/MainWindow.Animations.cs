@@ -100,4 +100,51 @@ public partial class MainWindow
         name = "skeleton index";
         return indexed;
     }
+
+    void ShowLayeredSky(BrowserItem item, List<string> lines)
+    {
+        if (item.Resource is null)
+            return;
+
+        try
+        {
+            _previewSky = LayeredSky.Read(EffectiveData(item));
+        }
+        catch (Exception ex)
+        {
+            lines.Add("");
+            lines.Add($"       layered sky unreadable: {ex.Message}");
+            return;
+        }
+
+        _previewSkyItem = item;
+        _previewSkyWhere = _showing;
+        LayeredSkyLayer first = _previewSky.Layers[0];
+        lines.Add($"layers     {_previewSky.Layers.Count}");
+        lines.Add($"texels     {first.Width} x {first.Height} x {first.Depth} "
+            + $"at {first.BytesPerTexel} byte(s)");
+        lines.Add("hours      " + string.Join(", ", _previewSky.Layers
+            .Select(layer => $"{layer.Hour:0.#}")));
+        OpenSkyButton.Visibility = Visibility.Visible;
+    }
+
+    void OpenSkyEditor()
+    {
+        if (_previewSky is null || _previewSkyItem is null || _previewSkyWhere is null)
+            return;
+
+        LayeredSkyAsset sky = _previewSky;
+        BrowserItem item = _previewSkyItem;
+        Location where = _previewSkyWhere;
+        new SkyWindow(sky, item.Name, data =>
+        {
+            if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex, where.EntryName,
+                    item.Index, item.Name, data, ResourceClassHash: LayeredSky.ClassHash)],
+                    $"Edit {item.Name}"))
+                return;
+
+            SetStatus($"{item.Name}: changes queued");
+            UpdateChangeButtons();
+        }).Show();
+    }
 }
