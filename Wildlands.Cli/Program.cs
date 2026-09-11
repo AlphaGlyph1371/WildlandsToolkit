@@ -87,6 +87,8 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  lodsizes <game folder> <archive.forge> [name prefix]  check that every LODSelector names the real size of the LOD it streams");
     Console.WriteLine("  agree <game folder> <archive.forge> [name prefix]  check that every installed copy of a container offers the same options");
     Console.WriteLine("  buildinfo <archive.forge> <container filter> [table filter]  show BuildTable row tags and selectors");
+    Console.WriteLine("  classcensus <folder with .data>  count every resource class and how many bytes it holds");
+    Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
     Console.WriteLine("  prefetchcycle <game folder>  read and rewrite every prefetch block byte for byte");
     Console.WriteLine("  metacycle <game folder>  read and rewrite every GlobalMetaFile byte for byte");
     Console.WriteLine("  makepatch <skeleton.forge> <source.forge> <out.forge> <entry name|prefix*>...  build a patch archive from entries of another archive");
@@ -277,6 +279,10 @@ try
             return CheckCopiesAgree(args[1], args[2], args.Length >= 4 ? args[3] : "");
         case "buildinfo" when args.Length >= 3:
             return InspectBuildTables(args[1], args[2], args.Length >= 4 ? args[3] : "");
+        case "classcensus" when args.Length >= 2:
+            return CensusResourceClasses(args[1]);
+        case "prefetchblock" when args.Length >= 3:
+            return DumpPrefetchBlock(args[1], args[2..]);
         case "prefetchcycle" when args.Length >= 2:
             return CyclePrefetchBlocks(args[1], args.Length >= 3 ? args[2] : "",
                 args.Length >= 4 && args[3] == "dump");
@@ -4114,6 +4120,55 @@ static int CreatePatchArchive(string skeletonPath, string sourcePath, string out
         + $"{new FileInfo(outputPath).Length / (1024.0 * 1024.0):0.0} MB");
     foreach (ForgeEntry entry in written.Entries)
         Console.WriteLine($"  {entry.Length,12:n0}  0x{entry.Id:X12}  {entry.Name}{entry.FileExtension}");
+    return 0;
+}
+
+static int CensusResourceClasses(string folder)
+{
+    var counts = new Dictionary<uint, int>();
+    var bytes = new Dictionary<uint, long>();
+    int files = 0, unreadable = 0;
+    foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            DataFile file = DataFile.Read(stream);
+            files++;
+            foreach (Resource resource in file.Resources)
+            {
+                counts[resource.ClassHash] = counts.GetValueOrDefault(resource.ClassHash) + 1;
+                bytes[resource.ClassHash] = bytes.GetValueOrDefault(resource.ClassHash) + resource.Data.Length;
+            }
+        }
+        catch
+        {
+            unreadable++;
+        }
+    }
+
+    Console.WriteLine($"{files:n0} container(s), {unreadable:n0} unreadable, {counts.Count} class(es)");
+    Console.WriteLine($"{"count",10}  {"bytes",14}  class       name");
+    foreach ((uint hash, int count) in counts.OrderByDescending(pair => pair.Value))
+        Console.WriteLine($"{count,10:n0}  {bytes[hash],14:n0}  0x{hash:X8}  {ResourceTypes.NameOf(hash)}");
+    return 0;
+}
+
+static int DumpPrefetchBlock(string archivePath, IReadOnlyList<string> entryTexts)
+{
+    var wanted = entryTexts.Select(ParseResourceId).ToHashSet();
+    using var archive = ForgeArchive.Open(archivePath);
+    ForgeEntry prefetchEntry = archive.Entries.Single(candidate => candidate.Id == 145);
+    byte[] data = archive.ReadEntry(prefetchEntry);
+    foreach ((ulong id, byte[] block) in PrefetchingFileInfos.ReadObjects(data))
+    {
+        if (wanted.Count > 0 && !wanted.Contains(id))
+            continue;
+        Console.WriteLine($"0x{id:X12}  {block.Length} bytes");
+        for (int offset = 0; offset < block.Length; offset += 16)
+            Console.WriteLine($"  {offset:X4}  "
+                + Convert.ToHexString(block.AsSpan(offset, Math.Min(16, block.Length - offset))));
+    }
     return 0;
 }
 
