@@ -404,4 +404,80 @@ static partial class Commands
         double dot = Math.Abs(Quaternion.Dot(left, right));
         return 2 * Math.Acos(Math.Clamp(dot, -1, 1)) * 180 / Math.PI;
     }
+
+    internal static int PoseAnimation(string folder, string filter)
+    {
+        var skeletons = new List<(string Name, List<SkeletonBone> Bones, HashSet<uint> Names)>();
+        var animations = new List<(string Name, AnimationAsset Asset)>();
+        foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+        {
+            DataFile file;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources)
+            {
+                if (resource.ClassHash == Skeleton.ClassHash)
+                {
+                    try
+                    {
+                        List<SkeletonBone> bones = Skeleton.Read(resource.Data);
+                        skeletons.Add((resource.Name, bones, bones.Select(bone => bone.Name).ToHashSet()));
+                    }
+                    catch
+                    {
+                    }
+                }
+                else if (resource.ClassHash == Animation.ClassHash && animations.Count < 12
+                         && resource.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        animations.Add((resource.Name, Animation.Read(resource.Data)));
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine($"{skeletons.Count} skeleton(s), {animations.Count} animation(s)");
+        int ordered = skeletons.Count(item => item.Bones
+            .All(bone => bone.ParentIndex < item.Bones.IndexOf(bone)));
+        Console.WriteLine($"{ordered} skeleton(s) list every parent before its child");
+
+        foreach ((string name, AnimationAsset asset) in animations)
+        {
+            var wanted = asset.Tracks.Select(track => track.Bone).ToHashSet();
+            var best = skeletons.OrderByDescending(item => wanted.Count(hash => item.Names.Contains(hash)))
+                .FirstOrDefault();
+            if (best.Bones is null)
+                continue;
+
+            var player = new AnimationPlayer(asset, best.Bones);
+            Console.WriteLine($"{name}: {asset.Duration:0.###} s on {best.Name} "
+                + $"({player.BoneCount} bones) - {player.Matched} track(s) matched, "
+                + $"{player.Unmatched} unmatched, {player.Unreadable} unreadable");
+            for (int step = 0; step <= 4; step++)
+            {
+                float time = asset.Duration * step / 4f;
+                IReadOnlyList<Matrix4x4> pose = player.Evaluate(time);
+                var points = pose.Select(matrix => matrix.Translation).ToList();
+                Console.WriteLine($"    t={time:0.00}s  x {points.Min(p => p.X):0.00}..{points.Max(p => p.X):0.00}  "
+                    + $"y {points.Min(p => p.Y):0.00}..{points.Max(p => p.Y):0.00}  "
+                    + $"z {points.Min(p => p.Z):0.00}..{points.Max(p => p.Z):0.00}  "
+                    + $"finite {points.All(p => float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z))}");
+            }
+        }
+
+        return 0;
+    }
 }

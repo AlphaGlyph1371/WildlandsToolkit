@@ -36,6 +36,13 @@ sealed class OrbitCameraController
         };
     }
 
+    public void SetOrbit(double yaw, double pitch)
+    {
+        _yaw = yaw;
+        _pitch = pitch;
+        UpdateCamera();
+    }
+
     public void Fit(Rect3D bounds)
     {
         if (bounds.IsEmpty)

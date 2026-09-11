@@ -287,6 +287,8 @@ try
             return ShowAnimation(args[1], args.Length >= 3 ? args[2] : "");
         case "animcycle" when args.Length >= 2:
             return CycleAnimations(args[1]);
+        case "animpose" when args.Length >= 2:
+            return PoseAnimation(args[1], args.Length >= 3 ? args[2] : "");
         case "animvalues" when args.Length >= 2:
             return CheckAnimationValues(args[1]);
         case "animformats" when args.Length >= 2:

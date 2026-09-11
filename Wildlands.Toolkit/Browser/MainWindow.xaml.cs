@@ -65,6 +65,9 @@ public partial class MainWindow : Window
     BrowserItem? _previewCycleItem;
     Location? _previewCycleWhere;
 
+    AnimationAsset? _previewAnimation;
+    string _previewAnimationName = "";
+
     BuildTableAsset? _previewBuildTable;
     byte[]? _previewBuildTableData;
     BrowserItem? _previewBuildTableItem;
@@ -723,9 +726,10 @@ public partial class MainWindow : Window
             : _previewCycle is not null ? "Open in time cycle editor"
             : FeatureAvailability.BuildTableEditor && _previewBuildTable is not null ? "Open in BuildTable editor"
             : _previewMesh is not null ? "Open in mesh viewer"
+            : _previewAnimation is not null ? "Open in animation viewer"
             : "Open in texture viewer";
         MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null
-            || _previewMesh is not null || _previewCycle is not null
+            || _previewMesh is not null || _previewCycle is not null || _previewAnimation is not null
             || FeatureAvailability.BuildTableEditor && _previewBuildTable is not null));
 
         MenuExtract.IsEnabled = count > 0;
@@ -934,6 +938,8 @@ public partial class MainWindow : Window
         _previewMeshWhere = null;
         _previewSet = null;
         _previewCycle = null;
+        _previewAnimation = null;
+        _previewAnimationName = "";
         _previewBuildTable = null;
         _previewBuildTableData = null;
         _previewBuildTableItem = null;
@@ -949,6 +955,7 @@ public partial class MainWindow : Window
         OpenMeshButton.Visibility = Visibility.Collapsed;
         OpenCycleButton.Visibility = Visibility.Collapsed;
         OpenBuildTableButton.Visibility = Visibility.Collapsed;
+        OpenAnimationButton.Visibility = Visibility.Collapsed;
 
         if (item is null)
         {
@@ -982,6 +989,13 @@ public partial class MainWindow : Window
         if (item.Resource?.ClassHash == BuildTable.ClassHash)
         {
             ShowBuildTable(item, lines);
+            PreviewInfo.Text = string.Join(Environment.NewLine, lines);
+            return;
+        }
+
+        if (item.Resource?.ClassHash == Animation.ClassHash)
+        {
+            ShowAnimation(item, lines);
             PreviewInfo.Text = string.Join(Environment.NewLine, lines);
             return;
         }
@@ -1551,6 +1565,12 @@ public partial class MainWindow : Window
         if (_previewCycle is not null)
         {
             OpenCycleEditor();
+            return;
+        }
+
+        if (_previewAnimation is not null)
+        {
+            OpenAnimationViewer();
             return;
         }
 

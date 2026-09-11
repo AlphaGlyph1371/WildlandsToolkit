@@ -1,4 +1,5 @@
 using System.IO;
+using System.Numerics;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
 using Wildlands.Formats.Models;
@@ -7,7 +8,7 @@ namespace Wildlands.Formats;
 
 public sealed class SkeletonIndex
 {
-    const uint FileMagic = 0x534B4C31; // "SKL1"
+    const uint FileMagic = 0x534B4C32;
 
     readonly List<List<SkeletonBone>> _skeletons = [];
     readonly Dictionary<uint, List<int>> _byBoneHash = [];
@@ -102,6 +103,13 @@ public sealed class SkeletonIndex
                 {
                     writer.Write(bone.Name);
                     writer.Write(bone.ParentIndex);
+                    writer.Write(bone.LocalPosition.X);
+                    writer.Write(bone.LocalPosition.Y);
+                    writer.Write(bone.LocalPosition.Z);
+                    writer.Write(bone.LocalRotation.X);
+                    writer.Write(bone.LocalRotation.Y);
+                    writer.Write(bone.LocalRotation.Z);
+                    writer.Write(bone.LocalRotation.W);
                 }
             }
         }
@@ -131,7 +139,14 @@ public sealed class SkeletonIndex
                 var bones = new List<SkeletonBone>(boneCount);
 
                 for (int b = 0; b < boneCount; b++)
-                    bones.Add(new SkeletonBone { Name = reader.ReadUInt32(), ParentIndex = reader.ReadInt32() });
+                    bones.Add(new SkeletonBone
+                    {
+                        Name = reader.ReadUInt32(),
+                        ParentIndex = reader.ReadInt32(),
+                        LocalPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                        LocalRotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(),
+                            reader.ReadSingle(), reader.ReadSingle()),
+                    });
 
                 index.Add(bones);
             }
