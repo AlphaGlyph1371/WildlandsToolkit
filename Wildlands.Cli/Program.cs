@@ -92,6 +92,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  objectcheck <folder with .data>  hold the object scanner against the BuildTable parser");
     Console.WriteLine("  animinfo <file.data> [filter]  what an animation holds, track by track");
     Console.WriteLine("  animcycle <folder|file.data>  read and rewrite every Animation byte for byte");
+    Console.WriteLine("  animvalues <folder with .data>  check decoded rotations, key times and smoothness");
     Console.WriteLine("  classdump <folder with .data> <class> <outdir> [count]  write resources of one class to disk");
     Console.WriteLine("  classcensus <folder with .data>  count every resource class and how many bytes it holds");
     Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
@@ -286,8 +287,12 @@ try
             return ShowAnimation(args[1], args.Length >= 3 ? args[2] : "");
         case "animcycle" when args.Length >= 2:
             return CycleAnimations(args[1]);
+        case "animvalues" when args.Length >= 2:
+            return CheckAnimationValues(args[1]);
         case "animformats" when args.Length >= 2:
             return DeriveAnimationFormats(args[1]);
+        case "skelbones" when args.Length >= 4:
+            return DumpSkeletonBones(args[1], args[2], args[3]);
         case "animtry" when args.Length >= 3:
             return TryAnimationStrides(args[1], args[2..]);
         case "classdump" when args.Length >= 4:

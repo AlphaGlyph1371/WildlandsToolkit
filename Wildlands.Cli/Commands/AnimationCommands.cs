@@ -1,4 +1,5 @@
 using System.IO;
+using System.Numerics;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Models;
 
@@ -266,5 +267,141 @@ static partial class Commands
         }
 
         return offset == data.Length;
+    }
+
+    internal static int DumpSkeletonBones(string folder, string filter, string outFile)
+    {
+        var lines = new List<string>();
+        foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+        {
+            DataFile file;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources.Where(item => item.ClassHash == Skeleton.ClassHash
+                         && item.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+            {
+                SkeletonAsset asset;
+                try
+                {
+                    asset = Skeleton.ReadAsset(resource.Data);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (SkeletonBone bone in asset.Bones)
+                    lines.Add($"{resource.Name};{bone.Name:X8};{bone.ParentIndex};"
+                        + $"{bone.LocalRotation.X:R};{bone.LocalRotation.Y:R};{bone.LocalRotation.Z:R};"
+                        + $"{bone.LocalRotation.W:R};"
+                        + $"{bone.LocalPosition.X:R};{bone.LocalPosition.Y:R};{bone.LocalPosition.Z:R}");
+            }
+        }
+
+        File.WriteAllLines(outFile, lines);
+        Console.WriteLine($"{lines.Count} bone(s) written to {outFile}");
+        return 0;
+    }
+
+    internal static int CheckAnimationValues(string folder)
+    {
+        var invariant = new Dictionary<int, (int Ok, int Total)>();
+        var steps = new Dictionary<int, List<double>>();
+        var times = new Dictionary<int, (int Ok, int Total)>();
+        int animations = 0;
+
+        foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+        {
+            DataFile file;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources.Where(item => item.ClassHash == Animation.ClassHash))
+            {
+                AnimationAsset asset;
+                try
+                {
+                    asset = Animation.Read(resource.Data);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                animations++;
+                foreach (AnimationTrack track in asset.Tracks)
+                {
+                    int format = track.ValueFormat;
+                    if (track.TimeFormat != 2)
+                    {
+                        var (tok, ttotal) = times.GetValueOrDefault(format);
+                        int last = AnimationValues.ReadTimes(track)[^1];
+                        times[format] = (tok + (last <= (int)Math.Ceiling(asset.Duration
+                            * AnimationValues.TimeUnitsPerSecond) + 1 ? 1 : 0), ttotal + 1);
+                    }
+
+                    if (!AnimationValues.CanRead(format)
+                        || AnimationValues.ChannelOf(format) != AnimationChannel.Rotation)
+                        continue;
+
+                    var (ok, total) = invariant.GetValueOrDefault(format);
+                    Quaternion previous = default;
+                    if (!steps.TryGetValue(format, out List<double>? list))
+                        steps[format] = list = [];
+
+                    for (int i = 0; i < track.KeyCount; i++)
+                    {
+                        Quaternion value = AnimationValues.ReadRotation(
+                            track.Values.AsSpan(i * track.Stride, track.Stride), format);
+                        float length = value.Length();
+                        total++;
+                        if (Math.Abs(length - 1f) < 1e-3f)
+                            ok++;
+                        if (i > 0 && list.Count < 400_000)
+                            list.Add(Angle(previous, value));
+                        previous = value;
+                    }
+
+                    invariant[format] = (ok, total);
+                }
+            }
+        }
+
+        Console.WriteLine($"{animations} Animation(s)");
+        foreach ((int format, (int ok, int total)) in invariant.OrderBy(pair => pair.Key))
+        {
+            List<double> list = steps[format];
+            list.Sort();
+            Console.WriteLine($"  value format {format} (stride {Animation.StrideOf(format)}): "
+                + $"{total} rotation key(s), {100.0 * ok / total:0.000}% unit length, "
+                + $"step between keys median {list[list.Count / 2]:0.00} deg, "
+                + $"p99 {list[(int)(list.Count * 0.99)]:0.00} deg");
+        }
+
+        foreach ((int format, (int ok, int total)) in times.OrderBy(pair => pair.Key))
+            Console.WriteLine($"  value format {format}: {100.0 * ok / total:0.000}% of {total} track(s) "
+                + "end within the announced duration");
+        return 0;
+    }
+
+    static double Angle(Quaternion left, Quaternion right)
+    {
+        double dot = Math.Abs(Quaternion.Dot(left, right));
+        return 2 * Math.Acos(Math.Clamp(dot, -1, 1)) * 180 / Math.PI;
     }
 }
