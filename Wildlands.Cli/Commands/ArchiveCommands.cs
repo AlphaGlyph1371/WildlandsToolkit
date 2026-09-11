@@ -798,6 +798,42 @@ static partial class Commands
         }
     }
 
+    internal static int DumpResourceClass(string folder, uint classHash, string outputDirectory, int limit)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        int written = 0;
+        foreach (string path in Directory.EnumerateFiles(folder, "*.data"))
+        {
+            if (written >= limit)
+                break;
+            DataFile file;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (Resource resource in file.Resources.Where(item => item.ClassHash == classHash))
+            {
+                string name = string.Concat(resource.Name.Select(c =>
+                    Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+                File.WriteAllBytes(Path.Combine(outputDirectory,
+                    $"{resource.Id:X12}_{name}.bin"), resource.Data);
+                Console.WriteLine($"{resource.Data.Length,10:n0}  0x{resource.Id:X12}  {resource.Name}  "
+                    + $"<- {Path.GetFileName(path)}");
+                if (++written >= limit)
+                    break;
+            }
+        }
+
+        Console.WriteLine($"{written} resource(s) of class 0x{classHash:X8} written to {outputDirectory}");
+        return written == 0 ? 1 : 0;
+    }
+
     internal static int CensusResourceClasses(string folder)
     {
         var counts = new Dictionary<uint, int>();
