@@ -34,8 +34,11 @@ public partial class InstallModeWindow : Window
             InPlaceOption.IsChecked = true;
         }
 
-        InPlaceSizeText.Text = $"Rewrites {string.Join(", ", plans.Select(work => work.Name))} "
-            + $"and backs up {Describe(plans.Where(work => !ArchiveBackup.Exists(work.Path)).Sum(work => work.Size))} first.";
+        string archives = string.Join(", ", plans.Select(work => work.Name));
+        long backup = plans.Where(work => !ArchiveBackup.Exists(work.Path)).Sum(work => work.Size);
+        InPlaceSizeText.Text = backup > 0
+            ? $"Rewrites {archives} and backs up {Describe(backup)} first."
+            : $"Rewrites {archives}. A backup of every one of them already exists.";
     }
 
     public InstallMode Mode { get; private set; } = InstallMode.Addon;
