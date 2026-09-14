@@ -27,6 +27,8 @@ static class GltfImportSelfTest
             Close(first.Vertices[1].Position, new(8, 0, 0), "nested negative scale");
             if (!first.Indices.SequenceEqual([0, 2, 1]))
                 throw new InvalidDataException("A mirrored glTF node did not reverse triangle winding.");
+            Close(first.Vertices[1].Uv[0], new Vector2(1, 0), "texture coordinates along u");
+            Close(first.Vertices[2].Uv[0], new Vector2(0, 1), "texture coordinates along v");
             MeshVertex tangentVertex = first.Vertices[0];
             if (Vector3.Dot(Vector3.Cross(tangentVertex.Normal, tangentVertex.Tangent), tangentVertex.Binormal) <= 0)
                 throw new InvalidDataException("A mirrored glTF node did not preserve tangent handedness.");
@@ -221,6 +223,12 @@ static class GltfImportSelfTest
     static void Close(Vector3 actual, Vector3 expected, string label)
     {
         if (Vector3.DistanceSquared(actual, expected) > 1e-8f)
+            throw new InvalidDataException($"glTF {label} self-test failed: {actual} instead of {expected}.");
+    }
+
+    static void Close(Vector2 actual, Vector2 expected, string label)
+    {
+        if (Vector2.DistanceSquared(actual, expected) > 1e-8f)
             throw new InvalidDataException($"glTF {label} self-test failed: {actual} instead of {expected}.");
     }
 }

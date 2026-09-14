@@ -63,7 +63,7 @@ public static class GltfFile
             for (int set = 0; set < layout.UvCount; set++)
             {
                 int which = set;
-                attributes["TEXCOORD_" + set] = Pairs(binary, views, accessors, used, vertices, v => which < v.Uv.Length ? new Vector2(v.Uv[which].X, 1 - v.Uv[which].Y) : Vector2.Zero);
+                attributes["TEXCOORD_" + set] = Pairs(binary, views, accessors, used, vertices, v => which < v.Uv.Length ? v.Uv[which] : Vector2.Zero);
             }
 
             if (layout.HasColor)

@@ -48,6 +48,9 @@ archive modification.
 - Mesh export failures are now reported instead of appearing to do nothing
 - Fixed several glTF import issues involving transforms, material ranges, skin ownership and tangent
   handedness
+- glTF export and import no longer flip the V texture coordinate. glTF measures V from the top of
+  the image, which is where the game measures it too, so the flip mirrored every imported UV map
+  vertically. OBJ and FBX measure V from the bottom and keep their flip
 - Fixed several clustered and plain mesh buffer and index-range issues
 - Fixed several texture conversion and mip-chain edge cases
 - Fixed archive metadata and prefetch handling when containers are added or removed

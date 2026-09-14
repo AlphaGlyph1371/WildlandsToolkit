@@ -136,7 +136,7 @@ static class GltfImport
                     };
 
                     for (int set = 0; set < uvSets.Count; set++)
-                        vertex.Uv[set] = new Vector2(uvSets[set][i].X, 1 - uvSets[set][i].Y);
+                        vertex.Uv[set] = uvSets[set][i];
 
                     if (tangents is not null)
                     {
