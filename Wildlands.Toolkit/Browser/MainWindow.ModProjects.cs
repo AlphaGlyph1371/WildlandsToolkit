@@ -217,14 +217,8 @@ public partial class MainWindow
         {
             UpdateChangeButtons();
             ShowArchiveAgain();
-            string details = string.Join(Environment.NewLine, result.Problems.Take(12));
-            if (result.Problems.Count > 12)
-                details += $"\n…and {result.Problems.Count - 12} more";
-            MessageBox.Show(this,
-                installing
-                    ? $"The mod cannot be installed because these conflicts must be resolved first:\n\n{details}"
-                    : $"The project was opened, but its changes cannot be applied until these conflicts are resolved:\n\n{details}",
-                installing ? "Cannot install mod" : "Mod project conflicts",
+            MessageBox.Show(this, ConflictMessage(project, result, installing),
+                installing ? "Mod does not fit your game" : "Mod project conflicts",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             SetStatus(installing
                 ? $"{project.Name}: installation blocked by {result.Problems.Count} conflict(s)"
@@ -242,6 +236,31 @@ public partial class MainWindow
                 ? $"Opened {project.Name}: changes ready to apply"
                 : $"Opened {project.Name}: project is already applied");
         return result;
+    }
+
+    static string ConflictMessage(ModProject project, ModCompileResult result, bool installing)
+    {
+        var others = result.Problems.Except(result.Mismatches).ToList();
+        string message = "";
+
+        if (result.Mismatches.Count > 0)
+            message = installing
+                ? $"{project.Name} does not fit the current version of your game, so it cannot be installed.\n\n"
+                    + "This usually happens after a game update, or when another mod already changes the same things. "
+                    + $"Nothing was changed.\n\nAsk the mod author for an updated version."
+                : $"{project.Name} no longer fits the game files. {result.Mismatches.Count} of its changes expect "
+                    + $"a different game version.\n\nThis usually happens after a game update, or when another mod "
+                    + "is still installed. The project was opened, but its changes cannot be applied.";
+
+        if (others.Count > 0)
+        {
+            string list = string.Join("\n", others.Take(5)) + (others.Count > 5 ? $"\n…and {others.Count - 5} more" : "");
+            message = message.Length == 0
+                ? (installing ? "The mod cannot be installed:" : "The project's changes cannot be applied:") + $"\n\n{list}"
+                : message + $"\n\nAlso:\n{list}";
+        }
+
+        return message;
     }
 
     bool ConfirmProjectSwitch()

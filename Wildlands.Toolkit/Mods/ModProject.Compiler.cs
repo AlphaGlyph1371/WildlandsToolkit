@@ -16,6 +16,7 @@ public sealed partial class ModProject
         var changes = new ChangeSet();
         var problems = new List<string>();
         int alreadyApplied = 0;
+        var mismatches = new List<string>();
         var archives = new Dictionary<string, ForgeArchive>(StringComparer.OrdinalIgnoreCase);
         var files = new Dictionary<(string Archive, ulong Entry), (ForgeEntry Entry, DataFile File)>();
 
@@ -47,7 +48,7 @@ public sealed partial class ModProject
                         byte[] current = archive.ReadEntry(entry);
                         if (!Matches(operation.BaseSha256, current)
                             && !Matches(operation.DeployedSha256, current))
-                            throw new InvalidDataException(
+                            throw new GameMismatchException(
                                 $"{operation.EntryName} was changed by the game or another mod.");
                         changes.Set(new PendingChange(archivePath, entry.Index, entry.Name,
                             -1, entry.Name, [],
@@ -79,7 +80,7 @@ public sealed partial class ModProject
                         {
                             byte[] current = archive.ReadEntry(entry);
                             if (!Matches(operation.DeployedSha256, current))
-                                throw new InvalidDataException(
+                                throw new GameMismatchException(
                                     $"Entry 0x{operation.EntryId:X16} ({operation.EntryName}) already exists with different data.");
                             QueueExistingEntry(changes, archivePath, entry, current, payload,
                                 operation.Key, GroupId(operation), GroupLabel(operation));
@@ -88,7 +89,7 @@ public sealed partial class ModProject
                     }
 
                     if (entry is null)
-                        throw new InvalidDataException(
+                        throw new GameMismatchException(
                             $"Entry 0x{operation.EntryId:X16} ({operation.EntryName}) is missing.");
 
                     var cacheKey = (archivePath, entry.Id);
@@ -108,7 +109,7 @@ public sealed partial class ModProject
                             string currentHash = Hash(resource.Data);
                             if (!Matches(operation.BaseSha256, currentHash)
                                 && !Matches(operation.DeployedSha256, currentHash))
-                                throw new InvalidDataException(
+                                throw new GameMismatchException(
                                     $"{operation.ResourceName} was changed by the game or another mod.");
                             int removalIndex = entryFile.File.Resources.IndexOf(resource);
                             changes.Set(new PendingChange(archivePath, entry.Index, entry.Name,
@@ -133,12 +134,12 @@ public sealed partial class ModProject
                             string currentHash = Hash(resource.Data);
                             if (!Matches(operation.BaseSha256, currentHash)
                                 && !Matches(operation.DeployedSha256, currentHash))
-                                throw new InvalidDataException(
+                                throw new GameMismatchException(
                                     $"{operation.ResourceName} was changed by the game or another mod.");
                         }
                         else if (!Matches(operation.DeployedSha256, resource.Data))
                         {
-                            throw new InvalidDataException(
+                            throw new GameMismatchException(
                                 $"Resource 0x{operation.ResourceId:X16} ({operation.ResourceName}) already exists with different data.");
                         }
 
@@ -168,13 +169,16 @@ public sealed partial class ModProject
                     }
                     else
                     {
-                        throw new InvalidDataException(
+                        throw new GameMismatchException(
                             $"Resource 0x{operation.ResourceId:X16} ({operation.ResourceName}) is missing.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    problems.Add($"{operation.ResourceName.Default(operation.EntryName)}: {ex.Message}");
+                    string problem = $"{operation.ResourceName.Default(operation.EntryName)}: {ex.Message}";
+                    problems.Add(problem);
+                    if (ex is GameMismatchException)
+                        mismatches.Add(problem);
                 }
             }
         }
@@ -184,7 +188,7 @@ public sealed partial class ModProject
                 archive.Dispose();
         }
 
-        return new ModCompileResult(changes.Changes.ToList(), problems, alreadyApplied);
+        return new ModCompileResult(changes.Changes.ToList(), problems, alreadyApplied, mismatches);
     }
 
     static void QueueExistingEntry(ChangeSet changes, string archivePath, ForgeEntry entry,
@@ -230,3 +234,5 @@ public sealed partial class ModProject
         return path;
     }
 }
+
+sealed class GameMismatchException(string message) : IOException(message);

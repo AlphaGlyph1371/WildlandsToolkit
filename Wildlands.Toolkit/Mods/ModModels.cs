@@ -50,7 +50,8 @@ public sealed class ModOperationUndo
 public sealed record ModCompileResult(
     IReadOnlyList<PendingChange> Changes,
     IReadOnlyList<string> Problems,
-    int AlreadyApplied);
+    int AlreadyApplied,
+    IReadOnlyList<string> Mismatches);
 
 public sealed record ModPackageInfo(
     string Path,
