@@ -719,6 +719,8 @@ static partial class Commands
         Console.WriteLine($"  {result.Vertices} vertices, {result.Triangles} triangles, {result.Ranges} draw range(s)");
         Console.WriteLine($"  scale {result.QuantizationFactor:0.####}, uv {result.UvQuantizationFactor:0.####}"
             + (result.TransferredSkinning ? ", joint weights taken from the nearest original vertex" : ""));
+        if (result.DroppedMaterials.Count > 0)
+            Console.WriteLine("  warning: these material slots are left without geometry: " + string.Join(", ", result.DroppedMaterials));
         Console.WriteLine("written -> " + output + "  (reopened and verified)");
         return 0;
     }
@@ -777,6 +779,8 @@ static partial class Commands
             + (result.TransferredSkinning ? ", joint weights taken from the nearest original vertex" : "")
             + (result.PatchedVertices > 0
                 ? $", {result.PatchedVertices} vertex(es) had no bone this mesh knows and took the nearest original weights" : ""));
+        if (result.DroppedMaterials.Count > 0)
+            Console.WriteLine("  warning: these material slots are left without geometry: " + string.Join(", ", result.DroppedMaterials));
         Console.WriteLine("written -> " + output + "  (reopened and verified)");
         return 0;
     }

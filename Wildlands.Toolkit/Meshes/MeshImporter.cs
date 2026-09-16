@@ -44,6 +44,9 @@ public static class MeshImporter
             return null;
         }
 
+        if (result.DroppedMaterials.Count > 0 && !Ask(owner, DroppedNotice(name, result)))
+            return null;
+
         if (result.CarriedSkinning)
         {
             bool clean = result.JointsMatched == result.JointsInFile && result.JointsMatched == result.BoneCount && result.PatchedVertices == 0;
@@ -92,6 +95,19 @@ public static class MeshImporter
             + (result.PatchedVertices > 0 ? $", {result.PatchedVertices} vertex(es) fell back to the nearest original weights" : "");
 
         return rebuilt;
+    }
+
+    static string DroppedNotice(string name, MeshImportResult result)
+    {
+        int before = result.Ranges + result.DroppedMaterials.Count;
+        return $"{name} has {before} material slots, but your file only fills {result.Ranges}. "
+            + "These slots would be left without any geometry:\n\n"
+            + string.Join("\n", result.DroppedMaterials) + "\n\n"
+            + "The game can still reach for a slot that is gone, for example when it puts a camo or colour on it "
+            + "in the loadout menu, and that is a likely crash.\n\n"
+            + "To keep every slot, give the parts of your model materials named exactly like above in Blender "
+            + "before you export. The Toolkit matches them by that name.\n\n"
+            + "Replace anyway?";
     }
 
     static string SkeletonNotice(string name, MeshImportResult result)

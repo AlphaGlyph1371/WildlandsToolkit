@@ -20,6 +20,7 @@ public sealed class MeshImportResult
     public int BoneCount { get; set; }
     public bool Cloth { get; set; }
     public int RangesBefore { get; set; }
+    public List<string> DroppedMaterials { get; } = [];
 }
 
 public static class MeshImport
@@ -135,6 +136,11 @@ public static class MeshImport
         if (hadShadow)
             RebuildRanges(mesh.Data.Shadow, perRange, ref next);
 
+        var materialsBefore = new List<ulong>();
+        foreach (var material in mesh.Materials)
+            if (!materialsBefore.Contains(material.MaterialId))
+                materialsBefore.Add(material.MaterialId);
+
         MatchRangeCount(mesh, geometry.Groups, perRange, ref next);
 
         var clustered = mesh.Clustered;
@@ -164,7 +170,7 @@ public static class MeshImport
 
         ValidateGpuLayout(mesh, perRange, indices.Count);
 
-        return new MeshImportResult
+        var result = new MeshImportResult
         {
             Vertices = vertices.Count,
             Triangles = indices.Count / 3,
@@ -180,7 +186,15 @@ public static class MeshImport
             JointsMatched = matched,
             BoneCount = mesh.Bones.Count,
         };
+
+        foreach (ulong id in materialsBefore)
+            if (!mesh.Materials.Exists(material => material.MaterialId == id))
+                result.DroppedMaterials.Add(MaterialName(id));
+
+        return result;
     }
+
+    static string MaterialName(ulong id) => "Material_" + id.ToString("X16");
 
     static MeshVertex Fit(MeshVertex source, VertexLayout layout)
     {
