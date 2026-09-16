@@ -262,7 +262,8 @@ public sealed partial class ModProject
         CaptureUndo(operation.Key, old);
         if (old is not null)
         {
-            operation.BaseSha256 ??= old.BaseSha256;
+            if (old.BaseSha256 is not null)
+                operation.BaseSha256 = old.BaseSha256;
             operation.DeployedSha256 = old.DeployedSha256;
             if (old.Kind == ModOperationKind.AddResource
                 && operation.Kind == ModOperationKind.ReplaceResource)
