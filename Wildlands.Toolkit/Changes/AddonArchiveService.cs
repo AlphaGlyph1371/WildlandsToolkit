@@ -1,12 +1,16 @@
 using System.IO;
+using System.Security.Cryptography;
 using Wildlands.Formats.Forge;
 
 namespace Wildlands.Toolkit;
+
+public sealed record StaleAddon(string ArchivePath, IReadOnlyList<string> Containers);
 
 public static class AddonArchiveService
 {
     const int FirstSlot = 2;
     const int LastSlot = 99;
+    const string BasisExtension = ".basis";
 
     public static bool CanWrite(IReadOnlyList<ArchiveWork> plans, out string reason)
     {
@@ -65,14 +69,76 @@ public static class AddonArchiveService
             if (entries.Count == 0)
                 continue;
 
-            string target = SlotPath(family.Key, NextSlot(family.First().Path));
+            int slot = NextSlot(family.First().Path);
+            string target = SlotPath(family.Key, slot);
             progress?.Report($"Writing {Path.GetFileName(target)}...");
             ForgeArchive.Create(target, entries.Values.ToList(), identity,
                 (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             written.Add(target);
+
+            progress?.Report($"Noting which game containers {Path.GetFileName(target)} covers...");
+            File.WriteAllLines(target + BasisExtension, Basis(family.Key, slot, entries.Keys)
+                .OrderBy(pair => pair.Key)
+                .Select(pair => $"{pair.Key} {pair.Value}"));
         }
 
         return written;
+    }
+
+    public static List<StaleAddon> FindStale(IEnumerable<string> archivePaths)
+    {
+        var stale = new List<StaleAddon>();
+        foreach (string path in archivePaths)
+        {
+            string basisPath = path + BasisExtension;
+            if (!File.Exists(basisPath))
+                continue;
+
+            var recorded = new Dictionary<ulong, string>();
+            foreach (string line in File.ReadAllLines(basisPath))
+            {
+                string[] parts = line.Split(' ');
+                if (parts.Length == 2 && ulong.TryParse(parts[0], out ulong id))
+                    recorded[id] = parts[1];
+            }
+
+            Dictionary<ulong, string> current = Basis(FamilyOf(path), SlotOf(path), recorded.Keys);
+            var changed = recorded
+                .Where(pair => !current.TryGetValue(pair.Key, out string? hash) || hash != pair.Value)
+                .Select(pair => pair.Key)
+                .ToHashSet();
+            if (changed.Count == 0)
+                continue;
+
+            using ForgeArchive archive = ForgeArchive.Open(path);
+            stale.Add(new StaleAddon(path, archive.Entries
+                .Where(entry => changed.Contains(entry.Id))
+                .Select(entry => entry.Name)
+                .ToList()));
+        }
+
+        return stale;
+    }
+
+    static Dictionary<ulong, string> Basis(string family, int below, IEnumerable<ulong> ids)
+    {
+        var wanted = new HashSet<ulong>(ids);
+        var basis = new Dictionary<ulong, string>();
+        for (int slot = below - 1; slot >= 0 && wanted.Count > 0; slot--)
+        {
+            string path = slot == 0 ? family + ".forge" : SlotPath(family, slot);
+            if (!File.Exists(path))
+                continue;
+
+            using ForgeArchive archive = ForgeArchive.Open(path);
+            foreach (ForgeEntry entry in archive.Entries)
+            {
+                if (wanted.Remove(entry.Id))
+                    basis[entry.Id] = Convert.ToHexString(SHA1.HashData(archive.ReadEntry(entry)));
+            }
+        }
+
+        return basis;
     }
 
     public static long EstimateSize(IReadOnlyList<ArchiveWork> plans)

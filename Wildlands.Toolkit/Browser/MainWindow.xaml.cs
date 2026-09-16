@@ -113,6 +113,7 @@ public partial class MainWindow : Window
             if (_settings.IsConfigured)
             {
                 ShowIndexSetupIfNeeded();
+                _ = WarnAboutStaleAddonsAsync();
                 return;
             }
 
@@ -130,6 +131,41 @@ public partial class MainWindow : Window
         {
             BeginUpdateCheck();
         }
+    }
+
+    async Task WarnAboutStaleAddonsAsync()
+    {
+        string gameFolder = _settings.GamePath;
+        List<StaleAddon> stale;
+        try
+        {
+            stale = await Task.Run(() => AddonArchiveService.FindStale(ArchiveLocator.Find(gameFolder)));
+        }
+        catch
+        {
+            return;
+        }
+
+        if (stale.Count == 0 || !IsLoaded)
+            return;
+
+        var text = new StringBuilder();
+        text.AppendLine("The game has changed underneath an addon archive.");
+        foreach (StaleAddon addon in stale)
+        {
+            text.AppendLine();
+            text.AppendLine($"{Path.GetFileName(addon.ArchivePath)} was built on containers that have been replaced since, most likely by a game update:");
+            foreach (string container in addon.Containers.Take(12))
+                text.AppendLine("    " + container);
+            if (addon.Containers.Count > 12)
+                text.AppendLine($"    and {addon.Containers.Count - 12} more");
+        }
+        text.AppendLine();
+        text.AppendLine("An addon archive holds whole containers, not just your changes, so it now puts the old versions back over the new ones. That usually crashes the game.");
+        text.AppendLine();
+        text.Append("Move the archive out of the game folder, then install your changes again so they are built on the current game files.");
+
+        MessageBox.Show(this, text.ToString(), "Addon archive is out of date", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     void BeginUpdateCheck()
