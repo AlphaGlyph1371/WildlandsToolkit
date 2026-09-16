@@ -64,6 +64,34 @@ public sealed partial class ModProject
         return project;
     }
 
+    public static Dictionary<string, string> DeployedHashesInLibrary(string library, string exceptId)
+    {
+        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!Directory.Exists(library))
+            return hashes;
+
+        foreach (string manifest in Directory.EnumerateFiles(library, "*.wlproj", SearchOption.AllDirectories))
+        {
+            ModProject other;
+            try
+            {
+                other = Load(manifest);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (other.Id == exceptId)
+                continue;
+            foreach (ModOperation operation in other.Operations)
+                if (operation.DeployedSha256 is not null)
+                    hashes.TryAdd(operation.DeployedSha256, other.Name);
+        }
+
+        return hashes;
+    }
+
     public void Save()
     {
         EnsureAttached();

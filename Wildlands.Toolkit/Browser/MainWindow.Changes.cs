@@ -86,7 +86,44 @@ public partial class MainWindow
             _changes.Set(change);
         }
         UpdateChangeButtons();
+
+        if (projectKeys is not null)
+            WarnIfBuiltOnAnotherProject(projectKeys);
         return true;
+    }
+
+    readonly HashSet<string> _warnedBuiltOn = [];
+
+    void WarnIfBuiltOnAnotherProject(IReadOnlyList<string> keys)
+    {
+        if (_project is null || _warnedBuiltOn.Contains(_project.Id))
+            return;
+
+        Dictionary<string, string> deployed;
+        try
+        {
+            deployed = ModProject.DeployedHashesInLibrary(AppSettings.ModLibraryPath, _project.Id);
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (string key in keys)
+        {
+            ModOperation? operation = _project.Operations.FirstOrDefault(candidate =>
+                candidate.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (operation?.BaseSha256 is null || !deployed.TryGetValue(operation.BaseSha256, out string? other))
+                continue;
+
+            _warnedBuiltOn.Add(_project.Id);
+            MessageBox.Show(this,
+                $"{other} is still installed in the game, and {_project.Name} is being built on top of it.\n\n"
+                + $"A mod package made from {_project.Name} would then only install on games that also have {other}.\n\n"
+                + $"Remove {other} from the game first, then make this change again.",
+                "Another mod is still installed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
     }
 
     static string DescribeOperation(IReadOnlyList<PendingChange> changes)
