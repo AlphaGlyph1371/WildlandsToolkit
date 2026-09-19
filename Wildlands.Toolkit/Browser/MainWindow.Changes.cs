@@ -33,6 +33,12 @@ public partial class MainWindow
             return;
         }
 
+        if (item.Resource.ClassHash == Skeleton.ClassHash)
+        {
+            ReplaceSkeleton(item);
+            return;
+        }
+
         ReplaceRawResource(item);
     }
 
@@ -174,6 +180,26 @@ public partial class MainWindow
 
         SetStatus($"{item.Name}: replacement queued");
         UpdateChangeButtons();
+    }
+
+    void ReplaceSkeleton(BrowserItem item)
+    {
+        if (item.Resource is null || _showing is null)
+            return;
+
+        byte[]? rebuilt = SkeletonInterchange.Import(this, EffectiveData(item), item.Name,
+            _settings, out string summary);
+        if (rebuilt is null)
+            return;
+
+        if (!QueueChanges([new PendingChange(_showing.ArchivePath, _showing.EntryIndex,
+                _showing.EntryName, item.Index, item.Name, rebuilt,
+                ResourceClassHash: Skeleton.ClassHash)], $"Edit Skeleton {item.Name}"))
+            return;
+
+        SetStatus($"{item.Name}: {summary}; replacement queued");
+        UpdateChangeButtons();
+        ShowArchiveAgain();
     }
 
     async Task<ApplyResult> ApplyChanges(Window dialogOwner, string? installingPackage = null)

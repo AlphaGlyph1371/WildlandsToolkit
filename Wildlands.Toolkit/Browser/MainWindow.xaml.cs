@@ -56,6 +56,12 @@ public partial class MainWindow : Window
     BrowserItem? _previewMeshItem;
     Location? _previewMeshWhere;
 
+    SkeletonAsset? _previewSkeleton;
+    byte[]? _previewSkeletonData;
+    string _previewSkeletonName = "";
+    BrowserItem? _previewSkeletonItem;
+    Location? _previewSkeletonWhere;
+
     List<Resource> _previewSiblings = [];
 
     TextureSet? _previewSet;
@@ -161,7 +167,8 @@ public partial class MainWindow : Window
                 text.AppendLine($"    and {addon.Containers.Count - 12} more");
         }
         text.AppendLine();
-        text.AppendLine("An addon archive holds whole containers, not just your changes, so it now puts the old versions back over the new ones. That usually crashes the game.");
+        text.AppendLine("The addon was built from an older version of these containers. Reinstall it "
+            + "so its resource overlays are rebuilt and checked against the current game files.");
         text.AppendLine();
         text.Append("Move the archive out of the game folder, then install your changes again so they are built on the current game files.");
 
@@ -771,22 +778,31 @@ public partial class MainWindow : Window
             : _previewCycle is not null ? "Open in time cycle editor"
             : FeatureAvailability.BuildTableEditor && _previewBuildTable is not null ? "Open in BuildTable editor"
             : _previewMesh is not null ? "Open in mesh viewer"
+            : _previewSkeleton is not null ? "Open in skeleton viewer"
             : _previewAnimation is not null ? "Open in animation viewer"
             : _previewSky is not null ? "Open in sky editor"
             : _previewSettings is not null ? "Open in cloth editor"
             : "Open in texture viewer";
         MenuOpen.IsEnabled = stepsIn || (item is not null && (_preview is not null
-            || _previewMesh is not null || _previewCycle is not null || _previewAnimation is not null
+            || _previewMesh is not null || _previewSkeleton is not null
+            || _previewCycle is not null || _previewAnimation is not null
             || _previewSky is not null || _previewSettings is not null
             || FeatureAvailability.BuildTableEditor && _previewBuildTable is not null));
 
         MenuExtract.IsEnabled = count > 0;
         MenuExtract.Header = count > 1 ? $"Extract {count} items..." : "Extract...";
 
-        MenuExport.IsEnabled = _preview is not null || _previewMesh is not null || _previewSet is not null;
+        bool skeleton = item?.Resource?.ClassHash == Skeleton.ClassHash;
+        MenuExport.IsEnabled = skeleton || _preview is not null || _previewMesh is not null
+            || _previewSet is not null;
 
         MenuReplace.IsEnabled = item?.Resource is not null || _preview is not null;
-        MenuReplace.Header = item?.Resource?.ClassHash == Mesh.ClassHash ? "Replace geometry..." : "Replace...";
+        MenuReplace.Header = item?.Resource?.ClassHash switch
+        {
+            Mesh.ClassHash => "Replace geometry...",
+            Skeleton.ClassHash => "Import edited Skeleton...",
+            _ => "Replace...",
+        };
         MenuReplaceRaw.IsEnabled = item?.Resource is not null;
 
         MenuFindCopies.IsEnabled = item is { Id: not 0 } && _showing is not null;
@@ -848,7 +864,15 @@ public partial class MainWindow : Window
 
     void Export()
     {
-        if (_preview is not null)
+        if (ItemList.SelectedItem is BrowserItem
+            { Resource.ClassHash: Skeleton.ClassHash } skeletonItem)
+        {
+            string done = SkeletonInterchange.Export(this, EffectiveData(skeletonItem),
+                skeletonItem.Name, _settings);
+            if (done.Length > 0)
+                SetStatus(done);
+        }
+        else if (_preview is not null)
         {
             int level = PreviewLevelBox.SelectedItem is TextureMipLevel selected ? selected.Level : _preview.FocusLevel;
 
@@ -984,6 +1008,11 @@ public partial class MainWindow : Window
         _previewMeshData = null;
         _previewMeshItem = null;
         _previewMeshWhere = null;
+        _previewSkeleton = null;
+        _previewSkeletonData = null;
+        _previewSkeletonName = "";
+        _previewSkeletonItem = null;
+        _previewSkeletonWhere = null;
         _previewSet = null;
         _previewCycle = null;
         _previewAnimation = null;
@@ -1008,6 +1037,7 @@ public partial class MainWindow : Window
         SourceRow.Visibility = Visibility.Collapsed;
         OpenViewerButton.Visibility = Visibility.Collapsed;
         OpenMeshButton.Visibility = Visibility.Collapsed;
+        OpenSkeletonButton.Visibility = Visibility.Collapsed;
         OpenCycleButton.Visibility = Visibility.Collapsed;
         OpenBuildTableButton.Visibility = Visibility.Collapsed;
         OpenAnimationButton.Visibility = Visibility.Collapsed;
@@ -1053,6 +1083,13 @@ public partial class MainWindow : Window
         if (item.Resource?.ClassHash == Animation.ClassHash)
         {
             ShowAnimation(item, lines);
+            PreviewInfo.Text = string.Join(Environment.NewLine, lines);
+            return;
+        }
+
+        if (item.Resource?.ClassHash == Skeleton.ClassHash)
+        {
+            ShowSkeleton(item, lines);
             PreviewInfo.Text = string.Join(Environment.NewLine, lines);
             return;
         }
@@ -1545,6 +1582,40 @@ public partial class MainWindow : Window
             OpenMeshButton.Visibility = Visibility.Visible;
     }
 
+    void ShowSkeleton(BrowserItem item, List<string> lines)
+    {
+        if (item.Resource is null)
+            return;
+
+        byte[] data = EffectiveData(item);
+        try
+        {
+            _previewSkeleton = Skeleton.ReadAsset(data);
+            _previewSkeletonData = data;
+            _previewSkeletonName = item.Name;
+            _previewSkeletonItem = item;
+            _previewSkeletonWhere = _showing;
+        }
+        catch (Exception ex)
+        {
+            lines.Add("");
+            lines.Add($"       skeleton unreadable: {ex.Message}");
+            return;
+        }
+
+        int roots = _previewSkeleton.Bones.Count(bone => bone.ParentIndex < 0);
+        int modifiers = _previewSkeleton.Bones.Sum(bone => bone.Modifiers.Count);
+        lines.Add("");
+        lines.Add($"bones      {_previewSkeleton.Bones.Count:N0}");
+        lines.Add($"roots      {roots:N0}");
+        lines.Add($"modifiers  {modifiers:N0}");
+        if (_previewSkeletonWhere is { } where
+            && _changes.Contains(where.ArchivePath, where.EntryIndex, item.Index))
+            lines.Add("       pending edit");
+
+        OpenSkeletonButton.Visibility = Visibility.Visible;
+    }
+
     void ShowTexture(TextureView view, List<string> lines)
     {
         _preview = view;
@@ -1674,6 +1745,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_previewSkeleton is not null && _previewSkeletonData is not null)
+        {
+            Action<byte[], string>? queueImport = null;
+            bool pending = false;
+            if (_previewSkeletonItem?.Resource is not null && _previewSkeletonWhere is { } where)
+            {
+                BrowserItem item = _previewSkeletonItem;
+                pending = _changes.Contains(where.ArchivePath, where.EntryIndex, item.Index);
+                queueImport = (data, summary) => QueueSkeletonViewerImport(where, item, data, summary);
+            }
+
+            new SkeletonWindow(_previewSkeletonData, _previewSkeletonName, _settings,
+                queueImport, pending).Show();
+            return;
+        }
+
         if (_preview is null)
             return;
 
@@ -1701,6 +1788,23 @@ public partial class MainWindow : Window
         {
             _previewMeshData = (byte[])rebuilt.Clone();
             _previewMesh = Mesh.Read(rebuilt);
+        }
+
+        SetStatus($"{item.Name}: replacement queued");
+        UpdateChangeButtons();
+    }
+
+    void QueueSkeletonViewerImport(Location where, BrowserItem item, byte[] rebuilt, string _)
+    {
+        if (!QueueChanges([new PendingChange(where.ArchivePath, where.EntryIndex,
+                where.EntryName, item.Index, item.Name, rebuilt,
+                ResourceClassHash: Skeleton.ClassHash)], $"Edit Skeleton {item.Name}"))
+            return;
+
+        if (ReferenceEquals(_previewSkeletonItem, item) && _previewSkeletonWhere == where)
+        {
+            _previewSkeletonData = (byte[])rebuilt.Clone();
+            _previewSkeleton = Skeleton.ReadAsset(rebuilt);
         }
 
         SetStatus($"{item.Name}: replacement queued");

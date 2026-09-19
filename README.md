@@ -32,7 +32,7 @@ Version 0.2.0 is the largest Toolkit update so far. The main additions are:
 - A dedicated Changes window with grouped operations, pending-change markers and safer archive writes
 - Automatic skeleton discovery for rigged exports, plus improved FBX and OBJ export
 - Background archive loading, full DLC archive discovery and an exact cross-archive copy finder
-- Redesigned mesh and texture viewers, update notifications and recoverable crash reports
+- Dedicated mesh, skeleton and texture viewers, update notifications and recoverable crash reports
 
 The experimental BuildTable editor is intentionally disabled in this release. BuildTable resources
 can still be inspected, extracted and replaced as raw resources.
@@ -121,6 +121,8 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
   ship their skeleton next to them**, so that index is what makes a usable rig possible at all
 - Reads and writes `Mesh`, `Skeleton` and `BuildTable` **byte for byte**: 20450, 1662 and 3649
   resources of `DataPC.forge` come back out identical
+- Exports standalone `Skeleton` resources as Blender-readable GLB armatures and imports edited rest
+  poses while preserving every game-specific id, modifier and hierarchy record
 - The skeleton reader is checked against the published AnvilNext documentation from Firejumper93, which you can find [here](https://github.com/Firejumper93/GhostReconWildlands-AnvilNext2.0-Documentation), hash for hash and
   invariant for invariant
 
@@ -211,12 +213,24 @@ The toolbar has **Export** and **Replace** side by side, so the way back in is a
 the way out. Everything still goes through the same pile of pending changes, and nothing touches
 an archive until you press **Apply changes**.
 
-One thing Blender cannot do for you: the bones. **The skeleton in your file is not imported.** The
-mesh keeps the bone table it already has, and your joints are matched back onto it by name - so
-leave the armature that came out of the export alone, and do not rename its bones. The toolkit
-shows you how many matched before it writes anything. Vertices whose bones do not exist on the target
-take the weights of the nearest original point; a wholly foreign or missing rig is rebound that way as
-well, and the confirmation dialog warns when the replacement shape makes that approximation risky.
+When replacing mesh geometry, **the skeleton in the mesh file is not imported.** The mesh keeps the
+bone table it already has, and joints are matched back onto it by name. Vertices whose bones do not
+exist on the target take the weights of the nearest original point; the confirmation dialog reports
+when that approximation was needed. Use the separate Skeleton workflow below when you intend to
+move the actual game bones.
+
+### Example: Editing a Skeleton in Blender
+
+1. Select the `Skeleton` resource and open the **skeleton viewer**. Its toolbar shows the hierarchy
+   in 3D and can display every bone's local axes
+2. Choose **Export...** in the viewer toolbar and save the `.glb`
+3. Import that GLB in Blender. Keep the armature and its small invisible reference mesh
+4. Select the armature, enter **Edit Mode**, and move or rotate the bones in their rest pose. Do not
+   rename, add, delete, reparent or scale bones
+5. Export the scene as glTF binary (`.glb`)
+6. Back in the viewer, choose **Import edited skeleton...**. The 3D view updates immediately
+7. The Toolkit validates every bone and hierarchy link, updates local and global transforms, and
+   queues the replacement in **Changes**. Apply it like any other edit
 
 ### Example: Building and installing a mod package
 

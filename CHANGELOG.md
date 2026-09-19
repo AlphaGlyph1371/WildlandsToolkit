@@ -3,6 +3,15 @@
 The largest Wildlands Toolkit update so far, focused on mesh editing, mod distribution and safer
 archive modification.
 
+- Addon archives now overlay individual resources inside existing `.data` containers instead of
+  copying every sibling resource, so independent edits to the same weapon container can coexist.
+- Resource deletions are no longer offered in addon mode because an overlay cannot hide an older
+  resource; they continue to work through in-place installation.
+- Skeleton resources can be exported as Blender-readable GLB armatures and imported again after
+  editing their rest-pose positions and rotations.
+- Skeleton resources now open in a dedicated 3D viewer with the same top-toolbar workflow as the
+  mesh viewer, including live GLB import, export, framing and local bone-axis display.
+
 ## Added
 
 - Full glTF mesh export and import workflow

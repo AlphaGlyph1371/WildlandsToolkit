@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
+using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
 
 namespace Wildlands.Toolkit;
@@ -41,6 +42,35 @@ public static class AddonArchiveService
             {
                 reason = $"{Path.GetFileName(FamilyOf(work.Path))} already uses every patch number.";
                 return false;
+            }
+
+            using var archive = ForgeArchive.Open(work.Path);
+            foreach ((int index, byte[] data) in work.Entries)
+            {
+                ForgeEntry? entry = archive.Entries.FirstOrDefault(candidate =>
+                    candidate.Index == index);
+                if (entry is null)
+                {
+                    reason = $"{work.Name} no longer holds container {index}.";
+                    return false;
+                }
+
+                try
+                {
+                    _ = BuildResourcePatch(archive.ReadEntry(entry), data, entry,
+                        out bool removesResources);
+                    if (removesResources)
+                    {
+                        reason = $"{entry.Name} removes one or more resources. An addon archive "
+                            + "cannot hide resources from an older archive, so this has to be written in place.";
+                        return false;
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidDataException or OverflowException)
+                {
+                    reason = $"{entry.Name} cannot be written as a resource-level addon: {ex.Message}";
+                    return false;
+                }
             }
         }
 
@@ -144,27 +174,19 @@ public static class AddonArchiveService
     public static long EstimateSize(IReadOnlyList<ArchiveWork> plans)
     {
         ArgumentNullException.ThrowIfNull(plans);
-        var seen = new Dictionary<string, Dictionary<ulong, long>>(StringComparer.OrdinalIgnoreCase);
-        foreach (ArchiveWork work in plans)
+        long total = 0;
+        foreach (IGrouping<string, ArchiveWork> family in plans.GroupBy(work => FamilyOf(work.Path),
+                     StringComparer.OrdinalIgnoreCase))
         {
-            if (FamilyOf(work.Path).Length == 0)
+            if (family.Key.Length == 0)
                 continue;
-            if (!seen.TryGetValue(FamilyOf(work.Path), out Dictionary<ulong, long>? sizes))
-                seen[FamilyOf(work.Path)] = sizes = [];
-
-            using ForgeArchive archive = ForgeArchive.Open(work.Path);
-            foreach ((int index, byte[] data) in work.Entries)
-            {
-                ForgeEntry? entry = archive.Entries.FirstOrDefault(candidate => candidate.Index == index);
-                if (entry is not null)
-                    sizes[entry.Id] = data.Length;
-            }
-
-            foreach (ForgeEntryAddition addition in work.EntryAdditions)
-                sizes[addition.Id] = addition.Data.Length;
+            var entries = new Dictionary<ulong, ForgeNewEntry>();
+            foreach (ArchiveWork work in family.OrderByDescending(work => SlotOf(work.Path)))
+                CollectEntries(work, entries);
+            total += entries.Values.Sum(entry => (long)entry.Data.Length);
         }
 
-        return seen.Values.Sum(sizes => sizes.Values.Sum());
+        return total;
     }
 
     static void CollectEntries(ArchiveWork work, Dictionary<ulong, ForgeNewEntry> entries)
@@ -177,10 +199,23 @@ public static class AddonArchiveService
         {
             ForgeEntry entry = archive.Entries.FirstOrDefault(candidate => candidate.Index == index)
                 ?? throw new InvalidDataException($"{work.Name} no longer holds container {index}.");
-            if (entry.Id is 16 or 145 || entries.ContainsKey(entry.Id))
+            if (entry.Id is 16 or 145)
                 continue;
+            byte[] patch = BuildResourcePatch(archive.ReadEntry(entry), data, entry,
+                out bool removesResources);
+            if (removesResources)
+                throw new InvalidOperationException($"{entry.Name} removes one or more resources. "
+                    + "An addon archive cannot represent resource deletion.");
+            if (entries.TryGetValue(entry.Id, out ForgeNewEntry? preferred))
+            {
+                entries[entry.Id] = preferred with
+                {
+                    Data = MergeResourcePatches(preferred.Data, patch, entry.Id),
+                };
+                continue;
+            }
             entries.Add(entry.Id, new ForgeNewEntry(entry.Id, entry.Name, entry.Extension,
-                entry.UmacHash, data, PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
+                entry.UmacHash, patch, PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
         }
 
         foreach (ForgeEntryAddition addition in work.EntryAdditions)
@@ -191,6 +226,81 @@ public static class AddonArchiveService
                 addition.Extension, BitConverter.ToUInt64(addition.InfoTemplate, 4),
                 addition.Data, addition.PrefetchBlock));
         }
+    }
+
+    /// <summary>
+    /// Builds the smallest valid overlay for an existing multi-resource container. The first
+    /// resource is the container identity and must stay first; the game then resolves the other
+    /// resources by their own ids across the archive family.
+    /// </summary>
+    internal static byte[] BuildResourcePatch(byte[] originalData, byte[] rebuiltData,
+        ForgeEntry entry, out bool removesResources)
+    {
+        using var originalStream = new MemoryStream(originalData, writable: false);
+        using var rebuiltStream = new MemoryStream(rebuiltData, writable: false);
+        DataFile original = DataFile.Read(originalStream);
+        DataFile rebuilt = DataFile.Read(rebuiltStream);
+        if (rebuilt.Resources.Count == 0 || rebuilt.Resources[0].Id != entry.Id)
+            throw new InvalidDataException(
+                "The first resource no longer matches the Forge container id.");
+
+        var originalById = new Dictionary<ulong, Resource>();
+        foreach (Resource resource in original.Resources)
+        {
+            if (!originalById.TryAdd(resource.Id, resource))
+                throw new InvalidDataException($"The original container contains resource id "
+                    + $"0x{resource.Id:X16} more than once.");
+        }
+
+        var rebuiltIds = new HashSet<ulong>();
+        foreach (Resource resource in rebuilt.Resources)
+        {
+            if (!rebuiltIds.Add(resource.Id))
+                throw new InvalidDataException($"The rebuilt container contains resource id "
+                    + $"0x{resource.Id:X16} more than once.");
+        }
+        removesResources = originalById.Keys.Any(id => !rebuiltIds.Contains(id));
+
+        Resource root = rebuilt.Resources[0];
+        List<Resource> changed = rebuilt.Resources.Skip(1)
+            .Where(resource => !originalById.TryGetValue(resource.Id, out Resource? previous)
+                || resource.ClassHash != previous.ClassHash
+                || !resource.Header.AsSpan().SequenceEqual(previous.Header)
+                || !resource.Data.AsSpan().SequenceEqual(previous.Data))
+            .ToList();
+
+        rebuilt.Resources.Clear();
+        rebuilt.Resources.Add(root);
+        rebuilt.Resources.AddRange(changed);
+
+        using var output = new MemoryStream();
+        rebuilt.Write(output);
+        return output.ToArray();
+    }
+
+    static byte[] MergeResourcePatches(byte[] preferredData, byte[] fallbackData,
+        ulong containerId)
+    {
+        using var preferredStream = new MemoryStream(preferredData, writable: false);
+        using var fallbackStream = new MemoryStream(fallbackData, writable: false);
+        DataFile preferred = DataFile.Read(preferredStream);
+        DataFile fallback = DataFile.Read(fallbackStream);
+        if (preferred.Resources.Count == 0 || fallback.Resources.Count == 0
+            || preferred.Resources[0].Id != containerId
+            || fallback.Resources[0].Id != containerId)
+            throw new InvalidDataException(
+                "Resource overlays do not share the Forge container identity.");
+
+        var ids = preferred.Resources.Select(resource => resource.Id).ToHashSet();
+        foreach (Resource resource in fallback.Resources.Skip(1))
+        {
+            if (ids.Add(resource.Id))
+                preferred.Resources.Add(resource);
+        }
+
+        using var output = new MemoryStream();
+        preferred.Write(output);
+        return output.ToArray();
     }
 
     internal static string FamilyOf(string archivePath)

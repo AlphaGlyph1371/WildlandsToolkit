@@ -266,6 +266,9 @@
                     <Button x:Name="OpenMeshButton" Content="Open mesh viewer"
                         Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
 
+                    <Button x:Name="OpenSkeletonButton" Content="Open skeleton viewer"
+                        Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
+
                     <Button x:Name="OpenCycleButton" Content="Open time cycle editor"
                         Click="OpenViewer_Click" Visibility="Collapsed" Margin="0,0,0,10"/>
 

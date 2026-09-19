@@ -64,7 +64,7 @@
                                    Margin="10,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource TextDim}"
-                               Text="Writes a new archive beside the game files. Nothing that is already there is touched, so nothing can be damaged and no backup is needed. Uninstalling is deleting the file."/>
+                               Text="Writes a new archive beside the game files containing the changed resources. Existing archives stay untouched, no backup is needed, and uninstalling means deleting the new archive."/>
                     <TextBlock x:Name="AddonTargetText" Margin="0,6,0,0" TextWrapping="Wrap"
                                Foreground="{StaticResource TextDim}" FontSize="11"/>
                     <TextBlock x:Name="AddonBlockedText" Margin="0,6,0,0" TextWrapping="Wrap"
