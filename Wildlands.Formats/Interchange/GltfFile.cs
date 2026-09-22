@@ -18,13 +18,14 @@ public static class GltfFile
     const int UnsignedInt = 5125;
     const int Float = 5126;
 
-    public static void Write(Mesh mesh, string name, string path, List<SkeletonBone>? skeleton = null)
+    public static void Write(Mesh mesh, string name, string path,
+        List<SkeletonBone>? skeleton = null, bool includeSkin = true)
     {
         ArgumentNullException.ThrowIfNull(mesh);
 
         var vertices = MeshGeometry.ReadVertices(mesh);
         var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
-        bool skinned = layout.IsSkinned && mesh.Bones.Count > 0;
+        bool skinned = includeSkin && layout.IsSkinned && mesh.Bones.Count > 0;
 
         var binary = new MemoryStream();
         var accessors = new JsonArray();

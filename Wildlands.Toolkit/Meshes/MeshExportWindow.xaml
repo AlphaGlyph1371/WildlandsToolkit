@@ -1,0 +1,93 @@
+<Window x:Class="Wildlands.Toolkit.MeshExportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Export mesh" Height="560" Width="700"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="{StaticResource Background}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock x:Name="TitleText" FontSize="17" TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="MeshInfoText" Margin="0,3,0,0" FontSize="11"
+                       Foreground="{StaticResource TextDim}"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="76"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Folder" VerticalAlignment="Center"
+                       Foreground="{StaticResource TextDim}"/>
+            <TextBox Grid.Column="1" x:Name="FolderBox" Margin="0,0,8,0"
+                     TextChanged="Options_Changed"/>
+            <Button Grid.Column="2" Content="Browse" Click="Browse_Click" Margin="0"/>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="76"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Name" VerticalAlignment="Center"
+                       Foreground="{StaticResource TextDim}"/>
+            <TextBox Grid.Column="1" x:Name="NameBox" TextChanged="Options_Changed"/>
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="76"/>
+                <ColumnDefinition Width="280"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Format" VerticalAlignment="Center"
+                       Foreground="{StaticResource TextDim}"/>
+            <ComboBox Grid.Column="1" x:Name="FormatBox" SelectionChanged="Options_Changed"/>
+        </Grid>
+
+        <Border Grid.Row="4" Height="1" Background="{StaticResource Border}" Margin="0,0,0,13"/>
+
+        <Grid Grid.Row="5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="CONTENTS" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextDisabled}" Margin="0,0,0,7"/>
+                <CheckBox Content="Mesh geometry and vertex attributes" IsChecked="True"
+                          IsEnabled="False" Margin="0,0,0,7"/>
+                <CheckBox x:Name="SkeletonBox" Content="Skeleton and skin weights"
+                          Checked="Skeleton_Changed" Unchecked="Skeleton_Changed"/>
+            </StackPanel>
+            <Button Grid.Column="1" x:Name="ChooseSkeletonButton" Content="Choose skeleton…"
+                    Click="ChooseSkeleton_Click" VerticalAlignment="Bottom" Margin="12,0,0,0"/>
+        </Grid>
+
+        <Border Grid.Row="6" Margin="0,14,0,14" Padding="12,10" CornerRadius="3"
+                BorderBrush="{StaticResource Border}" BorderThickness="1"
+                Background="{StaticResource Surface}">
+            <TextBlock x:Name="HintText" TextWrapping="Wrap" FontFamily="Consolas"
+                       FontSize="12" Foreground="{StaticResource TextDim}"/>
+        </Border>
+
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Click="Cancel_Click" IsCancel="True"/>
+            <Button x:Name="SaveButton" Content="Export" Click="Save_Click"
+                    Margin="0" IsDefault="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

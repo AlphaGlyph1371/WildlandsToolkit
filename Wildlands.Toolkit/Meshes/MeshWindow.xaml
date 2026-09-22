@@ -49,6 +49,10 @@
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Frame all" Click="Fit_Click"
                                     ToolTip="Frame the whole mesh (F)"/>
+                            <ToggleButton x:Name="HierarchyButton" Content="Hierarchy"
+                                          Click="Hierarchy_Click" IsChecked="True"
+                                          Style="{StaticResource StateToggle}"
+                                          ToolTip="Show or hide the scene hierarchy"/>
                             <ToggleButton x:Name="TextureButton" Content="Textures"
                                           Click="Texture_Click" Style="{StaticResource StateToggle}"
                                           ToolTip="Display the diffuse texture resolved through each material and texture set"/>
@@ -107,13 +111,76 @@
             </Grid>
         </Border>
 
-        <Border x:Name="Stage" Background="#FF141416" ClipToBounds="True">
-            <Viewport3D x:Name="Viewport">
-                <Viewport3D.Camera>
-                    <PerspectiveCamera x:Name="Camera" FieldOfView="45" UpDirection="0,0,1"/>
-                </Viewport3D.Camera>
-                <ModelVisual3D x:Name="Scene"/>
-            </Viewport3D>
-        </Border>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="HierarchyColumn" Width="300"/>
+                <ColumnDefinition x:Name="HierarchySplitterColumn" Width="4"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="HierarchyPanel" Grid.Column="0" Background="{StaticResource Surface}"
+                    BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Padding="12,10" BorderBrush="{StaticResource Border}"
+                            BorderThickness="0,0,0,1">
+                        <StackPanel>
+                            <TextBlock Text="HIERARCHY" FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextDisabled}"/>
+                            <TextBlock Text="Select an item to outline it. Use the checkboxes to hide it."
+                                       Margin="0,5,0,0" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{StaticResource TextDim}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TreeView x:Name="HierarchyTree" BorderThickness="0" Padding="5"
+                              Background="{StaticResource Surface}"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              SelectedItemChanged="Hierarchy_SelectedItemChanged">
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="TreeViewItem">
+                                <Setter Property="IsExpanded" Value="True"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                <Setter Property="Padding" Value="2"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            </Style>
+                        </TreeView.ItemContainerStyle>
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                <Grid Margin="1,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0" IsThreeState="True"
+                                              IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                                              Tag="{Binding}" Click="HierarchyVisibility_Click"
+                                              VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Name}" MaxWidth="235"/>
+                                        <TextBlock Text="{Binding Detail}" FontSize="10"
+                                                   Foreground="{StaticResource TextDim}"
+                                                   TextWrapping="Wrap" MaxWidth="235"
+                                                   ToolTip="{Binding Detail}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                </DockPanel>
+            </Border>
+
+            <GridSplitter x:Name="HierarchySplitter" Grid.Column="1" Width="4"
+                          HorizontalAlignment="Stretch"/>
+
+            <Border Grid.Column="2" x:Name="Stage" Background="#FF141416" ClipToBounds="True">
+                <Viewport3D x:Name="Viewport">
+                    <Viewport3D.Camera>
+                        <PerspectiveCamera x:Name="Camera" FieldOfView="45" UpDirection="0,0,1"/>
+                    </Viewport3D.Camera>
+                    <ModelVisual3D x:Name="Scene"/>
+                </Viewport3D>
+            </Border>
+        </Grid>
     </DockPanel>
 </Window>

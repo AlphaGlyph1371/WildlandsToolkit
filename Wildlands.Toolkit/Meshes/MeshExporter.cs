@@ -1,78 +1,58 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
-using Microsoft.Win32;
 using Wildlands.Formats;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Models;
 
 namespace Wildlands.Toolkit;
 
+public enum MeshExportFormat
+{
+    Glb,
+    Fbx,
+    Obj,
+}
+
 public static class MeshExporter
 {
-    public static string Save(Window owner, Mesh mesh, string name, List<Resource> siblings, SkeletonIndex? skeletonIndex, AppSettings settings, List<SkeletonBone>? chosenSkeleton = null)
+    public static string Save(Window owner, Mesh mesh, string name, List<Resource> siblings,
+        SkeletonIndex? skeletonIndex, AppSettings settings,
+        List<SkeletonBone>? chosenSkeleton = null)
     {
-        var dialog = new SaveFileDialog
-        {
-            Title = "Export mesh",
-            FileName = name,
-            AddExtension = true,
-            DefaultExt = ".glb",
-            Filter = "glTF binary (*.glb)|*.glb|FBX model (*.fbx)|*.fbx|Wavefront OBJ (*.obj)|*.obj|All files (*.*)|*.*",
-        };
+        var dialog = new MeshExportWindow(mesh, name, siblings, skeletonIndex, settings,
+            chosenSkeleton) { Owner = owner };
+        return dialog.ShowDialog() == true ? dialog.Summary : "";
+    }
 
-        if (settings.ExportFolder.Length > 0 && Directory.Exists(settings.ExportFolder))
-            dialog.InitialDirectory = settings.ExportFolder;
-
-        if (dialog.ShowDialog(owner) != true)
-            return "";
-
-        settings.ExportFolder = Path.GetDirectoryName(dialog.FileName) ?? "";
-        settings.Save();
-
-        string extension = Path.GetExtension(dialog.FileName);
+    public static string Export(Mesh mesh, string name, string path, MeshExportFormat format,
+        bool includeSkin, List<SkeletonBone>? skeleton)
+    {
         var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
-        bool isSkinned = layout.IsSkinned && mesh.Bones.Count > 0;
-        bool wantsSkeleton = isSkinned
-            && !extension.Equals(".obj", System.StringComparison.OrdinalIgnoreCase);
-        var rig = wantsSkeleton
-            ? chosenSkeleton ?? SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex)
-            : null;
+        bool skinned = includeSkin && layout.IsSkinned && mesh.Bones.Count > 0;
 
-        if (extension.Equals(".obj", System.StringComparison.OrdinalIgnoreCase))
+        if (format == MeshExportFormat.Obj)
         {
-            ObjFile.Write(mesh, name, dialog.FileName);
-            return $"Wrote {Path.GetFileName(dialog.FileName)} ({mesh.Data.Standard.Count} draw range(s), positions, normals and one uv set)";
+            ObjFile.Write(mesh, name, path);
+            return $"Wrote {Path.GetFileName(path)} ({mesh.Data.Standard.Count} draw range(s), "
+                + "positions, normals and one uv set; OBJ cannot store a skeleton)";
         }
 
-        if (extension.Equals(".glb", System.StringComparison.OrdinalIgnoreCase) || extension.Equals(".gltf", System.StringComparison.OrdinalIgnoreCase))
+        if (format == MeshExportFormat.Glb)
         {
-            GltfFile.Write(mesh, name, dialog.FileName, rig);
-            return $"Wrote {Path.GetFileName(dialog.FileName)} ({mesh.Data.Standard.Count} primitive(s), "
+            GltfFile.Write(mesh, name, path, skeleton, includeSkin);
+            return $"Wrote {Path.GetFileName(path)} ({mesh.Data.Standard.Count} primitive(s), "
                 + $"{layout.UvCount} uv set(s)" + (layout.HasColor ? ", vertex colours" : "")
-                + (layout.IsSkinned && mesh.Bones.Count > 0
-                    ? $", skin over {mesh.Bones.Count} bones" + (rig is null ? " without a hierarchy" : " with their hierarchy")
+                + (skinned
+                    ? $", skin over {mesh.Bones.Count} bones"
+                        + (skeleton is null ? " with a flat hierarchy" : " with their hierarchy")
                     : "") + ")";
         }
 
-        string picked = "";
-        var skeleton = rig;
-
-        if (isSkinned && skeleton is null
-            && Ask(owner, "No skeleton found for this mesh, so its bones come out unconnected.\n\nPick one yourself?"))
-        {
-            skeleton = SkeletonPicker.Choose(owner, out picked);
-        }
-
-        FbxWriter.Write(mesh, name, dialog.FileName, skeleton);
-
-        string how = !isSkinned ? "static mesh"
-            : skeleton is null ? "flat bone list"
-            : picked.Length > 0 ? $"skeleton {picked}"
-            : $"skeleton with {skeleton.Count} bones";
-
-        return $"Wrote {Path.GetFileName(dialog.FileName)} ({how})";
+        FbxWriter.Write(mesh, name, path, skeleton, includeSkin: includeSkin);
+        string how = !skinned ? "static mesh"
+            : skeleton is null ? $"skin over {mesh.Bones.Count} bones with a flat hierarchy"
+            : $"skin over {mesh.Bones.Count} bones with their hierarchy";
+        return $"Wrote {Path.GetFileName(path)} ({how})";
     }
-
-    static bool Ask(Window owner, string question) => MessageBox.Show(owner, question, "Export mesh", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 }

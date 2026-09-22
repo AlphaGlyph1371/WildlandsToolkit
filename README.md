@@ -40,6 +40,10 @@ can still be inspected, extracted and replaced as raw resources.
 See [CHANGELOG.md](CHANGELOG.md) for the complete list of additions, changes, fixes and current
 limitations.
 
+The strict parser and writer coverage audit is tracked in
+[FORMAT_PARSER_STATUS.md](FORMAT_PARSER_STATUS.md). It distinguishes byte-exact roundtrips from
+formats that can already be created without copying unknown data from a source asset.
+
 ---
 
 ## Features
@@ -104,6 +108,8 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
 ### Meshes
 
 - 3D viewport with orbit, pan and zoom, built on WPF's own 3D
+- Scene hierarchy for draw ranges and the armature, with per-item visibility, selection details and
+  a visible selection outline in the viewport
 - Draws the real diffuse texture per draw range, back faces follow the original used material
 - Exports and **re-imports binary glTF** (`.glb`): positions, normals, tangents, every UV set,
   vertex colours, skin weights and one material per draw range, all of it round-trips
@@ -202,7 +208,8 @@ This is the path for anything the toolkit has no editor for, and for files you b
 ### Example: Replacing a mesh
 
 1. Select the mesh and press **Export** in the toolbar (or the button of the same name in the mesh
-   viewer). Keep the default `.glb`
+   viewer). The export dialog shows exactly what will be written. Keep the default `.glb` and leave
+   **Skeleton and skin weights** enabled for a skinned mesh
 2. Edit it in Blender. Every material stays a separate material, and that is what becomes a draw
    range on the way back. You may add or remove one; the material list follows
 3. Export it from Blender as glTF binary (`.glb`) again

@@ -11,6 +11,10 @@ archive modification.
   editing their rest-pose positions and rotations.
 - Skeleton resources now open in a dedicated 3D viewer with the same top-toolbar workflow as the
   mesh viewer, including live GLB import, export, framing and local bone-axis display.
+- The mesh viewer now has a scene hierarchy for draw ranges and the armature, per-item visibility,
+  selection details and a viewport outline for the selected hierarchy item.
+- Added a strict parser coverage audit that separates byte-exact roundtrips from formats that can be
+  created without copying unknown source bytes.
 
 ## Added
 
@@ -37,6 +41,8 @@ archive modification.
 - Archive discovery now includes every DLC directory
 - Archive loading and navigation are now asynchronous
 - Redesigned mesh and texture viewer toolbars
+- Added a dedicated mesh export dialog that shows the selected format and exported contents, keeps
+  skeletons and skin weights enabled by default, and explains that OBJ is geometry-only
 - Improved mesh material previews and viewer information
 - Improved validation of imported meshes before changes are queued
 - Improved skeleton matching and fallback weight generation

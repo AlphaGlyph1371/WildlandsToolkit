@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -39,6 +40,14 @@ public partial class MeshWindow : Window
     readonly SkeletonIndex? _skeletonIndex;
 
     List<SkeletonBone>? _skeleton;
+    List<SkeletonBone>? _automaticSkeleton;
+    MeshGeometry3D? _armatureGeometry;
+    bool[] _partVisible = [];
+    bool _armatureVisible = true;
+    bool _updatingHierarchy;
+    GridLength _hierarchyWidth = new(300);
+    MeshHierarchyItem? _selectedHierarchy;
+    readonly ObservableCollection<MeshHierarchyItem> _hierarchy = [];
 
     List<MeshSurface> _surfaces = [];
     bool _texturesLoaded;
@@ -68,8 +77,10 @@ public partial class MeshWindow : Window
         Title = name;
         MeshNameText.Text = name;
         bool isSkinned = mesh.Bones.Count > 0;
-        bool foundSkeleton = isSkinned
-            && SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex) is not null;
+        _automaticSkeleton = isSkinned
+            ? SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex)
+            : null;
+        bool foundSkeleton = _automaticSkeleton is not null;
         MeshTypeText.Text = !isSkinned
             ? "Static mesh"
             : foundSkeleton
@@ -85,7 +96,12 @@ public partial class MeshWindow : Window
             ImportButton.ToolTip = "Import is available when the viewer was opened from a concrete Mesh resource inside a data container.";
 
         _parts = MeshScene.Build(mesh);
+        _partVisible = Enumerable.Repeat(true, _parts.Count).ToArray();
+        _armatureGeometry = isSkinned
+            ? MeshScene.BuildArmature(mesh, ActiveSkeleton())
+            : null;
         _surfaces = MeshSurfaces.Load(mesh, siblings, archives, withTextures: false, out _borrowed);
+        BuildHierarchy();
         BuildScene();
         ShowFacts();
         UpdateRangeControl();
@@ -109,6 +125,9 @@ public partial class MeshWindow : Window
 
         for (int i = 0; i < _parts.Count; i++)
         {
+            if (i >= _partVisible.Length || !_partVisible[i])
+                continue;
+
             var colour = _colourRanges ? Palette[i % Palette.Length] : Palette[0];
 
             var surface = i < _surfaces.Count ? _surfaces[i] : null;
@@ -130,7 +149,206 @@ public partial class MeshWindow : Window
             group.Children.Add(model);
         }
 
+        if (_armatureVisible && _armatureGeometry is not null)
+        {
+            var armatureBrush = Paint(Color.FromRgb(0x73, 0xB7, 0xF2));
+            var armature = new GeometryModel3D(_armatureGeometry,
+                new EmissiveMaterial(armatureBrush))
+            {
+                BackMaterial = new EmissiveMaterial(armatureBrush),
+            };
+            group.Children.Add(armature);
+        }
+
+        Rect3D selected = SelectedBounds();
+        if (!selected.IsEmpty)
+        {
+            var accent = Paint(Color.FromRgb(0x4D, 0xA7, 0xFF));
+            var outline = new GeometryModel3D(MeshScene.BuildOutline(selected),
+                new EmissiveMaterial(accent))
+            {
+                BackMaterial = new EmissiveMaterial(accent),
+            };
+            group.Children.Add(outline);
+        }
+
         Scene.Content = group;
+    }
+
+    List<SkeletonBone>? ActiveSkeleton() => _skeleton ?? _automaticSkeleton;
+
+    void BuildHierarchy()
+    {
+        _selectedHierarchy = null;
+        _hierarchy.Clear();
+
+        var root = new MeshHierarchyItem
+        {
+            Name = _name,
+            Detail = "Mesh",
+            Kind = MeshHierarchyKind.Mesh,
+        };
+        var geometry = new MeshHierarchyItem
+        {
+            Name = "Geometry",
+            Detail = $"{_parts.Count} draw range(s)",
+            Kind = MeshHierarchyKind.Geometry,
+            Parent = root,
+        };
+        root.Children.Add(geometry);
+
+        for (int index = 0; index < _parts.Count; index++)
+        {
+            ulong materialId = index < _mesh.Materials.Count
+                ? _mesh.Materials[index].MaterialId
+                : 0;
+            geometry.Children.Add(new MeshHierarchyItem
+            {
+                Name = $"Draw range {index + 1}",
+                Detail = materialId == 0
+                    ? $"{_parts[index].TriangleCount:N0} triangles"
+                    : $"{_parts[index].TriangleCount:N0} triangles  ·  material 0x{materialId:X}",
+                Kind = MeshHierarchyKind.DrawRange,
+                Index = index,
+                Parent = geometry,
+                IsVisible = index < _partVisible.Length && _partVisible[index],
+            });
+        }
+
+        if (_mesh.Bones.Count > 0)
+        {
+            List<SkeletonBone>? skeleton = ActiveSkeleton();
+            root.Children.Add(new MeshHierarchyItem
+            {
+                Name = "Armature",
+                Detail = skeleton is null
+                    ? $"{_mesh.Bones.Count} weighted bones  ·  flat hierarchy"
+                    : $"{_mesh.Bones.Count} weighted bones  ·  hierarchy from {skeleton.Count} bones",
+                Kind = MeshHierarchyKind.Armature,
+                Parent = root,
+                IsVisible = _armatureVisible,
+            });
+        }
+
+        RefreshGroupState(geometry);
+        RefreshGroupState(root);
+        _hierarchy.Add(root);
+        HierarchyTree.ItemsSource = _hierarchy;
+    }
+
+    void HierarchyVisibility_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updatingHierarchy || sender is not System.Windows.Controls.CheckBox
+            { Tag: MeshHierarchyItem item } check)
+            return;
+
+        bool visible = check.IsChecked == true;
+        _updatingHierarchy = true;
+        SetVisible(item, visible);
+        for (MeshHierarchyItem? parent = item.Parent; parent is not null; parent = parent.Parent)
+            RefreshGroupState(parent);
+        _updatingHierarchy = false;
+        BuildScene();
+        ShowSelectionFacts();
+        e.Handled = true;
+    }
+
+    void SetVisible(MeshHierarchyItem item, bool visible)
+    {
+        item.IsVisible = visible;
+        foreach (MeshHierarchyItem child in item.Children)
+            SetVisible(child, visible);
+
+        if (item.Kind == MeshHierarchyKind.DrawRange
+            && (uint)item.Index < (uint)_partVisible.Length)
+            _partVisible[item.Index] = visible;
+        else if (item.Kind == MeshHierarchyKind.Armature)
+            _armatureVisible = visible;
+    }
+
+    static void RefreshGroupState(MeshHierarchyItem item)
+    {
+        if (item.Children.Count == 0)
+            return;
+        item.IsVisible = item.Children.All(child => child.IsVisible == true) ? true
+            : item.Children.All(child => child.IsVisible == false) ? false
+            : null;
+    }
+
+    void Hierarchy_SelectedItemChanged(object sender,
+        RoutedPropertyChangedEventArgs<object> e)
+    {
+        _selectedHierarchy = e.NewValue as MeshHierarchyItem;
+        BuildScene();
+        ShowSelectionFacts();
+    }
+
+    void Hierarchy_Click(object sender, RoutedEventArgs e)
+    {
+        bool show = HierarchyButton.IsChecked == true;
+        if (!show && HierarchyColumn.ActualWidth > 0)
+            _hierarchyWidth = new GridLength(HierarchyColumn.ActualWidth);
+        HierarchyPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        HierarchySplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        HierarchyColumn.Width = show ? _hierarchyWidth : new GridLength(0);
+        HierarchySplitterColumn.Width = show ? new GridLength(4) : new GridLength(0);
+    }
+
+    Rect3D SelectedBounds()
+    {
+        if (_selectedHierarchy is null)
+            return Rect3D.Empty;
+
+        if (_selectedHierarchy.Kind == MeshHierarchyKind.DrawRange)
+        {
+            int index = _selectedHierarchy.Index;
+            return (uint)index < (uint)_parts.Count && _partVisible[index]
+                ? _parts[index].Geometry.Bounds
+                : Rect3D.Empty;
+        }
+
+        if (_selectedHierarchy.Kind == MeshHierarchyKind.Armature)
+            return _armatureVisible && _armatureGeometry is not null
+                ? _armatureGeometry.Bounds
+                : Rect3D.Empty;
+
+        var bounds = Rect3D.Empty;
+        for (int index = 0; index < _parts.Count; index++)
+            if (index < _partVisible.Length && _partVisible[index])
+                bounds.Union(_parts[index].Geometry.Bounds);
+        if (_selectedHierarchy.Kind == MeshHierarchyKind.Mesh
+            && _armatureVisible && _armatureGeometry is not null)
+            bounds.Union(_armatureGeometry.Bounds);
+        return bounds;
+    }
+
+    void ShowSelectionFacts()
+    {
+        if (_selectedHierarchy is null
+            || _selectedHierarchy.Kind is MeshHierarchyKind.Mesh or MeshHierarchyKind.Geometry)
+        {
+            ShowFacts();
+            return;
+        }
+
+        if (_selectedHierarchy.Kind == MeshHierarchyKind.Armature)
+        {
+            List<SkeletonBone>? skeleton = ActiveSkeleton();
+            StatusText.Text = skeleton is null
+                ? $"Armature   {_mesh.Bones.Count} weighted bones   flat hierarchy"
+                : $"Armature   {_mesh.Bones.Count} weighted bones   hierarchy resolved from {skeleton.Count} skeleton bones";
+            return;
+        }
+
+        int index = _selectedHierarchy.Index;
+        if ((uint)index >= (uint)_parts.Count)
+            return;
+        ulong materialId = index < _mesh.Materials.Count
+            ? _mesh.Materials[index].MaterialId
+            : 0;
+        StatusText.Text = $"Draw range {index + 1}   {_parts[index].VertexCount:N0} vertices   "
+            + $"{_parts[index].TriangleCount:N0} triangles"
+            + (materialId == 0 ? "" : $"   material 0x{materialId:X}");
     }
 
     void Texture_Click(object sender, RoutedEventArgs e)
@@ -208,6 +426,8 @@ public partial class MeshWindow : Window
     void Fit()
     {
         var bounds = MeshScene.Bounds(_parts);
+        if (_armatureVisible && _armatureGeometry is not null)
+            bounds.Union(_armatureGeometry.Bounds);
         _cameraController.Fit(bounds);
     }
 
@@ -236,6 +456,9 @@ public partial class MeshWindow : Window
             _skeleton = null;
             SkeletonButton.Content = "Choose skeleton…";
             SkeletonButton.ToolTip = "Override the skeleton used when exporting GLB or FBX";
+            _armatureGeometry = MeshScene.BuildArmature(_mesh, ActiveSkeleton());
+            BuildHierarchy();
+            BuildScene();
             return;
         }
 
@@ -244,6 +467,9 @@ public partial class MeshWindow : Window
         SkeletonButton.ToolTip = _skeleton is null
             ? "Override the skeleton used when exporting GLB or FBX"
             : $"Export uses {name}. Click to return to automatic skeleton selection.";
+        _armatureGeometry = MeshScene.BuildArmature(_mesh, ActiveSkeleton());
+        BuildHierarchy();
+        BuildScene();
     }
 
     void Replace_Click(object sender, RoutedEventArgs e)
@@ -284,6 +510,14 @@ public partial class MeshWindow : Window
         _mesh = imported;
         _resourceData = rebuilt;
         _parts = parts;
+        _partVisible = Enumerable.Repeat(true, _parts.Count).ToArray();
+        _automaticSkeleton = _mesh.Bones.Count > 0
+            ? SkeletonFinder.Find(_siblings, _mesh.Bones, _skeletonIndex)
+            : null;
+        _armatureVisible = _mesh.Bones.Count > 0;
+        _armatureGeometry = _mesh.Bones.Count > 0
+            ? MeshScene.BuildArmature(_mesh, ActiveSkeleton())
+            : null;
         _texturesLoaded = false;
         _textured = false;
         _borrowed = null;
@@ -293,6 +527,7 @@ public partial class MeshWindow : Window
         _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives,
             withTextures: false, out _borrowed);
         UpdateRangeControl();
+        BuildHierarchy();
         BuildScene();
         ShowFacts();
         Fit();

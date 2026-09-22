@@ -32,7 +32,9 @@ public static class FbxWriter
         0xEC, 0xE9, 0x0C, 0xE3, 0x75, 0x8F, 0x29, 0x0B,
     ];
 
-    public static void Write(Mesh mesh, string name, string path, List<SkeletonBone>? skeleton = null, List<string>? materialNames = null)
+    public static void Write(Mesh mesh, string name, string path,
+        List<SkeletonBone>? skeleton = null, List<string>? materialNames = null,
+        bool includeSkin = true)
     {
         ArgumentNullException.ThrowIfNull(mesh);
 
@@ -68,7 +70,8 @@ public static class FbxWriter
         writer.Write((byte)0x00);
         writer.Write((uint)Version);
 
-        foreach (var node in BuildTree(name, vertices, [.. triangles], [.. polygonMaterial], materials, mesh.Bones, skeleton))
+        foreach (var node in BuildTree(name, vertices, [.. triangles], [.. polygonMaterial],
+                     materials, mesh.Bones, skeleton, includeSkin))
             node.Write(writer);
 
         writer.Write(new byte[FbxNode.Terminator]);
@@ -76,9 +79,11 @@ public static class FbxWriter
     }
 
     static IEnumerable<FbxNode> BuildTree(string name, MeshVertex[] vertices, int[] triangles, int[] polygonMaterial,
-        List<string> materials, List<MeshBone> bones, List<SkeletonBone>? skeleton)
+        List<string> materials, List<MeshBone> bones, List<SkeletonBone>? skeleton,
+        bool includeSkin)
     {
-        bool skinned = bones.Count > 0 && vertices.Length > 0 && vertices[0].JointIndices.Length > 0;
+        bool skinned = includeSkin && bones.Count > 0 && vertices.Length > 0
+            && vertices[0].JointIndices.Length > 0;
         var parents = BoneHierarchy.Resolve(bones, skeleton);
 
         var header = new FbxNode("FBXHeaderExtension");
