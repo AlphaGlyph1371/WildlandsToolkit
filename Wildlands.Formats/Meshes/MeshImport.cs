@@ -504,7 +504,7 @@ public static class MeshImport
         var clustered = mesh.Clustered ?? throw new InvalidDataException("The imported mesh lost its clustered GPU buffers.");
         if (clustered.VertexStride <= 0 || clustered.VertexBuffer.Length % clustered.VertexStride != 0)
             throw new InvalidDataException("The imported vertex buffer is not aligned to its stride.");
-        int indexSize = mesh.Data.Indices32Bit ? 4 : 2;
+        int indexSize = mesh.Indices32Bit ? 4 : 2;
         if (clustered.IndexBuffer.Length != checked(indexCount * indexSize))
             throw new InvalidDataException("The imported index-buffer size does not match its index count.");
         if (mesh.Data.Standard.Count != ranges.Count

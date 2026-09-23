@@ -55,8 +55,9 @@ public sealed class VertexLayout
         7 => new VertexLayout(7, 28, binormalAt: -1, colorAt: 16, uvAt: [20, 24], jointsAt: -1, weightsAt: -1, jointsPerVertex: 0),
         8 => new VertexLayout(8, 20, binormalAt: -1, colorAt: -1, uvAt: [16], jointsAt: -1, weightsAt: -1, jointsPerVertex: 0),
         9 => new VertexLayout(9, 24, binormalAt: -1, colorAt: -1, uvAt: [16, 20], jointsAt: -1, weightsAt: -1, jointsPerVertex: 0),
+        16 => new VertexLayout(16, 16, binormalAt: -1, colorAt: -1, uvAt: [], jointsAt: -1, weightsAt: -1, jointsPerVertex: 0),
         _ => throw new NotSupportedException($"Vertex format {format} has not been decoded yet."),
     };
 
-    public static bool IsKnown(int format) => format is 0 or 1 or 2 or 3 or 6 or 7 or 8 or 9;
+    public static bool IsKnown(int format) => format is 0 or 1 or 2 or 3 or 6 or 7 or 8 or 9 or 16;
 }

@@ -99,6 +99,7 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  skyout <file.data> <outdir>  write every sky layer as a dds file");
     Console.WriteLine("  classdump <folder with .data> <class> <outdir> [count]  write resources of one class to disk");
     Console.WriteLine("  classcensus <folder with .data>  count every resource class and how many bytes it holds");
+    Console.WriteLine("  parseraudit <game folder> [report.json] [--fast]  test every current game-format reader/writer across all installed archives");
     Console.WriteLine("  prefetchblock <archive.forge> <entry id>...  print one prefetch block as hex");
     Console.WriteLine("  prefetchcycle <game folder>  read and rewrite every prefetch block byte for byte");
     Console.WriteLine("  metacycle <game folder>  read and rewrite every GlobalMetaFile byte for byte");
@@ -314,6 +315,9 @@ try
                 args.Length >= 5 ? int.Parse(args[4]) : 20);
         case "classcensus" when args.Length >= 2:
             return CensusResourceClasses(args[1]);
+        case "parseraudit" when args.Length >= 2:
+            return AuditAllParsers(args[1], args.Length >= 3 && args[2] != "--fast" ? args[2] : null,
+                args.Contains("--fast"));
         case "prefetchblock" when args.Length >= 3:
             return DumpPrefetchBlock(args[1], args[2..]);
         case "prefetchcycle" when args.Length >= 2:

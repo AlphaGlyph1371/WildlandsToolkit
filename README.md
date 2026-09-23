@@ -168,13 +168,21 @@ extracted `.data` files and they check the whole lot; see the section above for 
 
 "It opens the file" and "it writes the file back correctly" are very different claims, so the CLI
 has commands that read every resource of a kind, write it straight back, and compare byte for byte.
-Over all of `DataPC.forge`:
+The full installed game corpus was checked on 23 September 2026: 24 archives, 301,994 Forge
+entries, 296,798 valid `.data` containers and 5,675,199 resources. The check finished with zero
+parser errors:
 
 | | rewritten | came out different |
 |---|---|---|
-| Meshes | 20450 | **0** |
-| Skeletons | 1662 | **0** |
-| BuildTables | 3649 | **0** |
+| Meshes | 703526 | **0** |
+| Skeletons | 8183 | **0** |
+| BuildTables | 11218 | **0** |
+| Animations | 46829 | **0** |
+| Prefetch blocks | 296798 | **0** |
+
+Run `parseraudit <game folder> <report.json> --fast` to repeat the complete reader/writer audit.
+`--fast` omits the expensive `.data` container recompression check; that structural write/read check
+was separately completed successfully for all 296,810 containers.
 
 ---
 
@@ -345,6 +353,7 @@ skelcycle <folder|file.data>                read and rewrite every skeleton byte
 skelcheck <folder|file.data>                check skeletons against the published Anvil docs
 buildcycle <folder|file.data>               parse and rewrite every build table byte for byte
 skelindex <folder> <cache.bin>              index every skeleton across a folder of archives
+parseraudit <game folder> [report.json] [--fast]  test every supported reader/writer across installed archives
 
 sets      <file.forge> [n]                  which textures the texture sets point at
 mats      <file.forge> [n]                  whether every draw range finds its material

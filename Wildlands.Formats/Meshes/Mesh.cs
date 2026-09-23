@@ -95,17 +95,53 @@ public sealed class Mesh
     public int DynamicMeshIndexCount { get; set; }
     public int UserCategory { get; set; }
 
+    /// <summary>
+    /// Original bytes for a mesh variant whose object-pointer layout is not decoded yet.
+    /// Such a mesh can be carried through an addon without loss, but cannot be edited as geometry.
+    /// </summary>
+    public byte[]? OpaqueData { get; private set; }
+
+    public bool IsOpaque => OpaqueData is not null;
+
     public GeometryKind Geometry => Clustered is not null ? GeometryKind.Clustered : Data.VertexBuffer.Length > 0 ? GeometryKind.Plain : GeometryKind.None;
 
     public byte[] VertexBuffer => Clustered is not null ? Clustered.VertexBuffer : Data.VertexBuffer;
     public byte[] IndexBuffer => Clustered is not null ? Clustered.IndexBuffer : Data.IndexBuffer;
     public int VertexStride => Clustered?.VertexStride ?? Data.VertexStride;
     public int VertexFormat => Clustered?.VertexFormat ?? Data.VertexFormat;
+    public bool Indices32Bit
+    {
+        get
+        {
+            if (Clustered is null)
+                return Data.Indices32Bit;
+
+            int count = Data.Standard.Concat(Data.Shadow)
+                .Select(range => checked(range.StartIndex + range.TriangleCount * 3))
+                .DefaultIfEmpty(0).Max();
+            if (count > 0 && IndexBuffer.Length == count * sizeof(ushort))
+                return false;
+            if (count > 0 && IndexBuffer.Length == count * sizeof(uint))
+                return true;
+            return Data.Indices32Bit;
+        }
+    }
 
     public static Mesh Read(byte[] resource)
     {
         ArgumentNullException.ThrowIfNull(resource);
+        try
+        {
+            return ReadKnown(resource);
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("unsupported object-pointer tag", StringComparison.Ordinal))
+        {
+            return new Mesh { OpaqueData = (byte[])resource.Clone() };
+        }
+    }
 
+    static Mesh ReadKnown(byte[] resource)
+    {
         using var stream = new MemoryStream(resource, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8);
         var mesh = new Mesh();
@@ -167,6 +203,9 @@ public sealed class Mesh
 
     public byte[] Write()
     {
+        if (OpaqueData is not null)
+            return (byte[])OpaqueData.Clone();
+
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8);
 

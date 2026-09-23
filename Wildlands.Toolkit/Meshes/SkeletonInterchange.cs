@@ -24,6 +24,8 @@ public static class SkeletonInterchange
             return "";
 
         SkeletonAsset skeleton = Skeleton.ReadAsset(resource);
+        if (skeleton.IsOpaque)
+            throw new InvalidDataException("This Skeleton uses an unknown modifier layout. It can be packaged unchanged, but cannot yet be exported or edited.");
         SkeletonGltf.Write(skeleton, name, dialog.FileName);
         settings.ExportFolder = Path.GetDirectoryName(dialog.FileName) ?? "";
         settings.Save();
@@ -47,6 +49,8 @@ public static class SkeletonInterchange
         try
         {
             SkeletonAsset skeleton = Skeleton.ReadAsset(resource);
+            if (skeleton.IsOpaque)
+                throw new InvalidDataException("This Skeleton uses an unknown modifier layout. It can be packaged unchanged, but cannot yet be exported or edited.");
             SkeletonGltfImportResult result = SkeletonGltf.Apply(skeleton, dialog.FileName);
             byte[] rebuilt = Skeleton.Write(skeleton);
             _ = Skeleton.ReadAsset(rebuilt);

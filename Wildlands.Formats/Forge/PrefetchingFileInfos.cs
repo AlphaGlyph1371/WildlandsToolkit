@@ -76,7 +76,11 @@ public static class PrefetchingFileInfos
         };
         int count = BinaryPrimitives.ReadUInt16LittleEndian(block.AsSpan(2));
         if (4 + (long)count * PrefetchReference.Size != block.Length)
-            throw new InvalidDataException($"A prefetch block of {block.Length} byte(s) does not hold {count} reference(s).");
+            return new PrefetchBlock
+            {
+                Flags = result.Flags,
+                OpaqueData = (byte[])block.Clone(),
+            };
         for (int index = 0; index < count; index++)
         {
             int offset = 4 + index * PrefetchReference.Size;
@@ -90,6 +94,8 @@ public static class PrefetchingFileInfos
     public static byte[] WriteBlock(PrefetchBlock block)
     {
         ArgumentNullException.ThrowIfNull(block);
+        if (block.OpaqueData is not null)
+            return (byte[])block.OpaqueData.Clone();
         byte[] result = new byte[4 + block.References.Count * PrefetchReference.Size];
         BinaryPrimitives.WriteUInt16LittleEndian(result, block.Flags);
         BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(2), checked((ushort)block.References.Count));
@@ -355,4 +361,9 @@ public sealed class PrefetchBlock
 {
     public ushort Flags { get; set; }
     public List<PrefetchReference> References { get; } = [];
+
+    /// <summary>Unrecognised block layout, kept unchanged until its reference format is decoded.</summary>
+    public byte[]? OpaqueData { get; init; }
+
+    public bool IsOpaque => OpaqueData is not null;
 }

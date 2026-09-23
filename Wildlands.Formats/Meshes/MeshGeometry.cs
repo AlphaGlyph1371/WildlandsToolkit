@@ -192,7 +192,7 @@ public static class MeshGeometry
         if (range.StartIndex < 0 || range.TriangleCount < 0)
             throw new InvalidDataException($"The mesh primitive has an invalid index range (start {range.StartIndex}, triangles {range.TriangleCount}).");
 
-        int indexSize = mesh.Data.Indices32Bit ? 4 : 2;
+        int indexSize = mesh.Indices32Bit ? 4 : 2;
         long requiredBytes = ((long)range.StartIndex + (long)range.TriangleCount * 3) * indexSize;
 
         if (requiredBytes > mesh.IndexBuffer.Length)
@@ -207,5 +207,7 @@ public static class MeshGeometry
         return indices;
     }
 
-    static int ReadIndex(Mesh mesh, int position) => mesh.Data.Indices32Bit ? BitConverter.ToInt32(mesh.IndexBuffer, position * 4) : BitConverter.ToUInt16(mesh.IndexBuffer, position * 2);
+    static int ReadIndex(Mesh mesh, int position) => mesh.Indices32Bit
+        ? BitConverter.ToInt32(mesh.IndexBuffer, position * 4)
+        : BitConverter.ToUInt16(mesh.IndexBuffer, position * 2);
 }

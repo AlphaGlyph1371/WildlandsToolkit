@@ -49,13 +49,13 @@ public static class LayeredSky
 
         var objects = AnvilObjects.ScanSequence(resource, FirstObject);
         if (objects.Count == 0)
-            throw new InvalidDataException("The LayeredSky holds no objects.");
+            return Empty(resource);
 
         int first = 0;
         while (first < objects.Count && objects[first].ClassHash != LayerClassHash)
             first++;
         if (first == objects.Count)
-            throw new InvalidDataException("The LayeredSky holds no layers.");
+            return Empty(resource);
         if (objects.Skip(first).Any(item => item.ClassHash != LayerClassHash))
             throw new InvalidDataException("The LayeredSky layers are not the last objects.");
 
@@ -99,6 +99,12 @@ public static class LayeredSky
 
         return asset;
     }
+
+    static LayeredSkyAsset Empty(byte[] resource) => new()
+    {
+        Id = BitConverter.ToUInt64(resource, 0),
+        Prologue = (byte[])resource.Clone(),
+    };
 
     public static byte[] Write(LayeredSkyAsset asset)
     {

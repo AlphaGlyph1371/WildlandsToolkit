@@ -1,6 +1,6 @@
 # Stand der Wildlands-Formatparser
 
-Stand: 22. September 2026
+Stand: 23. September 2026
 
 Dieses Dokument bewertet die Parser gegen das langfristige Ziel, ein Spielasset vollständig aus
 einem eigenen, typisierten Objektmodell erzeugen zu können. Ein bytegenauer Roundtrip allein reicht
@@ -22,9 +22,28 @@ ist das Format hier weiterhin **teilweise**.
 | 66 in `ResourceTypes` benannte Resource-Klassen | **0** | **21** | **45** |
 | Zusätzlich identifizierte Resource-Klassen | **0** | **2** | nicht vollständig inventarisiert |
 
-Die wichtige praktische Ergänzung: `Mesh`, `Skeleton` und `BuildTable` wurden auf **20.450**, **1.662**
-und **3.649** installierten Resources bytegenau gelesen und zurückgeschrieben. Das belegt sehr gute
-Roundtrip-Abdeckung. Es belegt noch keine vollständige, vorlagenfreie Erzeugung.
+## Vollständige Corpus-Prüfung
+
+Am 23. September 2026 lief `wlcli parseraudit <Spielordner> <report.json> --fast` über alle 24
+installierten Archive: 301.994 Forge-Einträge, 296.798 gültige `.data`-Container und 5.675.199
+Resources. Der Lauf endete mit **0 Fehlern**.
+
+| Format | Geprüfte Assets | Ergebnis |
+|---|---:|---|
+| Mesh | 703.526 | 703.526 bytegenaue Roundtrips |
+| Skeleton | 8.183 | 8.183 bytegenaue Roundtrips |
+| BuildTable | 11.218 | 11.218 bytegenaue Roundtrips |
+| Animation | 46.829 | 46.829 bytegenaue Roundtrips |
+| Prefetch-Block | 296.798 | 296.798 bytegenaue Roundtrips |
+| Cloth, SoftBodySettings, LayeredSky, GlobalMetaFile und TimeCycle | 1.182 | alle bytegenau |
+| TextureMap, CompiledMip, Material, TextureSet, CamoPattern und LocalizationPackage | 955.678 | alle erfolgreich gelesen |
+
+Die 24 `PrefetchingFileInfos`-Container bleiben strukturell identisch nach Schreiben und erneutem
+Lesen; ihre Kompression wird in 23 Fällen anders, daher sind sie nicht roh bytegleich. Genau ein
+Mesh mit einem bisher unbekannten Object-Pointer-Layout und ein Skeleton mit unbekanntem Modifier
+werden als **opaque** Rohdaten erhalten. Acht Prefetch-Blöcke verwenden ebenfalls ein noch
+unbekanntes 28-Byte-Layout. Alle diese Varianten sind bytegenau paketierbar, aber nicht editierbar,
+bis ihre jeweilige Struktur dekodiert ist.
 
 ## Resource-Klassen
 
@@ -52,12 +71,12 @@ Roundtrip-Abdeckung. Es belegt noch keine vollständige, vorlagenfreie Erzeugung
 | LODSelector | `0x51DC6B80` | Kein Parser | Es existieren Referenzheuristiken für BuildTables, aber kein typisierter `LODSelector`-Parser. |
 | Mask | `0xDF5D6C0E` | Teilweise | Ein fest erwartetes eingebettetes Mask-Objekt im Material wird traversiert; kein eigenständiges Feldmodell oder Writer. |
 | Material | `0x85C817C3` | Teilweise | Grundfelder, Flags, Referenzen und einige Parameterobjekte (`TextureSelector`, `UVTransform`) werden gelesen; unbekannte Parameter brechen die strukturierte Auswertung ab, Restbytes werden nicht modelliert, Writer fehlt. |
-| Mesh | `0x415D9568` | Teilweise | Sehr weit: strukturierter Reader/Writer, Plain-/Clustered-Geometrie, Draw Ranges, Bones, Skinning und mehrere Vertexlayouts. Plattformdaten, Bone-Tables und Primitive-Descriptions sind teilweise rohe Blöcke; der Import übernimmt Metadaten aus dem Zielmesh. Daher noch keine vorlagenfreie Erzeugung aller Varianten. |
+| Mesh | `0x415D9568` | Teilweise | Sehr weit: strukturierter Reader/Writer, Plain-/Clustered-Geometrie, Draw Ranges, Bones, Skinning und mehrere Vertexlayouts einschließlich Format 16. Plattformdaten, Bone-Tables und Primitive-Descriptions sind teilweise rohe Blöcke; ein Object-Pointer-Sonderlayout wird opaque erhalten. Der Import übernimmt Metadaten aus dem Zielmesh. Daher noch keine vorlagenfreie Erzeugung aller Varianten. |
 | MetaFile | `0x373C3C0F` | Kein Parser | Kein Parser für diese Resource-Klasse. Der separate Forge-Sondereintrag `GlobalMetaFile` ist unten aufgeführt. |
 | MinimapTextures | `0xEE568905` | Kein Parser | Nur Name und Hash bekannt. |
 | PostEffectSettings | `0x5FB26017` | Kein Parser | Nur Name und Hash bekannt. |
 | PrefetchInfo | `0x14A61AA1` | Kein Parser | Kein Parser für diese Resource-Klasse. Nicht mit dem Forge-Sondereintrag `PrefetchingFileInfos` gleichzusetzen. |
-| PrefetchingFileInfos | `0x714DE5E8` | Teilweise | Forge-Index, Objektblöcke und Referenzlisten können gelesen, geschrieben, angelegt, ergänzt und entfernt werden; die 3 Trailer-Bytes jeder Referenz sind noch unbenannt. |
+| PrefetchingFileInfos | `0x714DE5E8` | Teilweise | Forge-Index, Objektblöcke und Referenzlisten können gelesen, geschrieben, angelegt, ergänzt und entfernt werden; die 3 Trailer-Bytes jeder Referenz sind noch unbenannt. Acht beobachtete Blöcke mit anderem Layout bleiben opaque erhalten. |
 | PropertyControllerEntry | `0x050A3620` | Teilweise | Innerhalb der beiden TimeCycle-Formate strukturiert; kein eigenständiger Resource-Parser und nur vier bekannte Kurventypen. |
 | PropertyPath | `0x3C00B2E0` | Teilweise | Innerhalb der TimeCycle-Formate strukturiert; mehrere feste/verworfene Bytes sind semantisch noch unbekannt. |
 | PropertyPathNode | `0x1A8750BA` | Teilweise | Innerhalb der TimeCycle-Formate strukturiert; mehrere feste/verworfene Bytes sind semantisch noch unbekannt. |
@@ -66,7 +85,7 @@ Roundtrip-Abdeckung. Es belegt noch keine vollständige, vorlagenfreie Erzeugung
 | RoadPathContainer | `0x1B37E182` | Kein Parser | Nur Name und Hash bekannt. |
 | RoadPathNetwork | `0x093BC3D4` | Kein Parser | Nur Name und Hash bekannt. |
 | Season | `0xF7485E9F` | Kein Parser | Nur Name und Hash bekannt. |
-| Skeleton | `0x24AECB7C` | Teilweise | Sehr weit: Hierarchie, Bind-Transforms, bekannte Modifier, GLB-Export und Rückimport; `TailData` bleibt roh und unbekannte Modifier-Klassen sind nicht abgedeckt. |
+| Skeleton | `0x24AECB7C` | Teilweise | Sehr weit: Hierarchie, Bind-Transforms, bekannte Modifier, GLB-Export und Rückimport; `TailData` bleibt roh und ein unbekannter Modifier wird opaque erhalten. |
 | SmallLifeZoneSpawnDescriptor | `0x54CB8AD2` | Kein Parser | Nur Name und Hash bekannt. |
 | SoundActionOnStateConfig | `0x0A3E93E1` | Kein Parser | Nur Name und Hash bekannt. |
 | SoundDynEchoGlobalSettings | `0x725E4B56` | Kein Parser | Nur Name und Hash bekannt. |

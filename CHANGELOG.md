@@ -15,6 +15,8 @@ archive modification.
   selection details and a viewport outline for the selected hierarchy item.
 - Added a strict parser coverage audit that separates byte-exact roundtrips from formats that can be
   created without copying unknown source bytes.
+- Added `parseraudit`, which checks each supported reader and writer over every installed archive and
+  writes a machine-readable report. The current complete game corpus finishes without parser errors.
 
 ## Added
 

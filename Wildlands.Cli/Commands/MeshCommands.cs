@@ -213,12 +213,13 @@ static partial class Commands
         Console.WriteLine("  extent    " + Triple(mesh.ExtentMin) + "   to   " + Triple(mesh.ExtentMax));
     
         Console.WriteLine("  geometry  " + mesh.Geometry + "  format " + mesh.VertexFormat
-            + "  stride " + mesh.VertexStride + "  indices " + (mesh.Data.Indices32Bit ? 32 : 16) + " bit");
+            + "  stride " + mesh.VertexStride + "  indices " + (mesh.Indices32Bit ? 32 : 16) + " bit");
         Console.WriteLine("  scale     " + mesh.QuantizationFactor + "  uv " + mesh.UvQuantizationFactor
             + "  platform " + mesh.PlatformVersion + "  sdk " + mesh.SdkVersion);
         Console.WriteLine("  vertices  " + (mesh.VertexStride > 0 ? mesh.VertexBuffer.Length / mesh.VertexStride : 0)
             + "  (" + mesh.VertexBuffer.Length + " bytes)");
-        Console.WriteLine("  indices   " + mesh.IndexBuffer.Length / 2 + "  (" + mesh.IndexBuffer.Length + " bytes)");
+        Console.WriteLine("  indices   " + mesh.IndexBuffer.Length / (mesh.Indices32Bit ? 4 : 2)
+            + "  (" + mesh.IndexBuffer.Length + " bytes)");
     
         if (mesh.Clustered is { } clustered)
             Console.WriteLine("  clusters  " + clustered.ClusterCount + " over " + clustered.DrawPrimitiveCount
@@ -233,9 +234,11 @@ static partial class Commands
             Console.WriteLine("  decoded   x " + Range(vertices.Select(v => v.Position.X))
                 + "  y " + Range(vertices.Select(v => v.Position.Y))
                 + "  z " + Range(vertices.Select(v => v.Position.Z)));
-            Console.WriteLine("  uv        u " + Range(vertices.Where(v => v.Uv.Length > 0).Select(v => v.Uv[0].X))
-                + "  v " + Range(vertices.Where(v => v.Uv.Length > 0).Select(v => v.Uv[0].Y))
-                + "  normals " + Range(vertices.Select(v => v.Normal.Length())));
+            var textured = vertices.Where(v => v.Uv.Length > 0).ToList();
+            if (textured.Count > 0)
+                Console.WriteLine("  uv        u " + Range(textured.Select(v => v.Uv[0].X))
+                    + "  v " + Range(textured.Select(v => v.Uv[0].Y)));
+            Console.WriteLine("  normals   " + Range(vertices.Select(v => v.Normal.Length())));
             Console.WriteLine("  triangles " + triangles.Length / 3 + "  indices " + Range(triangles.Select(i => (float)i)));
         }
     
@@ -469,7 +472,7 @@ static partial class Commands
     }
 
     internal static int Index(Mesh mesh, int position) =>
-        mesh.Data.Indices32Bit
+        mesh.Indices32Bit
             ? BitConverter.ToInt32(mesh.IndexBuffer, position * 4)
             : BitConverter.ToUInt16(mesh.IndexBuffer, position * 2);
     

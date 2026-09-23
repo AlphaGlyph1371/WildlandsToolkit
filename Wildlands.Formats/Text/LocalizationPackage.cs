@@ -41,7 +41,8 @@ public static class LocalizationPackage
         if (reader.BaseStream.Position != reader.BaseStream.Length)
             throw new InvalidDataException($"LocalizationPackage has {reader.BaseStream.Length - reader.BaseStream.Position} unexplained byte(s)." );
 
-        ReadIndexedData(indexedBytes, result);
+        if (indexedBytes.Length > 0)
+            ReadIndexedData(indexedBytes, result);
         return result;
     }
     public static byte[] AddOrReplaceString(byte[] resource, uint stringId, string value)

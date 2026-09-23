@@ -75,6 +75,14 @@ public sealed class SkeletonAsset
     public List<SkeletonBone> Bones { get; } = [];
 
     public byte[] TailData { get; init; } = [];
+
+    /// <summary>
+    /// Original bytes for an asset with an unknown bone-modifier layout. It remains safe to
+    /// package unchanged, while editing is disabled until that modifier has been decoded.
+    /// </summary>
+    public byte[]? OpaqueData { get; init; }
+
+    public bool IsOpaque => OpaqueData is not null;
 }
 
 public static class Skeleton
@@ -90,6 +98,18 @@ public static class Skeleton
     public static SkeletonAsset ReadAsset(byte[] resource)
     {
         ArgumentNullException.ThrowIfNull(resource);
+        try
+        {
+            return ReadKnownAsset(resource);
+        }
+        catch (NotSupportedException)
+        {
+            return new SkeletonAsset { OpaqueData = (byte[])resource.Clone() };
+        }
+    }
+
+    static SkeletonAsset ReadKnownAsset(byte[] resource)
+    {
 
         using var stream = new MemoryStream(resource, writable: false);
         using var reader = new BinaryReader(stream);
@@ -122,6 +142,9 @@ public static class Skeleton
     public static byte[] Write(SkeletonAsset asset)
     {
         ArgumentNullException.ThrowIfNull(asset);
+        if (asset.OpaqueData is not null)
+            return (byte[])asset.OpaqueData.Clone();
+
         LinkAndValidate(asset.Bones);
         if (asset.TailData.Length == 0)
             throw new InvalidDataException("The Skeleton has no root and hierarchy tail.");

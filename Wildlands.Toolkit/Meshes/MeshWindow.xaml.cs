@@ -74,6 +74,8 @@ public partial class MeshWindow : Window
         _skeletonIndex = skeletonIndex;
         _settings = settings;
         _queueImport = queueImport;
+        if (mesh.IsOpaque)
+            throw new InvalidDataException("This Mesh uses an unknown object-pointer layout. It can be packaged unchanged, but cannot yet be previewed or edited.");
         Title = name;
         MeshNameText.Text = name;
         bool isSkinned = mesh.Bones.Count > 0;
