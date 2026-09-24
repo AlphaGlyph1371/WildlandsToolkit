@@ -51,6 +51,21 @@ public sealed class ChangeSet
             && change.Removal is null
             && change.ResourceIndex == resourceIndex);
 
+    public Dictionary<ulong, byte[]> PendingResources()
+    {
+        var resources = new Dictionary<ulong, byte[]>();
+
+        foreach (var change in _changes)
+        {
+            if (change.EntryAddition is not null || change.EntryRemoval is not null || change.Removal is not null || change.Data.Length < 12)
+                continue;
+
+            resources[BitConverter.ToUInt64(change.Data, 0)] = change.Data;
+        }
+
+        return resources;
+    }
+
     public void Clear() => _changes.Clear();
 
     public bool Remove(PendingChange change) => _changes.Remove(change);

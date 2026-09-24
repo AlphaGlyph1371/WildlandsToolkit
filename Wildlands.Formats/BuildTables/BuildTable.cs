@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Numerics;
+using Wildlands.Formats.Materials;
 
 namespace Wildlands.Formats.Models;
 
@@ -39,6 +41,21 @@ public sealed class BuildTableReference
 }
 
 public sealed record BuildTableObject(int Offset, ulong Id, uint ClassHash, string Path);
+
+public sealed record BuildTableMaterialTarget(ulong Material, ulong Template, bool MatchFlagMask, UInt128 FlagMask)
+{
+    public bool AppliesTo(Material material) =>
+        (Material == 0 || Material == material.Id)
+        && (Template == 0 || Template == material.TemplateId)
+        && (!MatchFlagMask || (FlagMask & material.FlagMask) != UInt128.Zero);
+}
+
+public sealed record BuildTableColumn(int Index, IReadOnlyList<uint> Path, BuildTableMaterialTarget? Target)
+{
+    public uint Property => Path.FirstOrDefault(hash => hash != 0);
+}
+
+public sealed record BuildTableValue(Vector4 Number, ulong Id, UvTransform? Transform = null);
 
 public sealed class BuildTableTagEntry
 {
@@ -93,7 +110,7 @@ public sealed class BuildTableHandleList
 
 public sealed class BuildTableRow
 {
-    internal BuildTableRow(int index, int offset, int length, ulong id, IReadOnlyList<BuildTableReference> references, IReadOnlyList<BuildTableObject> objects, BuildTableTagEntry tag, BuildTableTagList possibleTags)
+    internal BuildTableRow(int index, int offset, int length, ulong id, IReadOnlyList<BuildTableReference> references, IReadOnlyList<BuildTableObject> objects, BuildTableTagEntry tag, BuildTableTagList possibleTags, float weight, IReadOnlyDictionary<int, BuildTableValue> values)
     {
         Index = index;
         Offset = offset;
@@ -103,12 +120,16 @@ public sealed class BuildTableRow
         Objects = objects;
         TagEntry = tag;
         PossibleTagList = possibleTags;
+        Weight = weight;
+        Values = values;
     }
 
     public int Index { get; }
     public int Offset { get; }
     public int Length { get; }
     public ulong Id { get; }
+    public float Weight { get; }
+    public IReadOnlyDictionary<int, BuildTableValue> Values { get; }
     public IReadOnlyList<BuildTableReference> References { get; }
     public IReadOnlyList<BuildTableObject> Objects { get; }
     public BuildTableTagEntry TagEntry { get; }
@@ -132,6 +153,7 @@ public sealed class BuildTableAsset
     public int RowCountOffset { get; internal set; }
     public List<BuildTableReference> References { get; } = [];
     public List<BuildTableObject> Objects { get; } = [];
+    public List<BuildTableColumn> Columns { get; } = [];
     public List<BuildTableRow> Rows { get; } = [];
     public List<BuildTableTagList> BuildTagLists { get; } = [];
     public List<BuildTableHandleList> HandleLists { get; } = [];
@@ -579,7 +601,7 @@ public static class BuildTable
                 var row = ReadHeader(BuildRowHash, $"row {i}");
                 var rowData = ReadRow(i);
                 int end = checked((int)_reader.BaseStream.Position);
-                _asset.Rows.Add(new BuildTableRow(i, start, end - start, row.Id, _asset.References.Skip(referenceStart).ToList(), _asset.Objects.Skip(objectStart).ToList(), rowData.Tag, rowData.PossibleTags));
+                _asset.Rows.Add(new BuildTableRow(i, start, end - start, row.Id, _asset.References.Skip(referenceStart).ToList(), _asset.Objects.Skip(objectStart).ToList(), rowData.Tag, rowData.PossibleTags, rowData.Weight, rowData.Values));
             }
 
             ReadByte("shuffle selection");
@@ -602,8 +624,9 @@ public static class BuildTable
         {
             ReadUInt32($"column {index} pass");
             ReadHeader(PropertyPathHash, $"column {index} target property");
-            ReadPropertyPath(index);
-            ReadInt32($"column {index} index");
+            var (path, target) = ReadPropertyPath(index);
+            int componentIndex = ReadInt32($"column {index} index");
+            _asset.Columns.Add(new BuildTableColumn(componentIndex, path, target));
 
             int selections = ReadCount($"column {index} entity-position selection");
             for (int i = 0; i < selections; i++)
@@ -626,23 +649,28 @@ public static class BuildTable
             }
         }
 
-        void ReadPropertyPath(int column)
+        (List<uint> Path, BuildTableMaterialTarget? Target) ReadPropertyPath(int column)
         {
+            var path = new List<uint>();
+            BuildTableMaterialTarget? target = null;
+
             int nodes = ReadCount($"column {column} property-path node");
             for (int i = 0; i < nodes; i++)
             {
                 ReadHeader(PropertyPathNodeHash, $"column {column} property-path node {i}");
-                ReadPropertyPathNode(column, i);
+                path.Add(ReadPropertyPathNode(column, i, ref target));
             }
             ReadBytes(2, $"column {column} property-path flags");
+            return (path, target);
         }
 
-        void ReadPropertyPathNode(int column, int node)
+        uint ReadPropertyPathNode(int column, int node, ref BuildTableMaterialTarget? target)
         {
-            ReadBytes(41, $"column {column} property-path node {node} data");
+            byte[] data = ReadBytes(41, $"column {column} property-path node {node} data");
+            uint property = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(13));
             byte solverTag = ReadByte($"column {column} property-path node {node} solver tag");
             if (solverTag == 3)
-                return;
+                return property;
             if (solverTag != 0)
                 throw new InvalidDataException($"Property-path node solver uses unsupported tag {solverTag}.");
 
@@ -652,30 +680,34 @@ public static class BuildTable
             ReadBytes(2, $"column {column} property-path node {node} material solver alpha-test flags");
             ReadByte($"column {column} property-path node {node} material solver overrider-match switch");
             ReadInt32($"column {column} property-path node {node} material solver mode");
-            ReadByte($"column {column} property-path node {node} material solver flag-mask switch");
+            byte matchFlagMask = ReadByte($"column {column} property-path node {node} material solver flag-mask switch");
             ReadHeader(Mask16Hash, $"column {column} property-path node {node} material solver mask");
-            ReadBytes(16, $"column {column} property-path node {node} material solver mask data");
-            ReadHandle($"column {column} property-path node {node} target material");
-            ReadHandle($"column {column} property-path node {node} target material template");
+            Ensure(16, $"column {column} property-path node {node} material solver mask data");
+            UInt128 flagMask = Material.ReadFlagMask(_reader);
+            ulong material = ReadHandle($"column {column} property-path node {node} target material").Value;
+            ulong template = ReadHandle($"column {column} property-path node {node} target material template").Value;
+            target = new BuildTableMaterialTarget(material, template, matchFlagMask != 0, flagMask);
+            return property;
         }
 
-        (BuildTableTagEntry Tag, BuildTableTagList PossibleTags) ReadRow(int index)
+        (BuildTableTagEntry Tag, BuildTableTagList PossibleTags, float Weight, Dictionary<int, BuildTableValue> Values) ReadRow(int index)
         {
-            ReadSingle($"row {index} weight");
+            float weight = ReadSingle($"row {index} weight");
             ReadObjectPointer($"row {index} table");
             var tag = ReadBuildTag($"row {index} tag");
             var possibleTags = ReadBuildTags($"row {index} possible tags");
 
+            var values = new Dictionary<int, BuildTableValue>();
             int components = ReadCount($"row {index} component");
             for (int i = 0; i < components; i++)
             {
                 int componentIndex = ReadInt32($"row {index} component {i} index");
                 int referenceStart = _asset.References.Count;
-                ReadDynamicProperty($"row {index} component {i}");
+                values[componentIndex] = ReadDynamicProperty($"row {index} component {i}");
                 foreach (var reference in _asset.References.Skip(referenceStart))
                     reference.ComponentIndex = componentIndex;
             }
-            return (tag, possibleTags);
+            return (tag, possibleTags, weight, values);
         }
 
         BuildTableTagEntry ReadBuildTag(string field)
@@ -720,7 +752,7 @@ public static class BuildTable
                 additionalEntries, "default selector additional tables"));
         }
 
-        void ReadDynamicProperty(string field)
+        BuildTableValue ReadDynamicProperty(string field)
         {
             uint dataType = ReadUInt32(field + " data type");
             uint type = ReadUInt32(field + " type");
@@ -733,65 +765,63 @@ public static class BuildTable
                 case CharType:
                 case Signed8Type:
                 case Unsigned8Type:
-                    ReadByte(field + " value");
-                    break;
+                    return Number(ReadByte(field + " value"));
                 case Signed16Type:
                 case Unsigned16Type:
                     ReadBytes(2, field + " value");
-                    break;
+                    return Nothing;
                 case Signed32Type:
-                case Unsigned32Type:
-                case FloatType:
                 case EnumType:
-                    ReadBytes(4, field + " value");
-                    break;
+                    return Number(ReadInt32(field + " value"));
+                case Unsigned32Type:
+                    return Number(ReadUInt32(field + " value"));
+                case FloatType:
+                    return Number(ReadSingle(field + " value"));
                 case Signed64Type:
                 case Unsigned64Type:
                     ReadBytes(8, field + " value");
-                    break;
+                    return Nothing;
                 case ObjectIdType:
-                    ReadReference(BuildTableReferenceKind.ObjectId, field);
-                    break;
+                    return Reference(ReadReference(BuildTableReferenceKind.ObjectId, field));
                 case Vector2Type:
-                    ReadBytes(8, field + " value");
-                    break;
+                    return new BuildTableValue(new Vector4(ReadSingle(field + " x"), ReadSingle(field + " y"), 0, 0), 0);
                 case Vector3Type:
-                    ReadBytes(12, field + " value");
-                    break;
+                    return new BuildTableValue(new Vector4(ReadSingle(field + " x"), ReadSingle(field + " y"), ReadSingle(field + " z"), 0), 0);
                 case Vector4Type:
                 case QuaternionType:
-                    ReadBytes(16, field + " value");
-                    break;
+                    return new BuildTableValue(new Vector4(ReadSingle(field + " x"), ReadSingle(field + " y"), ReadSingle(field + " z"), ReadSingle(field + " w")), 0);
                 case Matrix33Type:
                     ReadBytes(36, field + " value");
-                    break;
+                    return Nothing;
                 case Matrix44Type:
                     ReadBytes(64, field + " value");
-                    break;
+                    return Nothing;
                 case HandleType:
-                    ReadHandle(field);
-                    break;
+                    return Reference(ReadHandle(field).Value);
                 case ReferenceType:
-                    ReadFileReference(field);
-                    break;
+                    return Reference(ReadFileReference(field));
                 case ObjectPointerType:
                 case BaseObjectPointerType:
-                    ReadObjectPointer(field);
-                    break;
+                    return ReadObjectPointer(field);
                 case StringType:
                     ReadString32(field);
-                    break;
+                    return Nothing;
                 case LocalizedStringType:
                     ReadBytes(8, field + " localized-string id");
-                    break;
+                    return Nothing;
                 case ObjectType:
                 case BaseObjectType:
-                    ReadEmbeddedObject(field);
-                    break;
+                    return ReadEmbeddedObject(field);
                 default:
                     throw new NotSupportedException($"{field} has unknown dynamic-property storage 0x{storage:X8} (data type 0x{dataType:X8}, type 0x{type:X8}).");
             }
         }
+
+        static readonly BuildTableValue Nothing = new(Vector4.Zero, 0);
+
+        static BuildTableValue Number(float value) => new(new Vector4(value, 0, 0, 0), 0);
+
+        static BuildTableValue Reference(ulong id) => new(Vector4.Zero, id);
 
         static bool IsStorageType(uint value) => value is >= CharType and <= ReferenceType || value == BoolType;
 
@@ -803,26 +833,24 @@ public static class BuildTable
                 ReadByte(field + " string terminator");
         }
 
-        void ReadObjectPointer(string field)
+        BuildTableValue ReadObjectPointer(string field)
         {
             byte tag = ReadByte(field + " pointer tag");
             switch (tag)
             {
                 case 1:
                 case 2:
-                    ReadReference(BuildTableReferenceKind.ObjectPointer, field);
-                    break;
+                    return Reference(ReadReference(BuildTableReferenceKind.ObjectPointer, field));
                 case 3:
-                    break;
+                    return Nothing;
                 case 0:
-                    ReadEmbeddedObject(field);
-                    break;
+                    return ReadEmbeddedObject(field);
                 default:
                     throw new InvalidDataException($"{field} uses unsupported object-pointer tag {tag}.");
             }
         }
 
-        void ReadEmbeddedObject(string field)
+        BuildTableValue ReadEmbeddedObject(string field)
         {
             int headerOffset = checked((int)_reader.BaseStream.Position);
             var header = ReadHeader(0, field + " embedded object");
@@ -831,33 +859,34 @@ public static class BuildTable
             {
                 case BuildRowHash:
                     _ = ReadRow(-1);
-                    break;
+                    return Nothing;
                 case BuildTagsHash:
                     ReadBuildTagsPayload(headerOffset, header, field);
-                    break;
+                    return Nothing;
                 case BuildTagHash:
                     ReadUInt32(field + " tag value");
-                    break;
+                    return Nothing;
                 case UvTransformHash:
-                    ReadBytes(32, field + " uv transform");
+                    Ensure(34, field + " uv transform");
+                    var transform = Material.ReadUvTransform(_reader);
                     ReadByte(field + " animate translation");
                     ReadByte(field + " animate rotation");
-                    break;
+                    return new BuildTableValue(Vector4.Zero, 0, transform);
                 case RowTagSelectionHash:
                 case RowTagSelectionAltHash:
                     ReadBytes(8, field + " row tag selection");
-                    break;
+                    return Nothing;
                 case ColumnSelectionAltHash:
-                    ReadBytes(41, field + " column selection");
-                    break;
+                    byte[] selector = ReadBytes(41, field + " column selection");
+                    return Reference(BinaryPrimitives.ReadUInt64LittleEndian(selector.AsSpan(25)));
                 case ColumnSelectionHash:
                     ReadBytes(60, field + " column selection");
-                    break;
+                    return Nothing;
                 case TagSelectionHash:
                     ReadUInt32(field + " tag");
                     ReadHeader(TagSelectionValueHash, field + " tag selection value");
                     ReadBytes(40, field + " tag selection value data");
-                    break;
+                    return Nothing;
                 default:
                     throw new NotSupportedException($"{field} embeds unsupported class 0x{header.ClassHash:X8} at 0x{_reader.BaseStream.Position - 4:X}.");
             }
@@ -880,11 +909,11 @@ public static class BuildTable
             return _asset.References[^1];
         }
 
-        void ReadFileReference(string field)
+        ulong ReadFileReference(string field)
         {
             byte referenceTag = ReadByte(field + " reference tag");
             byte globalFlag = ReadByte(field + " global flag");
-            ReadReference(BuildTableReferenceKind.FileReference, field, referenceTag, globalFlag);
+            return ReadReference(BuildTableReferenceKind.FileReference, field, referenceTag, globalFlag);
         }
 
         ulong ReadReference(BuildTableReferenceKind kind, string field,

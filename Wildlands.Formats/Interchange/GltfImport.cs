@@ -73,13 +73,15 @@ static class GltfImport
                 var positions = ReadVec3(accessors, views, buffers, attributes, "POSITION", required: true)!;
                 var normals = ReadVec3(accessors, views, buffers, attributes, "NORMAL", required: false);
                 var tangents = ReadVec4(accessors, views, buffers, attributes, "TANGENT");
-                var colours = ReadColour(accessors, views, buffers, attributes);
+                var colours = ReadColour(accessors, views, buffers, attributes, "COLOR_0");
+                var secondColours = ReadColour(accessors, views, buffers, attributes, "COLOR_1");
                 if (tangents is not null && normals is null)
                     throw new InvalidDataException("A primitive has tangents but no normals. Export normals with the mesh or omit its tangents.");
 
                 MatchCount("NORMAL", normals?.Length, positions.Length);
                 MatchCount("TANGENT", tangents?.Length, positions.Length);
                 MatchCount("COLOR_0", colours?.Length, positions.Length);
+                MatchCount("COLOR_1", secondColours?.Length, positions.Length);
 
                 var uvSets = new List<Vector2[]>();
                 foreach (string key in AttributeKeys(attributes, "TEXCOORD_"))
@@ -132,7 +134,8 @@ static class GltfImport
                         Position = Finite(Vector3.Transform(positions[i], instance.World), "position"),
                         Normal = normal,
                         Uv = new Vector2[Math.Max(uvSets.Count, 1)],
-                        Color = colours?[i] ?? 0xFFFFFFFF,
+                        Paint = colours?[i] ?? Vector4.One,
+                        Color = secondColours is null ? 0xFFFFFFFF : MeshGeometry.Pack(secondColours[i]),
                     };
 
                     for (int set = 0; set < uvSets.Count; set++)
@@ -188,6 +191,7 @@ static class GltfImport
 
                 geometry.Groups.Add(group);
                 geometry.HasColour |= colours is not null;
+                geometry.HasSecondColour |= secondColours is not null;
                 geometry.HasSkinning |= jointBlocks.Count > 0;
                 geometry.UvSets = Math.Max(geometry.UvSets, uvSets.Count);
             }
@@ -535,23 +539,25 @@ static class GltfImport
         return result;
     }
 
-    static uint[]? ReadColour(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes)
+    static Vector4[]? ReadColour(JsonArray accessors, JsonArray views, IReadOnlyList<byte[]> buffers, JsonObject attributes, string key)
     {
-        if (attributes["COLOR_0"] is not { } node) return null;
+        if (attributes[key] is not { } node) return null;
         var data = Accessor(accessors, views, buffers, node.GetValue<int>());
-        int lanes = data.Type == "VEC3" ? 3 : data.Type == "VEC4" ? 4 : throw new InvalidDataException("COLOR_0 must use VEC3 or VEC4.");
-        if (data.ComponentType is not (Float or UnsignedByte or UnsignedShort)) throw new InvalidDataException("COLOR_0 uses an unsupported component type.");
-        if (data.ComponentType != Float && !data.Normalized) throw new InvalidDataException("Integer COLOR_0 data must be normalized.");
-        if (data.ComponentType == Float && data.Normalized) throw new InvalidDataException("Float COLOR_0 data cannot be marked normalized.");
-        var result = new uint[data.Count];
+        int lanes = data.Type == "VEC3" ? 3 : data.Type == "VEC4" ? 4 : throw new InvalidDataException($"{key} must use VEC3 or VEC4.");
+        if (data.ComponentType is not (Float or UnsignedByte or UnsignedShort)) throw new InvalidDataException($"{key} uses an unsupported component type.");
+        if (data.ComponentType != Float && !data.Normalized) throw new InvalidDataException($"Integer {key} data must be normalized.");
+        if (data.ComponentType == Float && data.Normalized) throw new InvalidDataException($"Float {key} data cannot be marked normalized.");
+        var result = new Vector4[data.Count];
         for (int i = 0; i < result.Length; i++)
         {
             var e = data.Element(i);
-            byte[] c = [255, 255, 255, 255];
+            float[] c = [1, 1, 1, 1];
             int size = ComponentSize(data.ComponentType);
             for (int lane = 0; lane < lanes; lane++)
-                c[lane] = (byte)Math.Clamp(MathF.Round(ComponentFloat(e, lane * size, data) * 255f), 0, 255);
-            result[i] = (uint)(c[0] | c[1] << 8 | c[2] << 16 | c[3] << 24);
+                c[lane] = ComponentFloat(e, lane * size, data);
+            result[i] = new Vector4(c[0], c[1], c[2], c[3]);
+            if (!float.IsFinite(result[i].X) || !float.IsFinite(result[i].Y) || !float.IsFinite(result[i].Z) || !float.IsFinite(result[i].W))
+                throw new InvalidDataException($"{key} contains a non-finite value.");
         }
         return result;
     }

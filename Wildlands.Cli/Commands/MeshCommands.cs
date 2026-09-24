@@ -852,10 +852,10 @@ static partial class Commands
                         for (int set = 0; set < Math.Min(a.Uv.Length, b.Uv.Length); set++)
                             worstUv = Math.Max(worstUv, System.Numerics.Vector2.Distance(a.Uv[set], b.Uv[set]));
     
-                        if (layout.HasColor)
+                        if (layout.HasBinormal || layout.HasColor)
                         {
                             colourTotal++;
-                            if (a.Color == b.Color) colourKept++;
+                            if (a.Paint == b.Paint && a.Color == b.Color) colourKept++;
                         }
     
                         if (layout.IsSkinned)
@@ -941,14 +941,22 @@ static partial class Commands
                     float worst = 0;
                     float span = Math.Max(1e-6f, Math.Max(mesh.ExtentMax[0] - mesh.ExtentMin[0],
                         Math.Max(mesh.ExtentMax[1] - mesh.ExtentMin[1], mesh.ExtentMax[2] - mesh.ExtentMin[2])));
+                    var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
+                    int colourKept = 0;
     
                     for (int i = 0; i < cornersBefore.Length; i++)
-                        worst = Math.Max(worst, System.Numerics.Vector3.Distance(
-                            before[cornersBefore[i]].Position, after[cornersAfter[i]].Position));
+                    {
+                        var a = before[cornersBefore[i]];
+                        var b = after[cornersAfter[i]];
+                        worst = Math.Max(worst, System.Numerics.Vector3.Distance(a.Position, b.Position));
+                        if (a.Paint == b.Paint && a.Color == b.Color) colourKept++;
+                    }
     
                     Bump(problems, worst / span < 0.005f ? "corners kept within half a percent"
                         : worst / span < 0.02f ? "corners kept within two percent"
                         : "corners moved by more than two percent");
+                    if (layout.HasBinormal || layout.HasColor)
+                        Bump(problems, colourKept == cornersBefore.Length ? "vertex colours carried over exactly" : "vertex colours changed");
                 }
                 catch (Exception ex)
                 {

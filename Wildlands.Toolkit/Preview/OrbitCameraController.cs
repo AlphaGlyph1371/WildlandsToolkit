@@ -52,7 +52,9 @@ sealed class OrbitCameraController
             bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
         double radius = new Vector3D(bounds.SizeX, bounds.SizeY, bounds.SizeZ).Length / 2;
         double halfFieldOfView = _camera.FieldOfView / 2 * Math.PI / 180;
-        _distance = Math.Max(radius / Math.Sin(halfFieldOfView) * 1.1, 0.1);
+        double aspect = _stage.ActualHeight > 0 ? _stage.ActualWidth / _stage.ActualHeight : 1;
+        double halfVertical = Math.Atan(Math.Tan(halfFieldOfView) / aspect);
+        _distance = Math.Max(radius / Math.Sin(Math.Min(halfFieldOfView, halfVertical)) * 1.1, 0.1);
         UpdateCamera();
     }
 

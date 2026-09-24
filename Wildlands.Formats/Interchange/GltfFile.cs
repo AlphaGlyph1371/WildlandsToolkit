@@ -67,8 +67,11 @@ public static class GltfFile
                 attributes["TEXCOORD_" + set] = Pairs(binary, views, accessors, used, vertices, v => which < v.Uv.Length ? v.Uv[which] : Vector2.Zero);
             }
 
-            if (layout.HasColor)
-                attributes["COLOR_0"] = Colours(binary, views, accessors, used, vertices);
+            if (layout.HasBinormal || layout.HasColor)
+                attributes["COLOR_0"] = Paints(binary, views, accessors, used, vertices);
+
+            if (layout.HasBinormal && layout.HasColor)
+                attributes["COLOR_1"] = Colours(binary, views, accessors, used, vertices);
 
             if (skinned)
             {
@@ -248,6 +251,19 @@ public static class GltfFile
         }
 
         return AddAccessor(binary, views, accessors, start, Float, used.Count, "VEC2");
+    }
+
+    static int Paints(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices)
+    {
+        int start = Align(binary);
+
+        foreach (int index in used)
+        {
+            var paint = vertices[index].Paint;
+            Put(binary, paint.X); Put(binary, paint.Y); Put(binary, paint.Z); Put(binary, paint.W);
+        }
+
+        return AddAccessor(binary, views, accessors, start, Float, used.Count, "VEC4");
     }
 
     static int Colours(MemoryStream binary, JsonArray views, JsonArray accessors, List<int> used, MeshVertex[] vertices)

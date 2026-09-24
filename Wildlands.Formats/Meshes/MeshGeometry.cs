@@ -12,6 +12,7 @@ public sealed class MeshVertex
     public Vector3 Tangent { get; set; }
     public Vector3 Binormal { get; set; }
     public Vector2[] Uv { get; set; } = [];
+    public Vector4 Paint { get; set; } = Vector4.One;
     public uint Color { get; set; } = 0xFFFFFFFF;
     public byte[] JointIndices { get; set; } = [];
     public byte[] JointWeights { get; set; } = [];
@@ -48,28 +49,43 @@ public static class MeshGeometry
     static MeshVertex ReadVertex(ReadOnlySpan<byte> source, VertexLayout layout, float quantization, float uvQuantization)
     {
         short scale = BitConverter.ToInt16(source[VertexLayout.ScaleAt..]);
-        float factor = (scale < 0 ? -quantization : quantization) / 32767f;
+        float factor = (layout.HasBinormal || scale >= 0 ? quantization : -quantization) / 32767f;
 
         var vertex = new MeshVertex
         {
-            PositionScale = scale,
             Position = new Vector3(
                 BitConverter.ToInt16(source) * factor,
                 BitConverter.ToInt16(source[2..]) * factor,
                 BitConverter.ToInt16(source[4..]) * factor),
             Normal = Direction(source[VertexLayout.NormalAt..]),
-            NormalPadding = source[VertexLayout.NormalAt + 3],
             Tangent = Direction(source[VertexLayout.TangentAt..]),
-            TangentSign = source[VertexLayout.TangentAt + 3],
         };
 
         if (layout.HasBinormal)
+        {
             vertex.Binormal = Direction(source[layout.BinormalAt..]);
+            vertex.Paint = new Vector4(
+                source[layout.BinormalAt + 3] / 255f,
+                source[VertexLayout.TangentAt + 3] / 255f,
+                source[VertexLayout.NormalAt + 3] / 255f,
+                scale / 32767f);
+        }
         else
+        {
+            vertex.PositionScale = scale;
+            vertex.NormalPadding = source[VertexLayout.NormalAt + 3];
+            vertex.TangentSign = source[VertexLayout.TangentAt + 3];
             vertex.Binormal = Vector3.Cross(vertex.Normal, vertex.Tangent) * (vertex.TangentSign < 128 ? -1f : 1f);
+        }
 
         if (layout.HasColor)
-            vertex.Color = BitConverter.ToUInt32(source[layout.ColorAt..]);
+        {
+            uint colour = BitConverter.ToUInt32(source[layout.ColorAt..]);
+            if (layout.HasBinormal)
+                vertex.Color = colour;
+            else
+                vertex.Paint = Unpack(colour);
+        }
 
         vertex.Uv = new Vector2[layout.UvCount];
         for (int i = 0; i < layout.UvCount; i++)
@@ -112,8 +128,10 @@ public static class MeshGeometry
 
     static void WriteVertex(MeshVertex vertex, Span<byte> target, VertexLayout layout, float quantization, float uvQuantization, int index)
     {
-        short scale = vertex.PositionScale != 0 ? vertex.PositionScale : (short)32767;
-        float factor = 32767f / (scale < 0 ? -quantization : quantization);
+        short scale = layout.HasBinormal
+            ? (short)Math.Clamp(MathF.Round(vertex.Paint.W * 32767f), short.MinValue, short.MaxValue)
+            : vertex.PositionScale != 0 ? vertex.PositionScale : (short)32767;
+        float factor = 32767f / (layout.HasBinormal || scale >= 0 ? quantization : -quantization);
 
         WriteInt16(target, Quantize(vertex.Position.X * factor, index, "position X"));
         WriteInt16(target[2..], Quantize(vertex.Position.Y * factor, index, "position Y"));
@@ -121,18 +139,23 @@ public static class MeshGeometry
         WriteInt16(target[VertexLayout.ScaleAt..], scale);
 
         WriteDirection(target[VertexLayout.NormalAt..], vertex.Normal);
-        target[VertexLayout.NormalAt + 3] = vertex.NormalPadding;
         WriteDirection(target[VertexLayout.TangentAt..], vertex.Tangent);
-        target[VertexLayout.TangentAt + 3] = vertex.TangentSign;
 
         if (layout.HasBinormal)
         {
             WriteDirection(target[layout.BinormalAt..], vertex.Binormal);
-            target[layout.BinormalAt + 3] = vertex.TangentSign;
+            target[layout.BinormalAt + 3] = Channel(vertex.Paint.X);
+            target[VertexLayout.TangentAt + 3] = Channel(vertex.Paint.Y);
+            target[VertexLayout.NormalAt + 3] = Channel(vertex.Paint.Z);
+        }
+        else
+        {
+            target[VertexLayout.NormalAt + 3] = vertex.NormalPadding;
+            target[VertexLayout.TangentAt + 3] = vertex.TangentSign;
         }
 
         if (layout.HasColor)
-            BitConverter.TryWriteBytes(target[layout.ColorAt..], vertex.Color);
+            BitConverter.TryWriteBytes(target[layout.ColorAt..], layout.HasBinormal ? vertex.Color : Pack(vertex.Paint));
 
         for (int i = 0; i < layout.UvCount; i++)
         {
@@ -151,6 +174,17 @@ public static class MeshGeometry
             target[layout.WeightsAt + j] = j < vertex.JointWeights.Length ? vertex.JointWeights[j] : (byte)0;
         }
     }
+
+    public static uint Pack(Vector4 colour) =>
+        (uint)(Channel(colour.X) | Channel(colour.Y) << 8 | Channel(colour.Z) << 16 | Channel(colour.W) << 24);
+
+    public static Vector4 Unpack(uint colour) => new(
+        (colour & 0xFF) / 255f,
+        (colour >> 8 & 0xFF) / 255f,
+        (colour >> 16 & 0xFF) / 255f,
+        (colour >> 24) / 255f);
+
+    static byte Channel(float value) => (byte)Math.Clamp(MathF.Round(value * 255f), 0, 255);
 
     static short Quantize(float value, int index, string field)
     {

@@ -17,6 +17,12 @@ archive modification.
   created without copying unknown source bytes.
 - Added `parseraudit`, which checks each supported reader and writer over every installed archive and
   writes a machine-readable report. The current complete game corpus finishes without parser errors.
+- The mesh viewer paints clothing like the game: camo patterns, solid colours and dirt follow the
+  disassembled `CHR_cloth_Detail` shader, and a Style list shows every customization style of the
+  item. The old name-based camo guesser and the `camo` command are gone.
+- The mesh viewer renders with Direct3D 11: physically based lighting with soft shadows,
+  full-resolution textures with normal and gloss maps, a LOD list, and a Pending changes switch for
+  before and after comparisons without writing to the game.
 
 ## Added
 
@@ -61,6 +67,10 @@ archive modification.
 
 ## Fixed
 
+- Importing a mesh no longer destroys the hidden vertex colour of skinned clothing. It drives the
+  tint zones and camo of vests, shirts and pants; without it every strap got the wrong solid colour
+  and camo in game. OBJ files and glTF files without colours now take it from the matching triangle
+  of the original mesh
 - Static props, furniture and vehicle parts no longer request an unnecessary skeleton during FBX export
 - Mesh export failures are now reported instead of appearing to do nothing
 - Fixed several glTF import issues involving transforms, material ranges, skin ownership and tangent

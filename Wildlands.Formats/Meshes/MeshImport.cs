@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace Wildlands.Formats.Models;
 
@@ -14,6 +15,8 @@ public sealed class MeshImportResult
     public float UvQuantizationFactor { get; set; }
     public bool TransferredSkinning { get; set; }
     public bool CarriedSkinning { get; set; }
+    public bool CarriedColours { get; set; }
+    public bool TransferredColours { get; set; }
     public int PatchedVertices { get; set; }
     public int JointsInFile { get; set; }
     public int JointsMatched { get; set; }
@@ -44,6 +47,7 @@ public static class MeshImport
         int before = mesh.Data.Standard.Count;
         var layout = VertexLayout.For(mesh.VertexFormat, mesh.VertexStride);
         var original = MeshGeometry.ReadVertices(mesh);
+        var originalCorners = MeshGeometry.ReadTriangles(mesh);
 
         var vertices = new List<MeshVertex>();
         var perRange = new List<(int Start, int Count, int IndexStart, int IndexCount)>();
@@ -104,12 +108,23 @@ public static class MeshImport
             }
         }
 
+        bool paints = layout.HasBinormal || layout.HasColor;
+        bool secondColour = layout.HasBinormal && layout.HasColor;
+        bool paintMissing = paints && !geometry.HasColour;
+        bool secondMissing = secondColour && !geometry.HasSecondColour;
+
+        if ((paintMissing || secondMissing) && original.Length > 0)
+            TransferColours(vertices, indices, perRange, original, originalCorners, paintMissing, secondMissing);
+
         var (lo, hi) = Bounds(vertices);
         float quantization = Quantization(lo, hi, layout.IsSkinned);
         float uvQuantization = UvQuantization(vertices);
 
-        foreach (var vertex in vertices)
-            vertex.PositionScale = layout.IsSkinned ? (short)32767 : (short)quantization;
+        if (!layout.HasBinormal)
+        {
+            foreach (var vertex in vertices)
+                vertex.PositionScale = (short)quantization;
+        }
 
         mesh.QuantizationFactor = quantization;
         mesh.UvQuantizationFactor = uvQuantization;
@@ -181,6 +196,8 @@ public static class MeshImport
             TransferredSkinning = transferred,
             Cloth = mesh.Dynamic,
             CarriedSkinning = skinned && geometry.HasSkinning && matched > 0,
+            CarriedColours = paints && geometry.HasColour,
+            TransferredColours = (paintMissing || secondMissing) && original.Length > 0,
             PatchedVertices = patched,
             JointsInFile = geometry.JointNames.Count,
             JointsMatched = matched,
@@ -222,6 +239,7 @@ public static class MeshImport
             Tangent = source.Tangent,
             Binormal = source.Binormal,
             Uv = texture,
+            Paint = source.Paint,
             Color = layout.HasColor ? source.Color : 0xFFFFFFFF,
             TangentSign = tangentSign,
             JointIndices = layout.IsSkinned ? joints : [],
@@ -368,21 +386,7 @@ public static class MeshImport
 
         foreach (var vertex in vertices)
         {
-            float best = float.MaxValue;
-            var source = original[0];
-
-            foreach (var candidate in original)
-            {
-                float distance = Vector3.DistanceSquared(candidate.Position, vertex.Position);
-                if (distance >= best)
-                    continue;
-
-                best = distance;
-                source = candidate;
-                if (distance == 0)
-                    break;
-            }
-
+            var source = Nearest(vertex, original);
             int lanes = vertex.JointIndices.Length;
 
             for (int i = 0; i < lanes; i++)
@@ -393,6 +397,135 @@ public static class MeshImport
 
             Normalise(vertex.JointWeights);
         }
+    }
+
+    readonly record struct Face(int A, int B, int C, Vector3 Centre, Vector2 UvCentre, Vector3 Facing);
+
+    static void TransferColours(List<MeshVertex> vertices, List<int> indices, List<(int Start, int Count, int IndexStart, int IndexCount)> ranges,
+        MeshVertex[] original, int[] originalCorners, bool paint, bool second)
+    {
+        var originalFaces = new Face[originalCorners.Length / 3];
+        for (int i = 0; i < originalFaces.Length; i++)
+            originalFaces[i] = FaceOf(original, originalCorners[i * 3], originalCorners[i * 3 + 1], originalCorners[i * 3 + 2]);
+
+        var faces = new List<Face>();
+        foreach (var range in ranges)
+        {
+            for (int i = 0; i + 2 < range.IndexCount; i += 3)
+            {
+                faces.Add(FaceOf(vertices,
+                    range.Start + indices[range.IndexStart + i],
+                    range.Start + indices[range.IndexStart + i + 1],
+                    range.Start + indices[range.IndexStart + i + 2]));
+            }
+        }
+
+        var matches = new int[faces.Count];
+        if (originalFaces.Length > 0)
+            Parallel.For(0, faces.Count, i => matches[i] = NearestFace(faces[i], i, originalFaces));
+
+        var done = new bool[vertices.Count];
+        for (int i = 0; i < faces.Count && originalFaces.Length > 0; i++)
+        {
+            var match = originalFaces[matches[i]];
+            MeshVertex[] candidates = [original[match.A], original[match.B], original[match.C]];
+
+            foreach (int corner in new[] { faces[i].A, faces[i].B, faces[i].C })
+            {
+                if (done[corner])
+                    continue;
+
+                Copy(vertices[corner], Nearest(vertices[corner], candidates), paint, second);
+                done[corner] = true;
+            }
+        }
+
+        Parallel.For(0, vertices.Count, i =>
+        {
+            if (!done[i])
+                Copy(vertices[i], Nearest(vertices[i], original), paint, second);
+        });
+    }
+
+    static void Copy(MeshVertex target, MeshVertex source, bool paint, bool second)
+    {
+        if (paint)
+            target.Paint = source.Paint;
+        if (second)
+            target.Color = source.Color;
+    }
+
+    static Face FaceOf(IReadOnlyList<MeshVertex> vertices, int a, int b, int c)
+    {
+        var pa = vertices[a].Position;
+        var pb = vertices[b].Position;
+        var pc = vertices[c].Position;
+        var facing = Vector3.Cross(pb - pa, pc - pa);
+        if (facing.LengthSquared() > 0)
+            facing = Vector3.Normalize(facing);
+
+        return new Face(a, b, c, (pa + pb + pc) / 3, (First(vertices[a]) + First(vertices[b]) + First(vertices[c])) / 3, facing);
+    }
+
+    static int NearestFace(Face face, int order, Face[] faces)
+    {
+        const float SamePlace = 1e-10f;
+
+        int best = 0;
+        float bestDistance = float.MaxValue;
+        float bestUv = float.MaxValue;
+        float bestFacing = float.MinValue;
+
+        for (int i = 0; i < faces.Length; i++)
+        {
+            float distance = Vector3.DistanceSquared(faces[i].Centre, face.Centre);
+            if (distance > bestDistance + SamePlace)
+                continue;
+
+            float uv = Vector2.DistanceSquared(faces[i].UvCentre, face.UvCentre);
+            float facing = Vector3.Dot(faces[i].Facing, face.Facing);
+            bool closer = distance < bestDistance - SamePlace;
+            bool twin = uv == bestUv && facing == bestFacing;
+            if (!closer && (uv > bestUv || uv == bestUv && facing < bestFacing
+                || twin && Math.Abs(i - order) >= Math.Abs(best - order)))
+                continue;
+
+            best = i;
+            bestDistance = distance;
+            bestUv = uv;
+            bestFacing = facing;
+        }
+
+        return best;
+    }
+
+    static MeshVertex Nearest(MeshVertex vertex, MeshVertex[] original)
+    {
+        const float SamePlace = 1e-10f;
+
+        var uv = First(vertex);
+        float best = float.MaxValue;
+        float bestUv = float.MaxValue;
+        var source = original[0];
+
+        foreach (var candidate in original)
+        {
+            float distance = Vector3.DistanceSquared(candidate.Position, vertex.Position);
+            if (distance > best + SamePlace)
+                continue;
+
+            float uvDistance = Vector2.DistanceSquared(First(candidate), uv);
+            if (distance >= best - SamePlace && uvDistance >= bestUv)
+                continue;
+
+            best = distance;
+            bestUv = uvDistance;
+            source = candidate;
+            if (distance == 0 && uvDistance == 0)
+                break;
+        }
+
+        return source;
     }
 
     static void RebuildRanges(List<MeshPrimitive> target, List<(int Start, int Count, int IndexStart, int IndexCount)> ranges, ref ulong next)

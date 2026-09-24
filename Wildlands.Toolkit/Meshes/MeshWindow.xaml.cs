@@ -1,19 +1,26 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Numerics;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
+using System.Windows.Threading;
 using Wildlands.Formats;
 using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
 using Wildlands.Formats.Materials;
 using Wildlands.Formats.Models;
+using Wildlands.Formats.Textures;
 
 namespace Wildlands.Toolkit;
 
 enum BackFaces { FromMaterial, Always, Never }
+
+sealed record MeshLevel(string Label, string Name, Resource Mesh, List<Resource> Siblings);
 
 public partial class MeshWindow : Window
 {
@@ -30,14 +37,27 @@ public partial class MeshWindow : Window
     ];
 
     Mesh _mesh;
+    ulong _meshId;
     byte[] _resourceData;
-    readonly string _name;
+    string _name;
+    readonly string _openedName;
+    readonly List<Resource> _openedSiblings;
+    List<Resource> _siblings;
     readonly AppSettings _settings;
     readonly Action<byte[], string>? _queueImport;
-    List<MeshPart> _parts;
-    readonly List<Resource> _siblings;
+    readonly ChangeSet? _changes;
     readonly ArchiveSet? _archives;
     readonly SkeletonIndex? _skeletonIndex;
+
+    MeshRenderer? _renderer;
+    readonly PerspectiveCamera _camera = new() { FieldOfView = 45, UpDirection = new Vector3D(0, 0, 1) };
+    readonly OrbitCameraController _cameraController;
+    WriteableBitmap? _picture;
+    bool _renderQueued;
+
+    List<RenderPart> _parts = [];
+    int _vertexCount;
+    Rect3D _bounds = Rect3D.Empty;
 
     List<SkeletonBone>? _skeleton;
     List<SkeletonBone>? _automaticSkeleton;
@@ -50,65 +70,179 @@ public partial class MeshWindow : Window
     readonly ObservableCollection<MeshHierarchyItem> _hierarchy = [];
 
     List<MeshSurface> _surfaces = [];
+    SurfaceSources _sources;
+    List<ClothStyle> _styles = [];
+    ClothStyle? _style;
+    bool _fillingStyles;
+    List<MeshLevel> _levels = [];
+    bool _fillingLevels;
     bool _texturesLoaded;
-    string? _borrowed;
-    bool _textured;
-    readonly DirectionalLight _light = new(Color.FromRgb(0xFF, 0xFC, 0xF5), new Vector3D(0, 0, -1));
-
+    bool _textured = true;
     bool _colourRanges = true;
+    bool _floor = true;
+    bool _withChanges = true;
+    bool _changesMatter;
     BackFaces _backFaces = BackFaces.FromMaterial;
-    readonly OrbitCameraController _cameraController;
 
     public MeshWindow(Mesh mesh, byte[] resourceData, string name, List<Resource> siblings,
         ArchiveSet? archives, SkeletonIndex? skeletonIndex, AppSettings settings,
-        Action<byte[], string>? queueImport = null, bool hasPendingChange = false)
+        Action<byte[], string>? queueImport = null, bool hasPendingChange = false, ChangeSet? changes = null)
     {
         InitializeComponent();
-        _cameraController = new OrbitCameraController(Stage, Camera, _light);
+        _cameraController = new OrbitCameraController(Stage, _camera);
+        _camera.Changed += (_, _) => RequestRender();
+
+        if (mesh.IsOpaque)
+            throw new InvalidDataException("This Mesh uses an unknown object-pointer layout. It can be packaged unchanged, but cannot yet be previewed or edited.");
 
         _mesh = mesh;
         _resourceData = (byte[])resourceData.Clone();
+        _meshId = BitConverter.ToUInt64(resourceData, 0);
         _name = name;
+        _openedName = name;
         _siblings = siblings;
+        _openedSiblings = siblings;
         _archives = archives;
         _skeletonIndex = skeletonIndex;
         _settings = settings;
         _queueImport = queueImport;
-        if (mesh.IsOpaque)
-            throw new InvalidDataException("This Mesh uses an unknown object-pointer layout. It can be packaged unchanged, but cannot yet be previewed or edited.");
-        Title = name;
-        MeshNameText.Text = name;
-        bool isSkinned = mesh.Bones.Count > 0;
-        _automaticSkeleton = isSkinned
-            ? SkeletonFinder.Find(siblings, mesh.Bones, skeletonIndex)
-            : null;
-        bool foundSkeleton = _automaticSkeleton is not null;
-        MeshTypeText.Text = !isSkinned
-            ? "Static mesh"
-            : foundSkeleton
-                ? $"Skinned mesh  ·  {mesh.Bones.Count} bones  ·  export skeleton resolved automatically"
-                : $"Skinned mesh  ·  {mesh.Bones.Count} bones  ·  no export skeleton found";
-        SkeletonButton.Visibility = isSkinned && !foundSkeleton
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        PendingBadge.Visibility = hasPendingChange ? Visibility.Visible : Visibility.Collapsed;
+        _changes = changes;
+        _changesMatter = hasPendingChange;
+        _sources = NewSources();
+
+        try
+        {
+            _renderer = new MeshRenderer();
+        }
+        catch (Exception ex)
+        {
+            _renderer = null;
+            HintText.Text = $"3D rendering is not available: {ex.Message}";
+        }
 
         ImportButton.IsEnabled = queueImport is not null;
         if (queueImport is null)
             ImportButton.ToolTip = "Import is available when the viewer was opened from a concrete Mesh resource inside a data container.";
 
-        _parts = MeshScene.Build(mesh);
-        _partVisible = Enumerable.Repeat(true, _parts.Count).ToArray();
-        _armatureGeometry = isSkinned
-            ? MeshScene.BuildArmature(mesh, ActiveSkeleton())
-            : null;
-        _surfaces = MeshSurfaces.Load(mesh, siblings, archives, withTextures: false, out _borrowed);
-        BuildHierarchy();
-        BuildScene();
-        ShowFacts();
-        UpdateRangeControl();
+        ShowMesh(mesh);
+        _surfaces = MeshSurfaces.Load(mesh, _sources, withTextures: false, null);
+        UpdateChangesButton();
+        LoadStyles();
 
-        Loaded += (_, _) => Fit();
+        Loaded += (_, _) =>
+        {
+            Fit();
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                if (_textured)
+                    LoadTextures();
+                LoadLevels();
+            });
+        };
+        Closed += (_, _) =>
+        {
+            _renderer?.Dispose();
+            _renderer = null;
+        };
+    }
+
+    void ShowMesh(Mesh mesh)
+    {
+        _mesh = mesh;
+
+        var vertices = MeshGeometry.ReadVertices(mesh);
+        var gpu = new RenderVertex[vertices.Length];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            var vertex = vertices[i];
+            var uv = vertex.Uv.Length > 0 ? vertex.Uv[0] : Vector2.Zero;
+            gpu[i] = new RenderVertex
+            {
+                Position = vertex.Position,
+                Normal = vertex.Normal,
+                Tangent = vertex.Tangent,
+                Binormal = vertex.Binormal,
+                UvA = uv,
+                UvB = vertex.Uv.Length > 1 ? vertex.Uv[1] : uv,
+                Paint = vertex.Paint,
+            };
+        }
+
+        var indices = new List<uint>();
+        _parts = [];
+        _bounds = Rect3D.Empty;
+
+        foreach (var range in mesh.Data.Standard)
+        {
+            var triangles = MeshGeometry.ReadTriangles(mesh, range);
+            var low = new Vector3(float.MaxValue);
+            var high = new Vector3(float.MinValue);
+            foreach (int corner in triangles)
+            {
+                low = Vector3.Min(low, vertices[corner].Position);
+                high = Vector3.Max(high, vertices[corner].Position);
+            }
+
+            var bounds = triangles.Length == 0 ? Rect3D.Empty : new Rect3D(low.X, low.Y, low.Z, high.X - low.X, high.Y - low.Y, high.Z - low.Z);
+            _parts.Add(new RenderPart { IndexStart = indices.Count, IndexCount = triangles.Length, VertexCount = range.VertexCount, Bounds = bounds });
+            _bounds.Union(bounds);
+
+            foreach (int corner in triangles)
+                indices.Add((uint)corner);
+        }
+
+        _vertexCount = vertices.Length;
+        _renderer?.SetGeometry(gpu, indices.ToArray());
+        _partVisible = Enumerable.Repeat(true, _parts.Count).ToArray();
+
+        bool skinned = mesh.Bones.Count > 0;
+        _automaticSkeleton = skinned ? SkeletonFinder.Find(_siblings, mesh.Bones, _skeletonIndex) : null;
+        _armatureVisible = skinned;
+        _armatureGeometry = skinned ? MeshScene.BuildArmature(mesh, ActiveSkeleton()) : null;
+
+        Title = _name;
+        MeshNameText.Text = _name;
+        bool foundSkeleton = _automaticSkeleton is not null;
+        MeshTypeText.Text = !skinned
+            ? "Static mesh"
+            : foundSkeleton
+                ? $"Skinned mesh  ·  {mesh.Bones.Count} bones  ·  export skeleton resolved automatically"
+                : $"Skinned mesh  ·  {mesh.Bones.Count} bones  ·  no export skeleton found";
+        SkeletonButton.Visibility = skinned && !foundSkeleton ? Visibility.Visible : Visibility.Collapsed;
+        PendingBadge.Visibility = _withChanges && Pending()?.ContainsKey(_meshId) == true ? Visibility.Visible : Visibility.Collapsed;
+
+        UpdateRangeControl();
+        BuildHierarchy();
+        ShowFacts();
+        UpdateOverlays();
+    }
+
+    Dictionary<ulong, byte[]>? Pending() => _changes?.PendingResources();
+
+    SurfaceSources NewSources() => new()
+    {
+        Siblings = _siblings,
+        Archives = _archives,
+        Pending = _withChanges ? Pending() : null,
+    };
+
+    byte[] CurrentData()
+    {
+        byte[]? game = _siblings.FirstOrDefault(r => r.Id == _meshId && r.ClassHash == Mesh.ClassHash)?.Data;
+        byte[]? pending = _withChanges ? Pending()?.GetValueOrDefault(_meshId) : null;
+        return pending ?? game ?? _resourceData;
+    }
+
+    void Reload()
+    {
+        _renderer?.Forget(_sources.Decoded.Values.OfType<TexturePixels>());
+        _sources = NewSources();
+        ShowMesh(Mesh.Read(CurrentData()));
+        _surfaces = MeshSurfaces.Load(_mesh, _sources, withTextures: false, _style);
+        _texturesLoaded = false;
+        if (_textured)
+            LoadTextures();
+        RequestRender();
     }
 
     void UpdateRangeControl()
@@ -119,63 +253,99 @@ public partial class MeshWindow : Window
             : "This mesh is drawn in one piece, so there are no ranges to distinguish";
     }
 
-    void BuildScene()
+    void UpdateChangesButton()
     {
-        var group = new Model3DGroup();
-        group.Children.Add(new AmbientLight(Color.FromRgb(0x4A, 0x4C, 0x52)));
-        group.Children.Add(_light);
+        ChangesButton.Visibility = _changes is not null && _changesMatter ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void RequestRender()
+    {
+        if (_renderQueued || _renderer is null)
+            return;
+
+        _renderQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(Render));
+    }
+
+    void Render()
+    {
+        _renderQueued = false;
+        if (_renderer is null)
+            return;
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        int width = (int)Math.Round(Stage.ActualWidth * dpi.DpiScaleX);
+        int height = (int)Math.Round(Stage.ActualHeight * dpi.DpiScaleY);
+        if (width < 1 || height < 1)
+            return;
+
+        if (_picture is null || _picture.PixelWidth != width || _picture.PixelHeight != height)
+        {
+            _picture = new WriteableBitmap(width, height, dpi.PixelsPerInchX, dpi.PixelsPerInchY, System.Windows.Media.PixelFormats.Bgra32, null);
+            Picture.Source = _picture;
+        }
+
+        bool? twoSided = _backFaces switch
+        {
+            BackFaces.Always => true,
+            BackFaces.Never => false,
+            _ => null,
+        };
+
+        try
+        {
+            _renderer.Render(_picture, _camera, Draws(), _textured, twoSided, _bounds, _floor);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"rendering failed: {ex.Message}";
+        }
+    }
+
+    List<RenderDraw> Draws()
+    {
+        var draws = new List<RenderDraw>();
 
         for (int i = 0; i < _parts.Count; i++)
         {
             if (i >= _partVisible.Length || !_partVisible[i])
                 continue;
 
-            var colour = _colourRanges ? Palette[i % Palette.Length] : Palette[0];
-
             var surface = i < _surfaces.Count ? _surfaces[i] : null;
-            var brush = _textured ? surface?.Texture : null;
-            var front = brush ?? Paint(colour);
-
-            var model = new GeometryModel3D(_parts[i].Geometry, new DiffuseMaterial(front));
-
-            bool twoSided = _backFaces switch
+            draws.Add(new RenderDraw
             {
-                BackFaces.Always => true,
-                BackFaces.Never => false,
-                _ => surface?.TwoSided ?? true,
-            };
-
-            if (twoSided)
-                model.BackMaterial = new DiffuseMaterial(brush ?? Paint(Shade(colour, 0.45)));
-
-            group.Children.Add(model);
+                Part = _parts[i],
+                Material = surface?.Look,
+                Colour = _colourRanges ? Palette[i % Palette.Length] : Palette[0],
+                TwoSided = surface?.TwoSided ?? true,
+                Translucent = surface?.Translucent ?? false,
+            });
         }
+
+        return draws;
+    }
+
+    void UpdateOverlays()
+    {
+        var overlays = new List<RenderOverlay>();
 
         if (_armatureVisible && _armatureGeometry is not null)
-        {
-            var armatureBrush = Paint(Color.FromRgb(0x73, 0xB7, 0xF2));
-            var armature = new GeometryModel3D(_armatureGeometry,
-                new EmissiveMaterial(armatureBrush))
-            {
-                BackMaterial = new EmissiveMaterial(armatureBrush),
-            };
-            group.Children.Add(armature);
-        }
+            overlays.Add(Overlay(_armatureGeometry, Color.FromRgb(0x73, 0xB7, 0xF2)));
 
         Rect3D selected = SelectedBounds();
         if (!selected.IsEmpty)
-        {
-            var accent = Paint(Color.FromRgb(0x4D, 0xA7, 0xFF));
-            var outline = new GeometryModel3D(MeshScene.BuildOutline(selected),
-                new EmissiveMaterial(accent))
-            {
-                BackMaterial = new EmissiveMaterial(accent),
-            };
-            group.Children.Add(outline);
-        }
+            overlays.Add(Overlay(MeshScene.BuildOutline(selected), Color.FromRgb(0x4D, 0xA7, 0xFF)));
 
-        Scene.Content = group;
+        _renderer?.SetOverlays(overlays);
+        RequestRender();
     }
+
+    static RenderOverlay Overlay(MeshGeometry3D geometry, Color colour) => new()
+    {
+        Positions = geometry.Positions.Select(point => new Vector3((float)point.X, (float)point.Y, (float)point.Z)).ToArray(),
+        Indices = geometry.TriangleIndices.ToArray(),
+        Colour = colour,
+    };
 
     List<SkeletonBone>? ActiveSkeleton() => _skeleton ?? _automaticSkeleton;
 
@@ -250,7 +420,7 @@ public partial class MeshWindow : Window
         for (MeshHierarchyItem? parent = item.Parent; parent is not null; parent = parent.Parent)
             RefreshGroupState(parent);
         _updatingHierarchy = false;
-        BuildScene();
+        UpdateOverlays();
         ShowSelectionFacts();
         e.Handled = true;
     }
@@ -281,7 +451,7 @@ public partial class MeshWindow : Window
         RoutedPropertyChangedEventArgs<object> e)
     {
         _selectedHierarchy = e.NewValue as MeshHierarchyItem;
-        BuildScene();
+        UpdateOverlays();
         ShowSelectionFacts();
     }
 
@@ -305,7 +475,7 @@ public partial class MeshWindow : Window
         {
             int index = _selectedHierarchy.Index;
             return (uint)index < (uint)_parts.Count && _partVisible[index]
-                ? _parts[index].Geometry.Bounds
+                ? _parts[index].Bounds
                 : Rect3D.Empty;
         }
 
@@ -317,7 +487,7 @@ public partial class MeshWindow : Window
         var bounds = Rect3D.Empty;
         for (int index = 0; index < _parts.Count; index++)
             if (index < _partVisible.Length && _partVisible[index])
-                bounds.Union(_parts[index].Geometry.Bounds);
+                bounds.Union(_parts[index].Bounds);
         if (_selectedHierarchy.Kind == MeshHierarchyKind.Mesh
             && _armatureVisible && _armatureGeometry is not null)
             bounds.Union(_armatureGeometry.Bounds);
@@ -353,53 +523,182 @@ public partial class MeshWindow : Window
             + (materialId == 0 ? "" : $"   material 0x{materialId:X}");
     }
 
-    void Texture_Click(object sender, RoutedEventArgs e)
+    void LoadTextures()
     {
-        if (!_texturesLoaded)
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
         {
-            Mouse.OverrideCursor = Cursors.Wait;
-            try
-            {
-                _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives, withTextures: true, out _borrowed);
-                _texturesLoaded = true;
-            }
-            catch (Exception ex)
-            {
-                TextureButton.IsChecked = false;
-                StatusText.Text = $"textures could not be loaded: {ex.Message}";
-                MessageBox.Show(this, ex.Message, "Could not load mesh textures",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            finally
-            {
-                Mouse.OverrideCursor = null;
-            }
-
-            if (_surfaces.TrueForAll(s => s.Texture is null))
-            {
-                StatusText.Text = "no textures found for this mesh";
-                TextureButton.IsChecked = false;
-                TextureButton.IsEnabled = false;
-                TextureButton.Content = "No textures";
-                return;
-            }
-
-            ShowFacts();
+            _surfaces = MeshSurfaces.Load(_mesh, _sources, withTextures: true, _style);
+            _texturesLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            _textured = false;
+            TextureButton.IsChecked = false;
+            StatusText.Text = $"textures could not be loaded: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Could not load mesh textures",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
         }
 
-        _textured = TextureButton.IsChecked == true;
-        BuildScene();
+        if (_surfaces.TrueForAll(s => s.Look is null))
+        {
+            _textured = false;
+            TextureButton.IsChecked = false;
+            TextureButton.IsEnabled = false;
+            TextureButton.Content = "No textures";
+        }
+
+        _changesMatter |= _sources.UsedPending;
+        UpdateChangesButton();
+        ShowFacts();
+        RequestRender();
     }
 
-    static Brush Paint(Color colour)
+    void Texture_Click(object sender, RoutedEventArgs e)
     {
-        var brush = new SolidColorBrush(colour);
-        brush.Freeze();
-        return brush;
+        _textured = TextureButton.IsChecked == true;
+        if (_textured && !_texturesLoaded)
+            LoadTextures();
+
+        ShowFacts();
+        RequestRender();
     }
 
-    static Color Shade(Color colour, double factor) => Color.FromRgb((byte)(colour.R * factor), (byte)(colour.G * factor), (byte)(colour.B * factor));
+    async void LoadStyles()
+    {
+        var materials = _surfaces.Select(surface => surface.Cloth).OfType<Wildlands.Formats.Materials.Material>().ToList();
+        StylePanel.Visibility = materials.Count > 0 && _archives is not null ? Visibility.Visible : Visibility.Collapsed;
+        StyleSeparator.Visibility = StylePanel.Visibility;
+        if (StylePanel.Visibility != Visibility.Visible)
+            return;
+
+        _fillingStyles = true;
+        StyleBox.Items.Clear();
+        StyleBox.Items.Add("Reading styles…");
+        StyleBox.SelectedIndex = 0;
+        _fillingStyles = false;
+
+        try
+        {
+            _styles = await ClothStyles.For(_openedName, materials, _archives!);
+        }
+        catch (Exception ex)
+        {
+            _styles = [];
+            StatusText.Text = $"styles could not be read: {ex.Message}";
+        }
+
+        _fillingStyles = true;
+        StyleBox.Items.Clear();
+        StyleBox.Items.Add("Material as stored");
+        foreach (var style in _styles)
+            StyleBox.Items.Add(style.Tag != 0 && style.Weight > 0 ? $"{style.Name}  (game default)" : style.Name);
+        StyleBox.SelectedIndex = 0;
+        StyleBox.IsEnabled = _styles.Count > 0;
+        StyleBox.ToolTip = _styles.Count > 0
+            ? $"{_styles.Count} styles from {string.Join(", ", _styles.Select(style => style.Group).Distinct())}"
+            : "No customization style in the character templates uses this model";
+        _fillingStyles = false;
+    }
+
+    void Style_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_fillingStyles)
+            return;
+
+        int index = StyleBox.SelectedIndex - 1;
+        _style = index >= 0 && index < _styles.Count ? _styles[index] : null;
+        _textured = true;
+        TextureButton.IsChecked = true;
+        LoadTextures();
+    }
+
+    void LoadLevels()
+    {
+        if (_archives is null)
+            return;
+
+        string model = Regex.Replace(_openedName, "_LOD\\d+$", "", RegexOptions.IgnoreCase);
+        var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { model, model + "_LOD0" };
+        var found = new Dictionary<string, (ForgeArchive Archive, ForgeEntry Entry)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var archive in _archives.All())
+        {
+            foreach (var entry in archive.Entries)
+            {
+                if (entry.FileExtension == ".data" && wanted.Contains(entry.Name))
+                    found.TryAdd(entry.Name, (archive, entry));
+            }
+        }
+
+        var levels = new List<MeshLevel>();
+        foreach (var (archive, entry) in found.Values)
+        {
+            DataFile file;
+            try
+            {
+                using var stream = new MemoryStream(archive.ReadEntry(entry));
+                file = DataFile.Read(stream);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var resource in file.Resources.Where(r => r.ClassHash == Mesh.ClassHash))
+            {
+                var match = Regex.Match(resource.Name, "_LOD(\\d+)$", RegexOptions.IgnoreCase);
+                if (match.Success && resource.Name.StartsWith(model, StringComparison.OrdinalIgnoreCase))
+                    levels.Add(new MeshLevel($"LOD {match.Groups[1].Value}", resource.Name, resource, file.Resources));
+            }
+        }
+
+        levels = levels.DistinctBy(level => level.Name).OrderBy(level => level.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        int opened = levels.FindIndex(level => level.Name.Equals(_openedName, StringComparison.OrdinalIgnoreCase));
+        if (levels.Count < 2 || opened < 0)
+            return;
+
+        _levels = levels;
+        _fillingLevels = true;
+        LodBox.ItemsSource = levels.Select(level => level.Label).ToList();
+        LodBox.SelectedIndex = opened;
+        LodBox.Visibility = Visibility.Visible;
+        _fillingLevels = false;
+    }
+
+    void Lod_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_fillingLevels || LodBox.SelectedIndex < 0 || LodBox.SelectedIndex >= _levels.Count)
+            return;
+
+        var level = _levels[LodBox.SelectedIndex];
+        bool opened = level.Name.Equals(_openedName, StringComparison.OrdinalIgnoreCase);
+
+        _name = level.Name;
+        _meshId = level.Mesh.Id;
+        _siblings = opened ? _openedSiblings : level.Siblings;
+        ImportButton.IsEnabled = opened && _queueImport is not null;
+        ImportButton.ToolTip = opened
+            ? "Replace this mesh from GLB, glTF or OBJ and queue it for Apply changes (Ctrl+R)"
+            : $"Switch back to {_openedName} to replace it; other levels of detail are shown for comparison only";
+
+        Reload();
+        Fit();
+    }
+
+    void Changes_Click(object sender, RoutedEventArgs e)
+    {
+        _withChanges = ChangesButton.IsChecked == true;
+        Reload();
+        StatusText.Text = _withChanges
+            ? "showing queued changes, nothing has been written to the game"
+            : "showing the game files without the queued changes";
+    }
 
     void ShowFacts()
     {
@@ -414,29 +713,37 @@ public partial class MeshWindow : Window
             triangles += part.TriangleCount;
 
         StatusText.Text =
-            $"{_parts[0].Geometry.Positions.Count:N0} vertices   {triangles:N0} triangles   " +
+            $"{_vertexCount:N0} vertices   {triangles:N0} triangles   " +
             $"{_parts.Count} draw range(s)   format {_mesh.VertexFormat}, stride {_mesh.VertexStride}" +
             (_mesh.Bones.Count > 0 ? $"   {_mesh.Bones.Count} bones, shown in bind pose" : "") +
-            (_borrowed is null ? "" : $"   completed from {_borrowed}");
+            (_textured && _style is not null ? $"   style {_style.Name}" : "") +
+            (_sources.Borrowed.Count == 0 ? "" : $"   completed from {string.Join(", ", _sources.Borrowed)}");
 
-        var bounds = MeshScene.Bounds(_parts);
-        SizeText.Text = $"{bounds.SizeX:0.00} x {bounds.SizeY:0.00} x {bounds.SizeZ:0.00} m";
+        SizeText.Text = $"{_bounds.SizeX:0.00} x {_bounds.SizeY:0.00} x {_bounds.SizeZ:0.00} m";
     }
 
     void Fit_Click(object sender, RoutedEventArgs e) => Fit();
 
     void Fit()
     {
-        var bounds = MeshScene.Bounds(_parts);
+        var bounds = _bounds;
         if (_armatureVisible && _armatureGeometry is not null)
             bounds.Union(_armatureGeometry.Bounds);
         _cameraController.Fit(bounds);
     }
 
+    void Stage_SizeChanged(object sender, SizeChangedEventArgs e) => RequestRender();
+
     void Colour_Click(object sender, RoutedEventArgs e)
     {
         _colourRanges = ColourButton.IsChecked == true;
-        BuildScene();
+        RequestRender();
+    }
+
+    void Floor_Click(object sender, RoutedEventArgs e)
+    {
+        _floor = FloorButton.IsChecked == true;
+        RequestRender();
     }
 
     void Backface_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -447,8 +754,7 @@ public partial class MeshWindow : Window
             2 => BackFaces.Never,
             _ => BackFaces.FromMaterial,
         };
-        if (IsLoaded)
-            BuildScene();
+        RequestRender();
     }
 
     void Skeleton_Click(object sender, RoutedEventArgs e)
@@ -460,7 +766,7 @@ public partial class MeshWindow : Window
             SkeletonButton.ToolTip = "Override the skeleton used when exporting GLB or FBX";
             _armatureGeometry = MeshScene.BuildArmature(_mesh, ActiveSkeleton());
             BuildHierarchy();
-            BuildScene();
+            UpdateOverlays();
             return;
         }
 
@@ -471,12 +777,12 @@ public partial class MeshWindow : Window
             : $"Export uses {name}. Click to return to automatic skeleton selection.";
         _armatureGeometry = MeshScene.BuildArmature(_mesh, ActiveSkeleton());
         BuildHierarchy();
-        BuildScene();
+        UpdateOverlays();
     }
 
     void Replace_Click(object sender, RoutedEventArgs e)
     {
-        if (_queueImport is null)
+        if (_queueImport is null || !_name.Equals(_openedName, StringComparison.OrdinalIgnoreCase))
             return;
 
         byte[]? rebuilt = MeshImporter.Replace(this, _resourceData, _name, _settings,
@@ -484,12 +790,9 @@ public partial class MeshWindow : Window
         if (rebuilt is null)
             return;
 
-        Mesh imported;
-        List<MeshPart> parts;
         try
         {
-            imported = Mesh.Read(rebuilt);
-            parts = MeshScene.Build(imported);
+            Mesh.Read(rebuilt);
         }
         catch (Exception ex)
         {
@@ -509,29 +812,12 @@ public partial class MeshWindow : Window
             return;
         }
 
-        _mesh = imported;
         _resourceData = rebuilt;
-        _parts = parts;
-        _partVisible = Enumerable.Repeat(true, _parts.Count).ToArray();
-        _automaticSkeleton = _mesh.Bones.Count > 0
-            ? SkeletonFinder.Find(_siblings, _mesh.Bones, _skeletonIndex)
-            : null;
-        _armatureVisible = _mesh.Bones.Count > 0;
-        _armatureGeometry = _mesh.Bones.Count > 0
-            ? MeshScene.BuildArmature(_mesh, ActiveSkeleton())
-            : null;
-        _texturesLoaded = false;
-        _textured = false;
-        _borrowed = null;
-        TextureButton.IsChecked = false;
-        TextureButton.IsEnabled = true;
-        TextureButton.Content = "Textures";
-        _surfaces = MeshSurfaces.Load(_mesh, _siblings, _archives,
-            withTextures: false, out _borrowed);
-        UpdateRangeControl();
-        BuildHierarchy();
-        BuildScene();
-        ShowFacts();
+        _withChanges = true;
+        _changesMatter = true;
+        ChangesButton.IsChecked = true;
+        UpdateChangesButton();
+        Reload();
         Fit();
 
         PendingBadge.Visibility = Visibility.Visible;

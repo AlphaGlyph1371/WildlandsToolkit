@@ -107,10 +107,22 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
 
 ### Meshes
 
-- 3D viewport with orbit, pan and zoom, built on WPF's own 3D
+- Direct3D 11 viewport with orbit, pan and zoom: physically based lighting with a key, fill and
+  rim light, soft shadows on a floor, studio reflections and 4x antialiasing
 - Scene hierarchy for draw ranges and the armature, with per-item visibility, selection details and
   a visible selection outline in the viewport
-- Draws the real diffuse texture per draw range, back faces follow the original used material
+- Renders every draw range with its full material at mip 0: albedo, normal map, gloss and
+  reflectance. Weapons follow the layout of the `SHD_Weapon_InGame` and `SHD_Weapon_Gunsmith`
+  shaders (gloss in the normal map alpha, reflectance colour from the specular map), back faces
+  follow the material
+- A **LOD** list switches between every level of detail of the model for comparison
+- **Pending changes** shows queued changes to the mesh, its materials and its textures. Switch it
+  off to see the game files for a before and after comparison; nothing is written either way
+- Paints clothing the way the game does: the `CHR_cloth_Detail` shader was disassembled and its
+  albedo formula rebuilt, including the per-vertex colour masks, the Mask1 material zones, camo
+  overlay, detail fabric and baked-in dirt. A **Style** list offers every customization style the
+  character templates give that item (camo patterns and solid colours), found through the same
+  BuildTable columns and material masks the game uses
 - Exports and **re-imports binary glTF** (`.glb`): positions, normals, tangents, every UV set,
   vertex colours, skin weights and one material per draw range, all of it round-trips
 - Imports the active glTF scene rather than every mesh stored in the file, applies nested object
@@ -122,6 +134,9 @@ Note: A DDS in the format and size of the target goes through untouched, everyth
 - Exports **binary FBX** with skeleton and skin, without the Autodesk SDK. Static props and vehicle
   parts export directly without an irrelevant skeleton prompt
 - Exports and re-imports Wavefront OBJ as well, for tools that want it
+- Keeps the hidden per-vertex colour that drives the tint zones and camo of clothing. When the
+  imported file carries none (OBJ, or glTF without `COLOR_0`), it is taken from the matching
+  triangle of the original mesh
 - Finds the matching skeleton across all archives through a bone name index, and uses it to give
   both FBX and glTF a real bone hierarchy instead of a flat list. **98.8% of skinned meshes do not
   ship their skeleton next to them**, so that index is what makes a usable rig possible at all
@@ -140,7 +155,8 @@ shape. It tells you when it does that.
 
 ### Materials and appearance
 
-- Reads the parameter list of a material with resolved names and the textures it names
+- Reads the parameter list of a material with resolved names, values and the textures it names;
+  every parameter of the clothing shader has its real name
 - Resolves texture sets to their textures
 - Reads and rewrites `.BuildTable` resources byte for byte, all 3649 of them
 
@@ -287,6 +303,7 @@ yet; conflicting packages are stopped instead of silently overwriting each other
 
 - Recommended: Windows 10/11 (maybe older work too i haven't tested it)
 - [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0)
+- A graphics card with Direct3D 11 for the mesh viewer (it falls back to slower software rendering)
 - Legit copy of Ghost Recon Wildlands
 
 ## Building from source
@@ -358,7 +375,6 @@ parseraudit <game folder> [report.json] [--fast]  test every supported reader/wr
 sets      <file.forge> [n]                  which textures the texture sets point at
 mats      <file.forge> [n]                  whether every draw range finds its material
 params    <file.forge> [n] [out.txt]        walk every material parameter list
-camo      <file.forge> [more.forge...]      match every camo option to its texture
 guess     <list.txt> <file.forge> [...]     check candidate names against real hashes
 
 timecycle    <file.data> <name> [out.txt]   write one time cycle out as editable text

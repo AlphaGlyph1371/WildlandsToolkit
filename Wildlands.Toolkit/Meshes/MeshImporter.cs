@@ -92,6 +92,8 @@ public static class MeshImporter
             + (result.RangesBefore != result.Ranges ? $" (was {result.RangesBefore} range(s), materials followed)" : "")
             + (result.CarriedSkinning ? ", weights from the file" : "")
             + (result.TransferredSkinning ? ", weights from the nearest original vertex" : "")
+            + (result.CarriedColours ? ", vertex colours from the file" : "")
+            + (result.TransferredColours ? ", vertex colours from the nearest original vertex" : "")
             + (result.PatchedVertices > 0 ? $", {result.PatchedVertices} vertex(es) fell back to the nearest original weights" : "");
 
         return rebuilt;

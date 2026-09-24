@@ -1283,7 +1283,13 @@ public partial class MainWindow : Window
     string Describe(MaterialParameter parameter, ref string name, List<SetTexture> tiles)
     {
         if (parameter.ObjectClass == UvTransform)
-            return $"UVTransform  tiles {parameter.ScaleU:0.##} x {parameter.ScaleV:0.##}";
+            return $"UVTransform  tiles {parameter.Transform.ScaleU:0.##} x {parameter.Transform.ScaleV:0.##}";
+
+        if (parameter.Kind == 0x0A)
+            return $"{parameter.Value.X:0.###}";
+
+        if (parameter.Kind == 0x0D)
+            return $"{parameter.Value.X:0.###}  {parameter.Value.Y:0.###}  {parameter.Value.Z:0.###}  {parameter.Value.W:0.###}";
 
         if (parameter.TextureId == 0)
             return parameter.ObjectClass != 0
@@ -1741,7 +1747,7 @@ public partial class MainWindow : Window
                 queueImport = (data, summary) => QueueMeshViewerImport(where, item, data, summary);
             }
 
-            new MeshWindow(_previewMesh, meshData, _previewMeshName, _previewSiblings, _archives, _skeletonIndex, _settings, queueImport, pending).Show();
+            new MeshWindow(_previewMesh, meshData, _previewMeshName, _previewSiblings, _archives, _skeletonIndex, _settings, queueImport, pending, _changes).Show();
             return;
         }
 

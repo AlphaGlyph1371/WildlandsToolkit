@@ -313,7 +313,8 @@
                             <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Accent}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="Arrow" Property="Stroke" Value="{StaticResource TextDisabled}"/>
+                            <Setter TargetName="Root" Property="Background" Value="#FF35353B"/>
+                            <Setter TargetName="Root" Property="BorderBrush" Value="#FF46464E"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -348,7 +349,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
-                    <Grid>
+                    <Grid x:Name="Root">
                         <ToggleButton Style="{StaticResource ComboToggle}"
                                       IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
                                                   RelativeSource={RelativeSource TemplatedParent}}"/>
@@ -371,8 +372,7 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="Selection" Property="TextBlock.Foreground"
-                                    Value="{StaticResource TextDisabled}"/>
+                            <Setter TargetName="Root" Property="Opacity" Value="0.55"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

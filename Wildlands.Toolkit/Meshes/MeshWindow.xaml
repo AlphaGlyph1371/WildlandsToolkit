@@ -39,6 +39,8 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
@@ -54,12 +56,20 @@
                                           Style="{StaticResource StateToggle}"
                                           ToolTip="Show or hide the scene hierarchy"/>
                             <ToggleButton x:Name="TextureButton" Content="Textures"
-                                          Click="Texture_Click" Style="{StaticResource StateToggle}"
-                                          ToolTip="Display the diffuse texture resolved through each material and texture set"/>
+                                          Click="Texture_Click" IsChecked="True" Style="{StaticResource StateToggle}"
+                                          ToolTip="Render every draw range with its full material: albedo, normal and detail maps, gloss and the game's clothing shader"/>
                             <ToggleButton x:Name="ColourButton" Content="Draw ranges"
                                           Click="Colour_Click" IsChecked="True"
                                           Style="{StaticResource StateToggle}"
                                           ToolTip="Tint separate material draw ranges when no texture is being shown"/>
+                            <ToggleButton x:Name="FloorButton" Content="Floor"
+                                          Click="Floor_Click" IsChecked="True"
+                                          Style="{StaticResource StateToggle}"
+                                          ToolTip="Show a floor that catches the shadow of the key light"/>
+                            <ToggleButton x:Name="ChangesButton" Content="Pending changes"
+                                          Click="Changes_Click" IsChecked="True" Visibility="Collapsed"
+                                          Style="{StaticResource StateToggle}"
+                                          ToolTip="Include queued changes to this mesh, its materials and textures. Turn off to see the game files for a before and after comparison; nothing is written either way"/>
                         </StackPanel>
                     </StackPanel>
 
@@ -70,6 +80,9 @@
                         <TextBlock Text="GEOMETRY" FontSize="10" FontWeight="SemiBold"
                                    Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
                         <StackPanel Orientation="Horizontal">
+                            <ComboBox x:Name="LodBox" Width="92" Margin="0,0,6,0" Visibility="Collapsed"
+                                      SelectionChanged="Lod_Changed"
+                                      ToolTip="Level of detail; LOD 0 is the full quality model the game shows up close"/>
                             <ComboBox x:Name="BackfaceBox" Width="166" SelectedIndex="0"
                                       SelectionChanged="Backface_Changed"
                                       ToolTip="Choose whether the reverse side of a surface is rendered">
@@ -83,9 +96,20 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <TextBlock Grid.Column="4" x:Name="HintText" VerticalAlignment="Bottom"
+                    <Border Grid.Column="3" x:Name="StyleSeparator" Width="1" Background="{StaticResource Border}"
+                            Margin="14,0,14,0" Visibility="Collapsed"/>
+
+                    <StackPanel Grid.Column="4" x:Name="StylePanel" Visibility="Collapsed">
+                        <TextBlock Text="STYLE" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}" Margin="1,0,0,4"/>
+                        <ComboBox x:Name="StyleBox" Width="240" IsEnabled="False"
+                                  SelectionChanged="Style_Changed"
+                                  ToolTip="Show the clothing the way the game paints it for the chosen customization style"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="6" x:Name="HintText" VerticalAlignment="Bottom"
                                Foreground="{StaticResource TextDim}" FontSize="11" Margin="20,0,0,6"
-                               Text="Left-drag orbit  ·  right-drag pan  ·  wheel zoom  ·  F frame"/>
+                               TextWrapping="Wrap" MaxWidth="260"/>
                 </Grid>
             </StackPanel>
         </Border>
@@ -123,13 +147,8 @@
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Padding="12,10" BorderBrush="{StaticResource Border}"
                             BorderThickness="0,0,0,1">
-                        <StackPanel>
-                            <TextBlock Text="HIERARCHY" FontSize="10" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextDisabled}"/>
-                            <TextBlock Text="Select an item to outline it. Use the checkboxes to hide it."
-                                       Margin="0,5,0,0" FontSize="11" TextWrapping="Wrap"
-                                       Foreground="{StaticResource TextDim}"/>
-                        </StackPanel>
+                        <TextBlock Text="HIERARCHY" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextDisabled}"/>
                     </Border>
 
                     <TreeView x:Name="HierarchyTree" BorderThickness="0" Padding="5"
@@ -173,13 +192,9 @@
             <GridSplitter x:Name="HierarchySplitter" Grid.Column="1" Width="4"
                           HorizontalAlignment="Stretch"/>
 
-            <Border Grid.Column="2" x:Name="Stage" Background="#FF141416" ClipToBounds="True">
-                <Viewport3D x:Name="Viewport">
-                    <Viewport3D.Camera>
-                        <PerspectiveCamera x:Name="Camera" FieldOfView="45" UpDirection="0,0,1"/>
-                    </Viewport3D.Camera>
-                    <ModelVisual3D x:Name="Scene"/>
-                </Viewport3D>
+            <Border Grid.Column="2" x:Name="Stage" Background="#FF141416" ClipToBounds="True"
+                    SizeChanged="Stage_SizeChanged">
+                <Image x:Name="Picture" Stretch="Fill"/>
             </Border>
         </Grid>
     </DockPanel>

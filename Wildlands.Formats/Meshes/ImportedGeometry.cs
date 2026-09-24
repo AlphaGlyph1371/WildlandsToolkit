@@ -18,6 +18,7 @@ public sealed class ImportedGeometry
     public bool HasTangents { get; set; }
     public int UvSets { get; set; }
     public bool HasColour { get; set; }
+    public bool HasSecondColour { get; set; }
 
     public List<uint> JointNames { get; } = [];
 }

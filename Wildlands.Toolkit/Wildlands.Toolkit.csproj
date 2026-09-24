@@ -5,7 +5,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="..\GraphicsProfiles\*.json" Link="GraphicsProfiles\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Preview\MeshShader.hlsl" LogicalName="Wildlands.Toolkit.Preview.MeshShader.hlsl" />
   </ItemGroup>
 
   <PropertyGroup>

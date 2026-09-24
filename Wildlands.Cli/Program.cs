@@ -30,7 +30,6 @@ if (args.Length < 2 && (args.Length == 0 || args[0] != "memtraceprobe"))
     Console.WriteLine("  mats  <file.forge> [n]         whether every draw range finds its material");
     Console.WriteLine("  matinfo <file.forge> <container> <material>  show texture-selector and TextureSet links");
     Console.WriteLine("  params <file.forge> [n] [out.txt]  walk every material parameter list and count what is in it");
-    Console.WriteLine("  camo  <file.forge> [file2.forge...]  match every camo option to the texture it wears");
     Console.WriteLine("  ranges <file.data> <name>      how its index buffer splits over the draw ranges");
     Console.WriteLine("  meshes <file.forge> [n]        count the geometry containers and vertex formats");
     Console.WriteLine("  geometry <file.forge> [n]      decode every mesh and check it against its own header");
@@ -167,8 +166,6 @@ try
             return CheckMaterials(args[1], args.Length >= 3 ? int.Parse(args[2]) : 2000);
         case "matinfo" when args.Length >= 4:
             return ShowMaterialLinks(args[1], args[2], args[3]);
-        case "camo":
-            return MatchCamo(args[1..]);
         case "params":
             return CheckParameters(args[1], args.Length >= 3 ? int.Parse(args[2]) : int.MaxValue,
                 args.Length >= 4 ? args[3] : null);

@@ -1,4 +1,6 @@
+using System;
 using System.IO;
+using System.Numerics;
 
 namespace Wildlands.Formats.Materials;
 
@@ -15,11 +17,13 @@ public sealed class MaterialFlags
     public bool TwoSided => _values[17];
 }
 
-public sealed record MaterialParameter(uint Name, uint Kind, uint ObjectClass, ulong TextureSetId = 0, ulong TextureId = 0, float ScaleU = 1, float ScaleV = 1);
+public sealed record MaterialParameter(uint Name, uint Kind, uint ObjectClass, ulong TextureSetId = 0, ulong TextureId = 0, Vector4 Value = default, UvTransform Transform = default);
 
 public sealed class Material
 {
     public const uint ClassHash = 0x85C817C3;
+    public const uint TextureSelectorHash = 0x7D08460D;
+    public const uint UvTransformHash = 0xC52E2125;
 
     public ulong Id { get; private set; }
     public ulong TemplateId { get; private set; }
@@ -32,6 +36,7 @@ public sealed class Material
     public bool IsOpaque => BlendMode == 0;
     public byte AlphaTestValue { get; private set; }
     public MaterialFlags Flags { get; private set; } = new(new bool[MaterialFlags.Count]);
+    public UInt128 FlagMask { get; private set; }
 
     public List<MaterialParameter> Parameters { get; } = [];
 
@@ -62,8 +67,9 @@ public sealed class Material
 
         material.BackfaceMaterialId = ReadReference(reader);
 
-        ReadHeader(reader, SecondObjectHash);
-        reader.ReadBytes(SecondObjectBody);
+        ReadHeader(reader, FlagMaskHash);
+        material.FlagMask = ReadFlagMask(reader);
+        reader.ReadInt32();
 
         int count = reader.ReadInt32();
         for (int i = 0; i < count; i++)
@@ -107,8 +113,13 @@ public sealed class Material
                 return null;
             }
 
-            reader.BaseStream.Position += size;
-            return new MaterialParameter(name, kind.Value, 0);
+            long at = reader.BaseStream.Position;
+            var value = kind == FloatKind ? new Vector4(reader.ReadSingle(), 0, 0, 0)
+                : kind == VectorKind ? new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle())
+                : Vector4.Zero;
+
+            reader.BaseStream.Position = at + size;
+            return new MaterialParameter(name, kind.Value, 0, Value: value);
         }
 
         long start = reader.BaseStream.Position;
@@ -120,12 +131,9 @@ public sealed class Material
 
         if (objectClass == UvTransformHash)
         {
-            reader.BaseStream.Position = start + UvTransformScale;
-            float u = reader.ReadSingle();
-            float v = reader.ReadSingle();
-
+            var transform = ReadUvTransform(reader);
             reader.BaseStream.Position = start + UvTransformSize;
-            return new MaterialParameter(name, kind.Value, objectClass, ScaleU: u, ScaleV: v);
+            return new MaterialParameter(name, kind.Value, objectClass, Transform: transform);
         }
 
         int objectSize = ObjectSize(objectClass);
@@ -164,12 +172,20 @@ public sealed class Material
         return new MaterialParameter(name, kind, TextureSelectorHash, setId, textureId);
     }
 
+    public static UvTransform ReadUvTransform(BinaryReader reader)
+    {
+        var values = new float[8];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = reader.ReadSingle();
+
+        return new UvTransform(values[0], values[1], values[2], values[3], values[6]);
+    }
+
+    const uint FloatKind = 0x0A;
+    const uint VectorKind = 0x0D;
     const uint ObjectKind = 0x13;
-    const uint TextureSelectorHash = 0x7D08460D;
     const int TextureSelectorReferences = 25;
 
-    const uint UvTransformHash = 0xC52E2125;
-    const int UvTransformScale = 12;
     const int UvTransformSize = 46;
 
     static uint? KindOf(uint value) => (value & 0xFFFF) == 0 && (value >> 16) <= 0x1C ? value >> 16 : null;
@@ -195,8 +211,14 @@ public sealed class Material
     };
 
     const uint MaskHash = 0xDF5D6C0E;
-    const uint SecondObjectHash = 0x92B95F74;
-    const int SecondObjectBody = 20;
+    const uint FlagMaskHash = 0x92B95F74;
+
+    public static UInt128 ReadFlagMask(BinaryReader reader)
+    {
+        ulong low = reader.ReadUInt64();
+        ulong high = reader.ReadUInt64();
+        return new UInt128(high, low);
+    }
 
     static ulong ReadHeader(BinaryReader reader, uint expected)
     {
