@@ -30,6 +30,7 @@ public static class AddonArchiveService
             return false;
         }
 
+        var combined = new Dictionary<(string Family, ulong Container), ContainerChanges>();
         foreach (ArchiveWork work in plans)
         {
             if (FamilyOf(work.Path).Length == 0)
@@ -57,18 +58,16 @@ public static class AddonArchiveService
 
                 try
                 {
-                    _ = BuildResourcePatch(archive.ReadEntry(entry), data, entry,
-                        out bool removesResources);
-                    if (removesResources)
-                    {
-                        reason = $"{entry.Name} removes one or more resources. An addon archive "
-                            + "cannot hide resources from an older archive, so this has to be written in place.";
-                        return false;
-                    }
+                    ContainerChanges change = ContainerChanges.Between(archive.ReadEntry(entry), data, entry.Id);
+                    var key = (FamilyOf(work.Path).ToUpperInvariant(), entry.Id);
+                    if (combined.TryGetValue(key, out ContainerChanges? previous))
+                        previous.Include(change);
+                    else
+                        combined.Add(key, change);
                 }
                 catch (Exception ex) when (ex is InvalidDataException or OverflowException)
                 {
-                    reason = $"{entry.Name} cannot be written as a resource-level addon: {ex.Message}";
+                    reason = $"{entry.Name} cannot be written as an addon: {ex.Message}";
                     return false;
                 }
             }
@@ -78,7 +77,7 @@ public static class AddonArchiveService
         return true;
     }
 
-    public static IReadOnlyList<string> Write(IReadOnlyList<ArchiveWork> plans, string identity,
+    public static IReadOnlyList<string> Write(IReadOnlyList<ArchiveWork> plans,
         IProgress<string>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
@@ -89,20 +88,14 @@ public static class AddonArchiveService
         foreach (IGrouping<string, ArchiveWork> family in plans.GroupBy(work => FamilyOf(work.Path),
                      StringComparer.OrdinalIgnoreCase))
         {
-            var entries = new Dictionary<ulong, ForgeNewEntry>();
-            foreach (ArchiveWork work in family.OrderByDescending(work => SlotOf(work.Path)))
-            {
-                progress?.Report($"Collecting {work.Name}...");
-                CollectEntries(work, entries);
-            }
-
+            int slot = NextSlot(family.First().Path);
+            Dictionary<ulong, ForgeNewEntry> entries = Collect(family, family.Key, slot, progress);
             if (entries.Count == 0)
                 continue;
 
-            int slot = NextSlot(family.First().Path);
             string target = SlotPath(family.Key, slot);
             progress?.Report($"Writing {Path.GetFileName(target)}...");
-            ForgeArchive.Create(target, entries.Values.ToList(), identity,
+            ForgeArchive.Create(target, entries.Values.ToList(), Guid.NewGuid().ToString(),
                 (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             written.Add(target);
 
@@ -150,10 +143,15 @@ public static class AddonArchiveService
         return stale;
     }
 
-    static Dictionary<ulong, string> Basis(string family, int below, IEnumerable<ulong> ids)
+    static Dictionary<ulong, string> Basis(string family, int below, IEnumerable<ulong> ids) =>
+        Current(family, below, ids).ToDictionary(pair => pair.Key,
+            pair => Convert.ToHexString(SHA1.HashData(pair.Value.Data)));
+
+    static Dictionary<ulong, (byte[] Data, byte[] Prefetch)> Current(string family, int below,
+        IEnumerable<ulong> ids)
     {
         var wanted = new HashSet<ulong>(ids);
-        var basis = new Dictionary<ulong, string>();
+        var current = new Dictionary<ulong, (byte[] Data, byte[] Prefetch)>();
         for (int slot = below - 1; slot >= 0 && wanted.Count > 0; slot--)
         {
             string path = slot == 0 ? family + ".forge" : SlotPath(family, slot);
@@ -161,14 +159,20 @@ public static class AddonArchiveService
                 continue;
 
             using ForgeArchive archive = ForgeArchive.Open(path);
+            if (!archive.Entries.Any(entry => wanted.Contains(entry.Id)))
+                continue;
+
+            ForgeEntry? prefetchEntry = archive.Entries.FirstOrDefault(entry => entry.Id == 145);
+            byte[] prefetch = prefetchEntry is null ? [] : archive.ReadEntry(prefetchEntry);
             foreach (ForgeEntry entry in archive.Entries)
             {
                 if (wanted.Remove(entry.Id))
-                    basis[entry.Id] = Convert.ToHexString(SHA1.HashData(archive.ReadEntry(entry)));
+                    current[entry.Id] = (archive.ReadEntry(entry),
+                        PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id));
             }
         }
 
-        return basis;
+        return current;
     }
 
     public static long EstimateSize(IReadOnlyList<ArchiveWork> plans)
@@ -180,127 +184,167 @@ public static class AddonArchiveService
         {
             if (family.Key.Length == 0)
                 continue;
-            var entries = new Dictionary<ulong, ForgeNewEntry>();
-            foreach (ArchiveWork work in family.OrderByDescending(work => SlotOf(work.Path)))
-                CollectEntries(work, entries);
-            total += entries.Values.Sum(entry => (long)entry.Data.Length);
+            total += Collect(family, family.Key, NextSlot(family.First().Path), null)
+                .Values.Sum(entry => (long)entry.Data.Length);
         }
 
         return total;
     }
 
-    static void CollectEntries(ArchiveWork work, Dictionary<ulong, ForgeNewEntry> entries)
+    static Dictionary<ulong, ForgeNewEntry> Collect(IEnumerable<ArchiveWork> works, string family,
+        int slot, IProgress<string>? progress)
     {
-        using ForgeArchive archive = ForgeArchive.Open(work.Path);
-        ForgeEntry? prefetchEntry = archive.Entries.FirstOrDefault(entry => entry.Id == 145);
-        byte[] prefetch = prefetchEntry is null ? [] : archive.ReadEntry(prefetchEntry);
-
-        foreach ((int index, byte[] data) in work.Entries)
+        var entries = new Dictionary<ulong, ForgeNewEntry>();
+        var changes = new Dictionary<ulong, (ForgeEntry Entry, ContainerChanges Changes)>();
+        foreach (ArchiveWork work in works.OrderByDescending(work => SlotOf(work.Path)))
         {
-            ForgeEntry entry = archive.Entries.FirstOrDefault(candidate => candidate.Index == index)
-                ?? throw new InvalidDataException($"{work.Name} no longer holds container {index}.");
-            if (entry.Id is 16 or 145)
-                continue;
-            byte[] patch = BuildResourcePatch(archive.ReadEntry(entry), data, entry,
-                out bool removesResources);
-            if (removesResources)
-                throw new InvalidOperationException($"{entry.Name} removes one or more resources. "
-                    + "An addon archive cannot represent resource deletion.");
-            if (entries.TryGetValue(entry.Id, out ForgeNewEntry? preferred))
+            progress?.Report($"Collecting {work.Name}...");
+            using ForgeArchive archive = ForgeArchive.Open(work.Path);
+            foreach ((int index, byte[] data) in work.Entries)
             {
-                entries[entry.Id] = preferred with
-                {
-                    Data = MergeResourcePatches(preferred.Data, patch, entry.Id),
-                };
-                continue;
+                ForgeEntry entry = archive.Entries.FirstOrDefault(candidate => candidate.Index == index)
+                    ?? throw new InvalidDataException($"{work.Name} no longer holds container {index}.");
+                if (entry.Id is 16 or 145)
+                    continue;
+                ContainerChanges change = ContainerChanges.Between(archive.ReadEntry(entry), data, entry.Id);
+                if (changes.TryGetValue(entry.Id, out var previous))
+                    previous.Changes.Include(change);
+                else
+                    changes.Add(entry.Id, (entry, change));
             }
-            entries.Add(entry.Id, new ForgeNewEntry(entry.Id, entry.Name, entry.Extension,
-                entry.UmacHash, patch, PrefetchingFileInfos.ReadObjectBlock(prefetch, entry.Id)));
+
+            foreach (ForgeEntryAddition addition in work.EntryAdditions)
+            {
+                entries.TryAdd(addition.Id, new ForgeNewEntry(addition.Id, addition.Name,
+                    addition.Extension, BitConverter.ToUInt64(addition.InfoTemplate, 4),
+                    addition.Data, addition.PrefetchBlock));
+            }
         }
 
-        foreach (ForgeEntryAddition addition in work.EntryAdditions)
+        foreach (var (id, current) in Current(family, slot, changes.Keys))
         {
-            if (entries.ContainsKey(addition.Id))
-                continue;
-            entries.Add(addition.Id, new ForgeNewEntry(addition.Id, addition.Name,
-                addition.Extension, BitConverter.ToUInt64(addition.InfoTemplate, 4),
-                addition.Data, addition.PrefetchBlock));
+            var (entry, change) = changes[id];
+            foreach (string name in change.Overwrites(current.Data))
+                progress?.Report($"{entry.Name}: {name} replaces the version of an earlier addon");
+            entries[id] = new ForgeNewEntry(id, entry.Name, entry.Extension, entry.UmacHash,
+                change.ApplyTo(current.Data), current.Prefetch);
         }
+
+        return entries;
     }
 
-    /// <summary>
-    /// Builds the smallest valid overlay for an existing multi-resource container. The first
-    /// resource is the container identity and must stay first; the game then resolves the other
-    /// resources by their own ids across the archive family.
-    /// </summary>
-    internal static byte[] BuildResourcePatch(byte[] originalData, byte[] rebuiltData,
-        ForgeEntry entry, out bool removesResources)
+    sealed class ContainerChanges
     {
-        using var originalStream = new MemoryStream(originalData, writable: false);
-        using var rebuiltStream = new MemoryStream(rebuiltData, writable: false);
-        DataFile original = DataFile.Read(originalStream);
-        DataFile rebuilt = DataFile.Read(rebuiltStream);
-        if (rebuilt.Resources.Count == 0 || rebuilt.Resources[0].Id != entry.Id)
-            throw new InvalidDataException(
-                "The first resource no longer matches the Forge container id.");
+        readonly Dictionary<ulong, Resource> _before = [];
+        readonly List<(Resource Resource, ulong After)> _written = [];
+        readonly HashSet<ulong> _removed = [];
 
-        var originalById = new Dictionary<ulong, Resource>();
-        foreach (Resource resource in original.Resources)
+        public static ContainerChanges Between(byte[] originalData, byte[] rebuiltData, ulong containerId)
         {
-            if (!originalById.TryAdd(resource.Id, resource))
-                throw new InvalidDataException($"The original container contains resource id "
-                    + $"0x{resource.Id:X16} more than once.");
+            DataFile original = Read(originalData);
+            DataFile rebuilt = Read(rebuiltData);
+            if (rebuilt.Resources.Count == 0 || rebuilt.Resources[0].Id != containerId)
+                throw new InvalidDataException(
+                    "The first resource no longer matches the Forge container id.");
+
+            var changes = new ContainerChanges();
+            foreach (Resource resource in original.Resources)
+            {
+                if (!changes._before.TryAdd(resource.Id, resource))
+                    throw new InvalidDataException($"The original container contains resource id "
+                        + $"0x{resource.Id:X16} more than once.");
+            }
+
+            var kept = new HashSet<ulong>();
+            ulong after = 0;
+            foreach (Resource resource in rebuilt.Resources)
+            {
+                if (!kept.Add(resource.Id))
+                    throw new InvalidDataException($"The rebuilt container contains resource id "
+                        + $"0x{resource.Id:X16} more than once.");
+                if (!changes._before.TryGetValue(resource.Id, out Resource? previous) || !Same(resource, previous))
+                    changes._written.Add((resource, after));
+                after = resource.Id;
+            }
+
+            changes._removed.UnionWith(changes._before.Keys.Where(id => !kept.Contains(id)));
+            return changes;
         }
 
-        var rebuiltIds = new HashSet<ulong>();
-        foreach (Resource resource in rebuilt.Resources)
+        public IEnumerable<string> Overwrites(byte[] currentData)
         {
-            if (!rebuiltIds.Add(resource.Id))
-                throw new InvalidDataException($"The rebuilt container contains resource id "
-                    + $"0x{resource.Id:X16} more than once.");
-        }
-        removesResources = originalById.Keys.Any(id => !rebuiltIds.Contains(id));
-
-        Resource root = rebuilt.Resources[0];
-        List<Resource> changed = rebuilt.Resources.Skip(1)
-            .Where(resource => !originalById.TryGetValue(resource.Id, out Resource? previous)
-                || resource.ClassHash != previous.ClassHash
-                || !resource.Header.AsSpan().SequenceEqual(previous.Header)
-                || !resource.Data.AsSpan().SequenceEqual(previous.Data))
-            .ToList();
-
-        rebuilt.Resources.Clear();
-        rebuilt.Resources.Add(root);
-        rebuilt.Resources.AddRange(changed);
-
-        using var output = new MemoryStream();
-        rebuilt.Write(output);
-        return output.ToArray();
-    }
-
-    static byte[] MergeResourcePatches(byte[] preferredData, byte[] fallbackData,
-        ulong containerId)
-    {
-        using var preferredStream = new MemoryStream(preferredData, writable: false);
-        using var fallbackStream = new MemoryStream(fallbackData, writable: false);
-        DataFile preferred = DataFile.Read(preferredStream);
-        DataFile fallback = DataFile.Read(fallbackStream);
-        if (preferred.Resources.Count == 0 || fallback.Resources.Count == 0
-            || preferred.Resources[0].Id != containerId
-            || fallback.Resources[0].Id != containerId)
-            throw new InvalidDataException(
-                "Resource overlays do not share the Forge container identity.");
-
-        var ids = preferred.Resources.Select(resource => resource.Id).ToHashSet();
-        foreach (Resource resource in fallback.Resources.Skip(1))
-        {
-            if (ids.Add(resource.Id))
-                preferred.Resources.Add(resource);
+            var touched = _written.Select(written => written.Resource.Id).Concat(_removed).ToHashSet();
+            foreach (Resource resource in Read(currentData).Resources)
+            {
+                if (touched.Contains(resource.Id) && _before.TryGetValue(resource.Id, out Resource? before)
+                    && !Same(resource, before))
+                    yield return resource.Name;
+            }
         }
 
-        using var output = new MemoryStream();
-        preferred.Write(output);
-        return output.ToArray();
+        public void Include(ContainerChanges other)
+        {
+            foreach (var written in other._written)
+            {
+                ulong id = written.Resource.Id;
+                int existing = _written.FindIndex(item => item.Resource.Id == id);
+                if (_removed.Contains(id) || existing >= 0 && !Same(_written[existing].Resource, written.Resource))
+                    throw new InvalidDataException($"Resource 0x{id:X16} has conflicting changes in different archive copies.");
+                if (existing >= 0)
+                    continue;
+                _written.Add(written);
+                CopyBaseline(other, id);
+            }
+            foreach (ulong id in other._removed)
+            {
+                if (_written.Any(item => item.Resource.Id == id))
+                    throw new InvalidDataException($"Resource 0x{id:X16} is both replaced and removed in different archive copies.");
+                if (_removed.Add(id))
+                    CopyBaseline(other, id);
+            }
+        }
+
+        void CopyBaseline(ContainerChanges other, ulong id)
+        {
+            if (other._before.TryGetValue(id, out Resource? before))
+                _before[id] = before;
+            else
+                _before.Remove(id);
+        }
+
+        public byte[] ApplyTo(byte[] currentData)
+        {
+            DataFile current = Read(currentData);
+            List<Resource> resources = current.Resources;
+            resources.RemoveAll(resource => _removed.Contains(resource.Id));
+            foreach (var (resource, after) in _written)
+            {
+                int existing = resources.FindIndex(candidate => candidate.Id == resource.Id);
+                if (existing >= 0)
+                {
+                    resources[existing] = resource;
+                    continue;
+                }
+
+                int previous = resources.FindIndex(candidate => candidate.Id == after);
+                resources.Insert(previous >= 0 ? previous + 1 : resources.Count, resource);
+            }
+
+            using var output = new MemoryStream();
+            current.Write(output);
+            return output.ToArray();
+        }
+
+        static DataFile Read(byte[] data)
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            return DataFile.Read(stream);
+        }
+
+        static bool Same(Resource left, Resource right) =>
+            left.ClassHash == right.ClassHash
+            && left.Header.AsSpan().SequenceEqual(right.Header)
+            && left.Data.AsSpan().SequenceEqual(right.Data);
     }
 
     internal static string FamilyOf(string archivePath)
@@ -326,8 +370,9 @@ public static class AddonArchiveService
     {
         string family = FamilyOf(archivePath);
         int slot = FirstSlot;
-        while (slot <= LastSlot && File.Exists(SlotPath(family, slot)))
-            slot++;
+        for (int existing = FirstSlot; existing <= LastSlot; existing++)
+            if (File.Exists(SlotPath(family, existing)))
+                slot = existing + 1;
         return slot;
     }
 }

@@ -11,16 +11,22 @@ public partial class ImportWindow : Window
 {
     readonly TextureMap _texture;
     readonly IReadOnlyList<string> _targets;
+    readonly IReadOnlyList<string>? _copyTargets;
 
     public string? Path { get; private set; }
     public bool GenerateMips { get; private set; } = true;
+    public bool ReplaceCopies { get; private set; }
 
-    public ImportWindow(string name, TextureMap texture, IReadOnlyList<string> targets)
+    public ImportWindow(string name, TextureMap texture, IReadOnlyList<string> targets,
+        IReadOnlyList<string>? copyTargets = null)
     {
         InitializeComponent();
 
         _texture = texture;
         _targets = targets;
+        _copyTargets = copyTargets;
+        ReplaceCopiesBox.Visibility = copyTargets is not null && copyTargets.Count > targets.Count
+            ? Visibility.Visible : Visibility.Collapsed;
 
         TitleText.Text = name;
         TargetText.Text = $"{texture.Width} x {texture.Height}  {texture.Format}  {texture.MipCount} mip level(s), {texture.StreamedMips.Length} of them streamed";
@@ -44,6 +50,9 @@ public partial class ImportWindow : Window
     void Path_Changed(object sender, RoutedEventArgs e) => Describe();
 
     void Options_Changed(object sender, RoutedEventArgs e) => Describe();
+
+    void Copies_Changed(object sender, RoutedEventArgs e) =>
+        TargetList.ItemsSource = ReplaceCopiesBox.IsChecked == true ? _copyTargets : _targets;
 
     void Describe()
     {
@@ -118,6 +127,7 @@ public partial class ImportWindow : Window
     {
         Path = PathBox.Text.Trim();
         GenerateMips = GenerateMipsBox.IsChecked == true;
+        ReplaceCopies = ReplaceCopiesBox.IsChecked == true;
         DialogResult = true;
     }
 

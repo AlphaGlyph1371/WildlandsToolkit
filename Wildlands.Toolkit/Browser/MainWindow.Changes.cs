@@ -438,7 +438,7 @@ public partial class MainWindow
         try
         {
             IReadOnlyList<string> files = await Task.Run(() =>
-                _changes.WriteAddon(plans, Guid.NewGuid().ToString(), progress));
+                _changes.WriteAddon(plans, progress));
             written = true;
 
             string? warning = null;

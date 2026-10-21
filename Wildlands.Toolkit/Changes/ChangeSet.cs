@@ -79,10 +79,10 @@ public sealed class ChangeSet
         _changes.Clear();
     }
 
-    public IReadOnlyList<string> WriteAddon(IReadOnlyList<ArchiveWork> plans, string identity,
+    public IReadOnlyList<string> WriteAddon(IReadOnlyList<ArchiveWork> plans,
         IProgress<string>? progress = null)
     {
-        IReadOnlyList<string> written = AddonArchiveService.Write(plans, identity, progress);
+        IReadOnlyList<string> written = AddonArchiveService.Write(plans, progress);
         _changes.Clear();
         return written;
     }

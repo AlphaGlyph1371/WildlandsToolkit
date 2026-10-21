@@ -1823,11 +1823,16 @@ public partial class MainWindow : Window
         Location location;
         int index;
         TextureMap texture;
+        IReadOnlyList<string> targets;
+        IReadOnlyList<string> copyTargets;
 
         try
         {
             (resource, location, index) = LocateTexture(view);
             texture = TextureMap.Read(EffectiveData(location, index, resource));
+            targets = TextureImporter.Targets(texture, location, resource.Name, _archives);
+            copyTargets = TextureImporter.Targets(texture, location, resource.Name, _archives,
+                replaceCopies: true, resource: resource.Data);
         }
         catch (Exception ex)
         {
@@ -1835,7 +1840,7 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var dialog = new ImportWindow(resource.Name, texture, TextureImporter.Targets(texture, location, resource.Name, _archives)) { Owner = this };
+        var dialog = new ImportWindow(resource.Name, texture, targets, copyTargets) { Owner = this };
 
         if (dialog.ShowDialog() != true || dialog.Path is null)
             return null;
@@ -1843,7 +1848,7 @@ public partial class MainWindow : Window
         Mouse.OverrideCursor = Cursors.Wait;
         try
         {
-            var changes = TextureImporter.Build(dialog.Path, texture, resource.Data, location, index, resource.Name, _archives, dialog.GenerateMips, out _);
+            var changes = TextureImporter.Build(dialog.Path, texture, resource.Data, location, index, resource.Name, _archives, dialog.GenerateMips, out _, dialog.ReplaceCopies);
 
             if (!QueueChanges(changes, $"Replace textures for {resource.Name}"))
                 return null;

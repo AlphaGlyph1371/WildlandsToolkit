@@ -15,20 +15,31 @@ public static class TextureImporter
         + "PNG|*.png|JPEG|*.jpg;*.jpeg|Bitmap|*.bmp|TIFF|*.tif;*.tiff|DDS|*.dds|All files|*.*";
 
     public static List<string> Targets(TextureMap texture, Location location, string resourceName,
-        ArchiveSet? archives)
+        ArchiveSet? archives, bool replaceCopies = false, byte[]? resource = null)
     {
+        if (replaceCopies)
+            ArgumentNullException.ThrowIfNull(resource);
         var list = new List<string> { Describe(location.ArchivePath, location.EntryName, resourceName) };
+
+        if (replaceCopies && archives is not null)
+            foreach (FoundResource copy in MatchingCopies(archives, texture.Id, TextureMap.ClassHash, resource!))
+                if (!SameTarget(copy, location))
+                    list.Add(Describe(copy.File.ArchivePath, copy.File.Name, copy.Resource.Name));
 
         foreach (ulong id in texture.StreamedMips)
         {
             var found = archives?.FindResource(id, CompiledMip.ClassHash);
 
-            list.Add(found is null
-                ? $"not found, left alone   streamed mip 0x{id:X}"
-                : Describe(found.File.ArchivePath, found.File.Name, found.Resource.Name));
+            if (found is null)
+                list.Add($"not found, left alone   streamed mip 0x{id:X}");
+            else if (replaceCopies && archives is not null)
+                foreach (FoundResource copy in MatchingCopies(archives, id, CompiledMip.ClassHash, found.Resource.Data))
+                    list.Add(Describe(copy.File.ArchivePath, copy.File.Name, copy.Resource.Name));
+            else
+                list.Add(Describe(found.File.ArchivePath, found.File.Name, found.Resource.Name));
         }
 
-        return list;
+        return list.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     static string Describe(string archivePath, string entryName, string resourceName) =>
@@ -36,7 +47,7 @@ public static class TextureImporter
 
     public static List<PendingChange> Build(string path, TextureMap texture, byte[] resource,
         Location location, int resourceIndex, string resourceName, ArchiveSet? archives,
-        bool generateMips, out string summary)
+        bool generateMips, out string summary, bool replaceCopies = false)
     {
         var levels = LevelsFor(path, texture, generateMips, out string how, out int width, out int height);
 
@@ -51,6 +62,17 @@ public static class TextureImporter
 
         int streamed = 0;
         int missing = 0;
+        int copies = 0;
+        if (replaceCopies && archives is not null)
+        {
+            foreach (FoundResource copy in MatchingCopies(archives, texture.Id, TextureMap.ClassHash, resource))
+            {
+                if (SameTarget(copy, location))
+                    continue;
+                changes.Add(Replacement(copy, (byte[])changes[0].Data.Clone(), TextureMap.ClassHash));
+                copies++;
+            }
+        }
 
         foreach (ulong id in texture.StreamedMips)
         {
@@ -70,12 +92,20 @@ public static class TextureImporter
 
             var pixels = levels[(int)mip.Level];
 
-            changes.Add(new PendingChange(found.File.ArchivePath, found.File.EntryIndex, found.File.Name,
-                found.ResourceIndex, found.Resource.Name,
-                TextureImport.ReplacePixels(found.Resource.Data, mip.PixelOffset, pixels),
-                ResourceClassHash: CompiledMip.ClassHash));
+            byte[] data = TextureImport.ReplacePixels(found.Resource.Data, mip.PixelOffset, pixels);
+            changes.Add(Replacement(found, data, CompiledMip.ClassHash));
 
             streamed++;
+            if (replaceCopies && archives is not null)
+            {
+                foreach (FoundResource copy in MatchingCopies(archives, id, CompiledMip.ClassHash, found.Resource.Data))
+                {
+                    if (SameTarget(copy, new Location(found.File.ArchivePath, found.File.EntryIndex)))
+                        continue;
+                    changes.Add(Replacement(copy, (byte[])data.Clone(), CompiledMip.ClassHash));
+                    copies++;
+                }
+            }
         }
 
         string size = width == (int)texture.Width && height == (int)texture.Height
@@ -87,8 +117,43 @@ public static class TextureImporter
 
         if (missing > 0)
             summary += $", {missing} streamed mip(s) not found and left alone";
+        if (copies > 0)
+            summary += $", including {copies} matching copies";
 
         return changes;
+    }
+
+    static bool SameTarget(FoundResource found, Location location) =>
+        string.Equals(found.File.ArchivePath, location.ArchivePath, StringComparison.OrdinalIgnoreCase)
+        && found.File.EntryIndex == location.EntryIndex;
+
+    static PendingChange Replacement(FoundResource found, byte[] data, uint classHash) =>
+        new(found.File.ArchivePath, found.File.EntryIndex, found.File.Name,
+            found.ResourceIndex, found.Resource.Name, data, ResourceClassHash: classHash);
+
+    static IEnumerable<FoundResource> MatchingCopies(ArchiveSet archives, ulong id, uint classHash, byte[] original)
+    {
+        foreach (SourceFile source in archives.Candidates(id))
+        {
+            if (!source.Name.EndsWith(".data", StringComparison.OrdinalIgnoreCase))
+                continue;
+            DataFile file;
+            try
+            {
+                file = DataFile.Read(new MemoryStream(source.Data, writable: false));
+            }
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException)
+            {
+                continue;
+            }
+            for (int index = 0; index < file.Resources.Count; index++)
+            {
+                Resource resource = file.Resources[index];
+                if (resource.Id == id && resource.ClassHash == classHash
+                    && resource.Data.AsSpan().SequenceEqual(original))
+                    yield return new FoundResource(source, resource, index);
+            }
+        }
     }
 
     internal static List<byte[]> LevelsFor(string path, TextureMap texture, bool generateMips, out string how,

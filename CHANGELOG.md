@@ -3,10 +3,17 @@
 The largest Wildlands Toolkit update so far, focused on mesh editing, mod distribution and safer
 archive modification.
 
-- Addon archives now overlay individual resources inside existing `.data` containers instead of
-  copying every sibling resource, so independent edits to the same weapon container can coexist.
-- Resource deletions are no longer offered in addon mode because an overlay cannot hide an older
-  resource; they continue to work through in-place installation.
+- Addon archives carry complete `.data` containers, because the game replaces a container as a
+  whole. Each addon builds its containers on top of what the game currently loads, earlier addons
+  included, so independent edits to the same weapon container coexist. When two addons change the
+  same resource, the newer one wins and the install says so.
+- Resource deletions work in addon mode as well.
+- New addon archives use a patch number above every existing addon in their archive family,
+  including when an earlier addon was removed and left a gap in the numbering.
+- Addon installation combines independent resource edits queued against different copies of the
+  same container within an archive family. Conflicting edits to the same resource are rejected.
+- Texture imports offer an optional **Replace matching copies** checkbox to include identical
+  textures and streamed mips in other archives. The affected targets are listed before import.
 - Skeleton resources can be exported as Blender-readable GLB armatures and imported again after
   editing their rest-pose positions and rotations.
 - Skeleton resources now open in a dedicated 3D viewer with the same top-toolbar workflow as the
@@ -67,6 +74,8 @@ archive modification.
 
 ## Fixed
 
+- Addons written as partial containers (only the changed resources) left the game stuck on the
+  splash screen. Addons installed with such a build have to be deleted and installed again
 - Importing a mesh no longer destroys the hidden vertex colour of skinned clothing. It drives the
   tint zones and camo of vests, shirts and pants; without it every strap got the wrong solid colour
   and camo in game. OBJ files and glTF files without colours now take it from the matching triangle

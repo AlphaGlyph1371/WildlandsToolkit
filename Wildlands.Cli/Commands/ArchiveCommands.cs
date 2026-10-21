@@ -786,7 +786,7 @@ static partial class Commands
             Console.WriteLine($"{compiled.Changes.Count} change(s) in {plans.Count} archive(s), "
                 + $"{AddonArchiveService.EstimateSize(plans) / (1024.0 * 1024.0):0.0} MB of entries");
             var progress = new Progress<string>(Console.WriteLine);
-            IReadOnlyList<string> written = AddonArchiveService.Write(plans, Guid.NewGuid().ToString(), progress);
+            IReadOnlyList<string> written = AddonArchiveService.Write(plans, progress);
             foreach (string path in written)
                 Console.WriteLine($"wrote {path} ({new FileInfo(path).Length / (1024.0 * 1024.0):0.0} MB)");
             return 0;

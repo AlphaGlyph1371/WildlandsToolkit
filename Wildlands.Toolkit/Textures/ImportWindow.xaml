@@ -38,6 +38,9 @@
             <CheckBox x:Name="GenerateMipsBox" Content="Generate mip levels" IsChecked="True"
                       Click="Options_Changed" VerticalAlignment="Center"
                       ToolTip="Off keeps the levels a dds already carries, which is lossless"/>
+            <CheckBox x:Name="ReplaceCopiesBox" Content="Replace matching copies"
+                      Margin="20,0,0,0" Click="Copies_Changed" Visibility="Collapsed"
+                      ToolTip="Include identical textures and mips in other archives."/>
         </StackPanel>
 
         <Border Grid.Row="4" Margin="60,0,0,14" Padding="10,8" CornerRadius="3"
