@@ -17,6 +17,7 @@ public sealed class ArchiveSet : IDisposable
     readonly ForgeArchive _archive;
     readonly Task<List<ForgeArchive>> _siblings;
     readonly CancellationTokenSource _stopOpening = new();
+    readonly Dictionary<string, IReadOnlyList<FoundResource>> _resourceCopies = [];
     int _disposed;
 
     public ArchiveSet(ForgeArchive archive)
@@ -45,6 +46,57 @@ public sealed class ArchiveSet : IDisposable
     }
 
     public FoundResource? FindResource(ulong id, uint classHash) => FindResource(id, classHash, 0);
+
+    // Exact lookup for operations which must find every containing data file, not just
+    // the nearest container ID. Scan all requested IDs together and cache this snapshot.
+    public IReadOnlyList<FoundResource> FindResourceCopies(IReadOnlyCollection<ulong> ids,
+        CancellationToken cancellationToken = default)
+    {
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopOpening.Token);
+        cancellationToken = stop.Token;
+        cancellationToken.ThrowIfCancellationRequested();
+        string key = string.Join(",", ids.Distinct().Order());
+        lock (_resourceCopies)
+        {
+            if (_resourceCopies.TryGetValue(key, out var cached))
+                return cached;
+            var wanted = ids.ToHashSet();
+            var found = new List<FoundResource>();
+            foreach (string path in All().Select(archive => archive.FilePath).ToList())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Separate readers keep this background scan independent of the viewers.
+                using var archive = ForgeArchive.Open(path);
+                foreach (ForgeEntry entry in archive.Entries.Where(entry => entry.FileExtension == ".data"))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    DataFile file;
+                    byte[] bytes;
+                    try
+                    {
+                        if (!archive.ReadResourceIndex(entry).Any(resource => wanted.Contains(resource.Id)))
+                            continue;
+                        bytes = archive.ReadEntry(entry);
+                        file = DataFile.Read(new MemoryStream(bytes, writable: false));
+                    }
+                    catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException)
+                    {
+                        continue;
+                    }
+                    var source = new SourceFile(bytes, entry.Name + entry.FileExtension,
+                        Path.GetFileName(path), path, entry.Index);
+                    for (int index = 0; index < file.Resources.Count; index++)
+                        if (wanted.Contains(file.Resources[index].Id))
+                            found.Add(new FoundResource(source, file.Resources[index], index));
+                }
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            // Retain only the last query; full texture containers can be large.
+            _resourceCopies.Clear();
+            _resourceCopies.Add(key, found);
+            return found;
+        }
+    }
 
     public FoundResource? FindResource(ulong id, uint classHash, ulong containerId)
     {
@@ -151,6 +203,8 @@ public sealed class ArchiveSet : IDisposable
             return;
 
         _stopOpening.Cancel();
+        // A cancelled background lookup must release its readers before Apply writes.
+        lock (_resourceCopies) { }
         foreach (var sibling in _siblings.Result)
             sibling.Dispose();
         _stopOpening.Dispose();

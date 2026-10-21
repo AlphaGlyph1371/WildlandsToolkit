@@ -1824,15 +1824,16 @@ public partial class MainWindow : Window
         int index;
         TextureMap texture;
         IReadOnlyList<string> targets;
-        IReadOnlyList<string> copyTargets;
+        byte[] original;
+        var pending = _changes.Changes.ToList();
+        var archives = _archives;
 
         try
         {
             (resource, location, index) = LocateTexture(view);
-            texture = TextureMap.Read(EffectiveData(location, index, resource));
-            targets = TextureImporter.Targets(texture, location, resource.Name, _archives);
-            copyTargets = TextureImporter.Targets(texture, location, resource.Name, _archives,
-                replaceCopies: true, resource: resource.Data);
+            original = EffectiveData(location, index, resource);
+            texture = TextureMap.Read(original);
+            targets = TextureImporter.Targets(texture, location, resource.Name, archives, pending: pending);
         }
         catch (Exception ex)
         {
@@ -1840,7 +1841,9 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var dialog = new ImportWindow(resource.Name, texture, targets, copyTargets) { Owner = this };
+        var dialog = new ImportWindow(resource.Name, texture, targets, archives is null ? null :
+            cancellation => TextureImporter.Targets(texture, location, resource.Name, archives,
+                replaceCopies: true, resource: original, pending: pending, cancellationToken: cancellation)) { Owner = this };
 
         if (dialog.ShowDialog() != true || dialog.Path is null)
             return null;
@@ -1848,7 +1851,8 @@ public partial class MainWindow : Window
         Mouse.OverrideCursor = Cursors.Wait;
         try
         {
-            var changes = TextureImporter.Build(dialog.Path, texture, resource.Data, location, index, resource.Name, _archives, dialog.GenerateMips, out _, dialog.ReplaceCopies);
+            var changes = TextureImporter.Build(dialog.Path, texture, original, location, index, resource.Name,
+                archives, dialog.GenerateMips, out _, dialog.ReplaceCopies, pending);
 
             if (!QueueChanges(changes, $"Replace textures for {resource.Name}"))
                 return null;

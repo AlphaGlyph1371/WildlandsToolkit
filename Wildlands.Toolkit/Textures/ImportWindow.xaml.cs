@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using Wildlands.Formats.Textures;
@@ -11,21 +13,24 @@ public partial class ImportWindow : Window
 {
     readonly TextureMap _texture;
     readonly IReadOnlyList<string> _targets;
-    readonly IReadOnlyList<string>? _copyTargets;
+    readonly Func<CancellationToken, IReadOnlyList<string>>? _findCopies;
+    IReadOnlyList<string>? _copyTargets;
+    CancellationTokenSource? _copySearch;
+    bool _closed;
 
     public string? Path { get; private set; }
     public bool GenerateMips { get; private set; } = true;
     public bool ReplaceCopies { get; private set; }
 
     public ImportWindow(string name, TextureMap texture, IReadOnlyList<string> targets,
-        IReadOnlyList<string>? copyTargets = null)
+        Func<CancellationToken, IReadOnlyList<string>>? findCopies = null)
     {
         InitializeComponent();
 
         _texture = texture;
         _targets = targets;
-        _copyTargets = copyTargets;
-        ReplaceCopiesBox.Visibility = copyTargets is not null && copyTargets.Count > targets.Count
+        _findCopies = findCopies;
+        ReplaceCopiesBox.Visibility = findCopies is not null
             ? Visibility.Visible : Visibility.Collapsed;
 
         TitleText.Text = name;
@@ -51,8 +56,60 @@ public partial class ImportWindow : Window
 
     void Options_Changed(object sender, RoutedEventArgs e) => Describe();
 
-    void Copies_Changed(object sender, RoutedEventArgs e) =>
-        TargetList.ItemsSource = ReplaceCopiesBox.IsChecked == true ? _copyTargets : _targets;
+    async void Copies_Changed(object sender, RoutedEventArgs e)
+    {
+        if (ReplaceCopiesBox.IsChecked != true)
+        {
+            TargetList.ItemsSource = _targets;
+            return;
+        }
+
+        if (_copyTargets is not null)
+        {
+            TargetList.ItemsSource = _copyTargets;
+            return;
+        }
+        if (_findCopies is null)
+            return;
+
+        using var stop = new CancellationTokenSource();
+        _copySearch = stop;
+        ReplaceCopiesBox.IsEnabled = false;
+        ImportButton.IsEnabled = false;
+        TargetList.ItemsSource = new[] { "Finding matching copies…" };
+        try
+        {
+            _copyTargets = await Task.Run(() => _findCopies(stop.Token), stop.Token);
+            if (!_closed)
+                TargetList.ItemsSource = _copyTargets;
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (!_closed)
+            {
+                ReplaceCopiesBox.IsChecked = false;
+                TargetList.ItemsSource = _targets;
+                MessageBox.Show(this, ex.Message, "Could not find matching copies", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _copySearch = null;
+            if (!_closed)
+            {
+                ReplaceCopiesBox.IsEnabled = true;
+                Describe();
+            }
+        }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _closed = true;
+        _copySearch?.Cancel();
+        base.OnClosed(e);
+    }
 
     void Describe()
     {
@@ -101,7 +158,7 @@ public partial class ImportWindow : Window
             }
 
             SourceText.Text = text.ToString();
-            ImportButton.IsEnabled = true;
+            ImportButton.IsEnabled = _copySearch is null;
         }
         catch (Exception ex)
         {

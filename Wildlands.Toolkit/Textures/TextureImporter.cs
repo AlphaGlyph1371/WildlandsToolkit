@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Windows.Media.Imaging;
-using Wildlands.Formats.Data;
 using Wildlands.Formats.Forge;
 using Wildlands.Formats.Textures;
 
@@ -15,25 +15,27 @@ public static class TextureImporter
         + "PNG|*.png|JPEG|*.jpg;*.jpeg|Bitmap|*.bmp|TIFF|*.tif;*.tiff|DDS|*.dds|All files|*.*";
 
     public static List<string> Targets(TextureMap texture, Location location, string resourceName,
-        ArchiveSet? archives, bool replaceCopies = false, byte[]? resource = null)
+        ArchiveSet? archives, bool replaceCopies = false, byte[]? resource = null,
+        IReadOnlyList<PendingChange>? pending = null, CancellationToken cancellationToken = default)
     {
         if (replaceCopies)
             ArgumentNullException.ThrowIfNull(resource);
         var list = new List<string> { Describe(location.ArchivePath, location.EntryName, resourceName) };
+        var candidates = CopyCandidates(texture, archives, replaceCopies, cancellationToken);
 
         if (replaceCopies && archives is not null)
-            foreach (FoundResource copy in MatchingCopies(archives, texture.Id, TextureMap.ClassHash, resource!))
+            foreach (FoundResource copy in MatchingCopies(candidates, texture.Id, TextureMap.ClassHash, resource!, pending))
                 if (!SameTarget(copy, location))
                     list.Add(Describe(copy.File.ArchivePath, copy.File.Name, copy.Resource.Name));
 
         foreach (ulong id in texture.StreamedMips)
         {
-            var found = archives?.FindResource(id, CompiledMip.ClassHash);
+            var found = FindMip(id, texture, location, archives, candidates, replaceCopies, pending);
 
             if (found is null)
                 list.Add($"not found, left alone   streamed mip 0x{id:X}");
             else if (replaceCopies && archives is not null)
-                foreach (FoundResource copy in MatchingCopies(archives, id, CompiledMip.ClassHash, found.Resource.Data))
+                foreach (FoundResource copy in MatchingCopies(candidates, id, CompiledMip.ClassHash, EffectiveData(found, pending)!, pending))
                     list.Add(Describe(copy.File.ArchivePath, copy.File.Name, copy.Resource.Name));
             else
                 list.Add(Describe(found.File.ArchivePath, found.File.Name, found.Resource.Name));
@@ -47,7 +49,8 @@ public static class TextureImporter
 
     public static List<PendingChange> Build(string path, TextureMap texture, byte[] resource,
         Location location, int resourceIndex, string resourceName, ArchiveSet? archives,
-        bool generateMips, out string summary, bool replaceCopies = false)
+        bool generateMips, out string summary, bool replaceCopies = false,
+        IReadOnlyList<PendingChange>? pending = null)
     {
         var levels = LevelsFor(path, texture, generateMips, out string how, out int width, out int height);
 
@@ -63,11 +66,12 @@ public static class TextureImporter
         int streamed = 0;
         int missing = 0;
         int copies = 0;
+        var candidates = CopyCandidates(texture, archives, replaceCopies);
         if (replaceCopies && archives is not null)
         {
-            foreach (FoundResource copy in MatchingCopies(archives, texture.Id, TextureMap.ClassHash, resource))
+            foreach (FoundResource copy in MatchingCopies(candidates, texture.Id, TextureMap.ClassHash, resource, pending))
             {
-                if (SameTarget(copy, location))
+                if (SameTarget(copy, location) && copy.ResourceIndex == resourceIndex)
                     continue;
                 changes.Add(Replacement(copy, (byte[])changes[0].Data.Clone(), TextureMap.ClassHash));
                 copies++;
@@ -76,15 +80,16 @@ public static class TextureImporter
 
         foreach (ulong id in texture.StreamedMips)
         {
-            var found = archives?.FindResource(id, CompiledMip.ClassHash);
+            var found = FindMip(id, texture, location, archives, candidates, replaceCopies, pending);
             if (found is null)
             {
                 missing++;
                 continue;
             }
 
-            var mip = CompiledMip.Read(found.Resource.Data);
-            if (mip.Level >= levels.Count)
+            byte[] original = EffectiveData(found, pending)!;
+            var mip = CompiledMip.Read(original);
+            if (mip.TextureMapId != texture.Id || mip.Level >= levels.Count)
             {
                 missing++;
                 continue;
@@ -92,15 +97,16 @@ public static class TextureImporter
 
             var pixels = levels[(int)mip.Level];
 
-            byte[] data = TextureImport.ReplacePixels(found.Resource.Data, mip.PixelOffset, pixels);
+            byte[] data = TextureImport.ReplacePixels(original, mip.PixelOffset, pixels);
             changes.Add(Replacement(found, data, CompiledMip.ClassHash));
 
             streamed++;
             if (replaceCopies && archives is not null)
             {
-                foreach (FoundResource copy in MatchingCopies(archives, id, CompiledMip.ClassHash, found.Resource.Data))
+                foreach (FoundResource copy in MatchingCopies(candidates, id, CompiledMip.ClassHash, original, pending))
                 {
-                    if (SameTarget(copy, new Location(found.File.ArchivePath, found.File.EntryIndex)))
+                    if (SameTarget(copy, new Location(found.File.ArchivePath, found.File.EntryIndex))
+                        && copy.ResourceIndex == found.ResourceIndex)
                         continue;
                     changes.Add(Replacement(copy, (byte[])data.Clone(), CompiledMip.ClassHash));
                     copies++;
@@ -131,30 +137,57 @@ public static class TextureImporter
         new(found.File.ArchivePath, found.File.EntryIndex, found.File.Name,
             found.ResourceIndex, found.Resource.Name, data, ResourceClassHash: classHash);
 
-    static IEnumerable<FoundResource> MatchingCopies(ArchiveSet archives, ulong id, uint classHash, byte[] original)
+    static IReadOnlyList<FoundResource> CopyCandidates(TextureMap texture, ArchiveSet? archives,
+        bool replaceCopies, CancellationToken cancellationToken = default) =>
+        replaceCopies && archives is not null
+            ? archives.FindResourceCopies(texture.StreamedMips.Prepend(texture.Id).ToArray(), cancellationToken)
+            : [];
+
+    static FoundResource? FindMip(ulong id, TextureMap texture, Location location, ArchiveSet? archives,
+        IReadOnlyList<FoundResource> candidates, bool replaceCopies, IReadOnlyList<PendingChange>? pending)
     {
-        foreach (SourceFile source in archives.Candidates(id))
-        {
-            if (!source.Name.EndsWith(".data", StringComparison.OrdinalIgnoreCase))
-                continue;
-            DataFile file;
-            try
-            {
-                file = DataFile.Read(new MemoryStream(source.Data, writable: false));
-            }
-            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException)
-            {
-                continue;
-            }
-            for (int index = 0; index < file.Resources.Count; index++)
-            {
-                Resource resource = file.Resources[index];
-                if (resource.Id == id && resource.ClassHash == classHash
-                    && resource.Data.AsSpan().SequenceEqual(original))
-                    yield return new FoundResource(source, resource, index);
-            }
-        }
+        FoundResource? found;
+        if (replaceCopies)
+            found = candidates.Where(copy => copy.Resource.Id == id
+                    && copy.Resource.ClassHash == CompiledMip.ClassHash && EffectiveData(copy, pending) is not null)
+                .OrderByDescending(copy => SameTarget(copy, location))
+                .ThenByDescending(copy => string.Equals(copy.File.ArchivePath, location.ArchivePath,
+                    StringComparison.OrdinalIgnoreCase))
+                .FirstOrDefault();
+        else
+            found = archives?.FindResource(id, CompiledMip.ClassHash);
+        if (found is null || EffectiveData(found, pending) is not byte[] data)
+            return null;
+        var mip = CompiledMip.Read(data);
+        return mip.TextureMapId == texture.Id && mip.Level < texture.MipCount ? found : null;
     }
+
+    // Compare against the pending state too: an independent replacement must not be
+    // mistaken for an unchanged copy just because its on-disk bytes still match.
+    static byte[]? EffectiveData(FoundResource found, IReadOnlyList<PendingChange>? pending)
+    {
+        byte[] data = found.Resource.Data;
+        foreach (PendingChange change in pending ?? [])
+        {
+            if (!string.Equals(change.ArchivePath, found.File.ArchivePath, StringComparison.OrdinalIgnoreCase)
+                || change.EntryIndex != found.File.EntryIndex)
+                continue;
+            if (change.EntryRemoval is not null)
+                return null;
+            if (change.EntryAddition is not null || change.Addition is not null
+                || change.ResourceIndex != found.ResourceIndex)
+                continue;
+            if (change.Removal is not null)
+                return null;
+            data = change.Data;
+        }
+        return data;
+    }
+
+    static IEnumerable<FoundResource> MatchingCopies(IReadOnlyList<FoundResource> candidates,
+        ulong id, uint classHash, byte[] original, IReadOnlyList<PendingChange>? pending) =>
+        candidates.Where(copy => copy.Resource.Id == id && copy.Resource.ClassHash == classHash
+            && EffectiveData(copy, pending) is byte[] data && data.AsSpan().SequenceEqual(original));
 
     internal static List<byte[]> LevelsFor(string path, TextureMap texture, bool generateMips, out string how,
         out int width, out int height)

@@ -13,7 +13,8 @@ archive modification.
 - Addon installation combines independent resource edits queued against different copies of the
   same container within an archive family. Conflicting edits to the same resource are rejected.
 - Texture imports offer an optional **Replace matching copies** checkbox to include identical
-  textures and streamed mips in other archives. The affected targets are listed before import.
+  textures and streamed mips across containers and archives. Matching uses current contents,
+  including pending edits, so independent replacements are preserved. Targets are listed before import.
 - Skeleton resources can be exported as Blender-readable GLB armatures and imported again after
   editing their rest-pose positions and rotations.
 - Skeleton resources now open in a dedicated 3D viewer with the same top-toolbar workflow as the
